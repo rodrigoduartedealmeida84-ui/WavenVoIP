@@ -4,7 +4,7 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "1.2.11";
+        public const string Versao  = "1.2.12";
         public const string NomeApp = "WavenVoIP";
 
         public static readonly DateTime DataBuild = new DateTime(2026, 5, 25);
@@ -13,7 +13,12 @@ namespace WavenVoIP.Services
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
-            "v1.2.11 — Logs e Diagnóstico (25/05/2026)\n" +
+            "v1.2.12 — Hotfix Configuracoes (25/05/2026)\n" +
+            "• [FIX] Janela Configuracoes nao abria apos atualizacao v1.2.11\n" +
+            "• [FIX] StaticResource SectionCardStyle/SectionTitleStyle inexistentes removidos\n" +
+            "• [FIX] Secao Logs e Diagnostico reescrita com estilos inline corretos\n" +
+            "\n" +
+            "v1.2.11 — Logs e Diagnostico (25/05/2026)\n" +
             "• [NEW] Seção 'Logs e Diagnóstico' em Configurações\n" +
             "• [NEW] Checkbox: Ativar logs do sistema (persiste em SipConfig)\n" +
             "• [NEW] Checkbox: Ativar logs detalhados — SIP, AMI, CDR\n" +

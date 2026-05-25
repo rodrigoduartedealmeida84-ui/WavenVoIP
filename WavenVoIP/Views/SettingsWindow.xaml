@@ -565,36 +565,51 @@
                 </Border>
 
                 <!-- ══ LOGS E DIAGNÓSTICO ═════════════════════════════════════════ -->
-                <Border Style="{StaticResource SectionCardStyle}" Margin="0,0,0,16">
+                <Border Background="White" CornerRadius="16" BorderBrush="{StaticResource BorderSoftBrush}" BorderThickness="1" Margin="0,0,0,16">
                     <StackPanel>
-                        <TextBlock Text="Logs e Diagnóstico" Style="{StaticResource SectionTitleStyle}"/>
+                        <Border Background="#F0FDF4" CornerRadius="16,16,0,0" Padding="22,14" BorderBrush="#BBF7D0" BorderThickness="0,0,0,1">
+                            <StackPanel Orientation="Horizontal">
+                                <Border Width="34" Height="34" CornerRadius="10" Background="#DCFCE7" Margin="0,0,14,0">
+                                    <TextBlock Text="&#x1F4CB;" FontSize="16"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="Logs e Diagnóstico" FontSize="15" FontWeight="SemiBold"/>
+                                    <TextBlock Text="Controle de registro e exportação de diagnóstico" FontSize="12" Foreground="{StaticResource MutedBrush}"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                        <StackPanel Margin="22,16,22,20">
 
-                        <!-- Enable flags -->
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                            <CheckBox x:Name="chkLogAtivo" Content="Ativar logs do sistema" VerticalContentAlignment="Center" Margin="0,0,24,0"/>
-                            <CheckBox x:Name="chkLogDetalhado" Content="Ativar logs detalhados (SIP, AMI, CDR)" VerticalContentAlignment="Center"/>
+                            <!-- Enable flags -->
+                            <Border Background="#F8FAFC" CornerRadius="12" Padding="16,14" Margin="0,0,0,12" BorderBrush="#E7EAF3" BorderThickness="1">
+                                <StackPanel>
+                                    <CheckBox x:Name="chkLogAtivo" Content="Ativar logs do sistema" VerticalContentAlignment="Center" Margin="0,0,0,8"/>
+                                    <CheckBox x:Name="chkLogDetalhado" Content="Ativar logs detalhados (SIP, AMI, CDR)" VerticalContentAlignment="Center"/>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Status indicator -->
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,12" VerticalAlignment="Center">
+                                <Ellipse x:Name="ellLogStatus" Width="10" Height="10" Margin="0,0,6,0" Fill="#22C55E"/>
+                                <TextBlock x:Name="txtLogStatus" Text="Logs ativos" Foreground="{StaticResource MutedBrush}" FontSize="12" VerticalAlignment="Center"/>
+                            </StackPanel>
+
+                            <!-- Action buttons -->
+                            <WrapPanel Orientation="Horizontal">
+                                <Button x:Name="btnAbrirPastaLogs" Content="Abrir pasta de logs" Height="38" Padding="14,0"
+                                        Style="{StaticResource SecondaryButtonStyle}" Click="BtnAbrirPastaLogs_Click" Margin="0,0,8,8"/>
+                                <Button x:Name="btnCopiarDiagnostico" Content="Copiar diagnóstico" Height="38" Padding="14,0"
+                                        Style="{StaticResource SecondaryButtonStyle}" Click="BtnCopiarDiagnostico_Click" Margin="0,0,8,8"/>
+                                <Button x:Name="btnLimparLogs" Content="Limpar logs" Height="38" Padding="14,0"
+                                        Style="{StaticResource SecondaryButtonStyle}" Click="BtnLimparLogs_Click"
+                                        Background="#FFF1F2" Foreground="#DC2626" BorderBrush="#FECACA" Margin="0,0,8,8"/>
+                                <Button x:Name="btnExportarDiagnostico" Content="Exportar diagnóstico ZIP" Height="38" Padding="14,0"
+                                        Style="{StaticResource SecondaryButtonStyle}" Click="BtnExportarDiagnostico_Click" Margin="0,0,8,8"/>
+                            </WrapPanel>
+
+                            <TextBlock x:Name="txtLogResultado" Text="" FontSize="12" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0" TextWrapping="Wrap"/>
                         </StackPanel>
-
-                        <!-- Status indicator -->
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,12" VerticalAlignment="Center">
-                            <Ellipse x:Name="ellLogStatus" Width="10" Height="10" Margin="0,0,6,0" Fill="#22C55E"/>
-                            <TextBlock x:Name="txtLogStatus" Text="Logs ativos" Foreground="{StaticResource MutedBrush}" FontSize="12" VerticalAlignment="Center"/>
-                        </StackPanel>
-
-                        <!-- Action buttons -->
-                        <WrapPanel Orientation="Horizontal">
-                            <Button x:Name="btnAbrirPastaLogs" Content="Abrir pasta de logs" Height="34" Padding="14,0"
-                                    Style="{StaticResource SecondaryButtonStyle}" Click="BtnAbrirPastaLogs_Click" Margin="0,0,8,8"/>
-                            <Button x:Name="btnCopiarDiagnostico" Content="Copiar diagnóstico" Height="34" Padding="14,0"
-                                    Style="{StaticResource SecondaryButtonStyle}" Click="BtnCopiarDiagnostico_Click" Margin="0,0,8,8"/>
-                            <Button x:Name="btnLimparLogs" Content="Limpar logs" Height="34" Padding="14,0"
-                                    Style="{StaticResource SecondaryButtonStyle}" Click="BtnLimparLogs_Click"
-                                    Background="#FFF1F2" Foreground="#DC2626" BorderBrush="#FECACA" Margin="0,0,8,8"/>
-                            <Button x:Name="btnExportarDiagnostico" Content="Exportar diagnóstico ZIP" Height="34" Padding="14,0"
-                                    Style="{StaticResource SecondaryButtonStyle}" Click="BtnExportarDiagnostico_Click" Margin="0,0,8,8"/>
-                        </WrapPanel>
-
-                        <TextBlock x:Name="txtLogResultado" Text="" FontSize="12" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0" TextWrapping="Wrap"/>
                     </StackPanel>
                 </Border>
 
