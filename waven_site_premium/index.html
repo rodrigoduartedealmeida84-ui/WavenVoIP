@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WavenVoIP | Softphone Corporativo Premium</title>
+  <meta name="description" content="Softphone corporativo com SIP nativo, WhatsApp Business, CDR inteligente e dashboard em tempo real para equipes Issabel/Asterisk.">
+  <meta name="theme-color" content="#7C3AED">
+  <link rel="icon" type="image/png" sizes="192x192" href="./assets/waven_logo.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="./assets/waven_logo.png">
+  <link rel="manifest" href="./site.webmanifest">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
+  <link rel="stylesheet" href="./css/style.css?v=7.9">
+</head>
+<body>
+
+<!-- ╔══════════════════════════════════════════════════════════╗ -->
+<!--  NAV                                                        -->
+<!-- ╚══════════════════════════════════════════════════════════╝ -->
+<nav class="nav" id="nav">
+  <div class="nav-inner">
+    <a href="#" class="nav-logo">
+      <img src="./assets/waven_logo.png" alt="WavenVoIP">
+      <span>WavenVoIP</span>
+    </a>
+    <div class="nav-links" id="navLinks">
+      <a href="#features">Recursos</a>
+      <a href="#showcase">Interface</a>
+      <a href="#integrations">Integrações</a>
+      <a href="#download" class="nav-demo">Solicitar demo</a>
+      <a href="#download" class="nav-download">
+        <i class="fa-solid fa-download"></i>
+        Baixar grátis
+      </a>
+    </div>
+    <button class="nav-burger" id="navBurger" aria-label="Menu">
+      <span></span><span></span><span></span>
+    </button>
+  </div>
+</nav>
+
+<!-- ╔══════════════════════════════════════════════════════════╗ -->
+<!--  HERO                                                       -->
+<!-- ╚══════════════════════════════════════════════════════════╝ -->
+<section class="hero" id="top">
+  <div class="hero-blob blob-a"></div>
+  <div class="hero-blob blob-b"></div>
+  <div class="hero-inner">
+
+    <!-- LEFT: copy -->
+    <div class="hero-copy">
+      <div class="hero-badge">
+        <span class="badge-pulse"></span>
+        v7.9 &nbsp;·&nbsp; Nova versão disponível agora
+      </div>
+      <h1>
+        O softphone que<br>
+        <span class="grad">sua equipe vai usar</span><br>
+        todos os dias.
+      </h1>
+      <p class="hero-p">
+        SIP nativo com Issabel e Asterisk. Popup inteligente de WhatsApp Business.
+        CDR em tempo real. Dashboard corporativo. Tudo em um cliente Windows leve e rápido.
+      </p>
+      <div class="hero-ctas">
+        <a href="#download" class="btn-primary btn-lg">
+          <i class="fa-solid fa-download"></i>
+          Baixar WavenVoIP
+          <span class="btn-pill">Grátis</span>
+        </a>
+        <a href="#showcase" class="btn-outline btn-lg">
+          <i class="fa-solid fa-play"></i>
+          Ver interface
+        </a>
+      </div>
+      <div class="hero-trust">
+        <span><i class="fa-solid fa-shield-halved"></i> TLS/SRTP</span>
+        <span class="tsep"></span>
+        <span><i class="fa-brands fa-windows"></i> Windows 10/11</span>
+        <span class="tsep"></span>
+        <span><i class="fa-solid fa-arrows-rotate"></i> Auto-update</span>
+        <span class="tsep"></span>
+        <span><i class="fa-brands fa-whatsapp"></i> WhatsApp Business</span>
+      </div>
+    </div>
+
+    <!-- RIGHT: app window mockup -->
+    <div class="hero-visual">
+      <div class="app-win app-win-hero">
+        <div class="aw-titlebar">
+          <div class="aw-dots"><span class="d-r"></span><span class="d-y"></span><span class="d-g"></span></div>
+          <span class="aw-title">WavenVoIP</span>
+          <div class="aw-winbtns"><span>─</span><span>□</span><span>✕</span></div>
+        </div>
+        <div class="aw-header">
+          <img src="./assets/waven_logo.png" alt="" class="aw-logo">
+          <nav class="aw-nav">
+            <button class="aw-nb active"><i class="fa-solid fa-phone"></i> Discagem</button>
+            <button class="aw-nb"><i class="fa-solid fa-address-book"></i> Contatos</button>
+            <button class="aw-nb"><i class="fa-solid fa-clock-rotate-left"></i> Histórico</button>
+            <button class="aw-nb"><i class="fa-solid fa-gauge-high"></i> Dashboard</button>
+          </nav>
+          <button class="aw-status">
+            <span class="aw-sdot"></span>
+            <span class="aw-sinfo">
+              <span class="aw-sname">Rodrigo / 101</span>
+              <span class="aw-slabel">Online</span>
+            </span>
+            <i class="fa-solid fa-chevron-down fa-xs"></i>
+          </button>
+        </div>
+        <div class="aw-body">
+          <div class="aw-dialer">
+            <div class="aw-display"><span id="heroDisplay">_</span></div>
+            <div class="aw-grid">
+              <button class="aw-dk" data-h="1">1<small></small></button>
+              <button class="aw-dk" data-h="2">2<small>ABC</small></button>
+              <button class="aw-dk" data-h="3">3<small>DEF</small></button>
+              <button class="aw-dk" data-h="4">4<small>GHI</small></button>
+              <button class="aw-dk" data-h="5">5<small>JKL</small></button>
+              <button class="aw-dk" data-h="6">6<small>MNO</small></button>
+              <button class="aw-dk" data-h="7">7<small>PQRS</small></button>
+              <button class="aw-dk" data-h="8">8<small>TUV</small></button>
+              <button class="aw-dk" data-h="9">9<small>WXYZ</small></button>
+              <button class="aw-dk" data-h="*">*</button>
+              <button class="aw-dk" data-h="0">0<small>+</small></button>
+              <button class="aw-dk" data-h="#">#</button>
+            </div>
+            <button class="aw-call"><i class="fa-solid fa-phone"></i> Ligar</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Floating: incoming call -->
+      <div class="hero-float float-call">
+        <div class="fc-avatar"><i class="fa-solid fa-user"></i></div>
+        <div class="fc-info">
+          <strong>João Silva</strong>
+          <span>Chamada recebida · Ramal 201</span>
+        </div>
+        <div class="fc-btns">
+          <button class="fc-ok"><i class="fa-solid fa-phone"></i></button>
+          <button class="fc-no"><i class="fa-solid fa-phone-slash"></i></button>
+        </div>
+      </div>
+
+      <!-- Floating: WhatsApp notification -->
+      <div class="hero-float float-wa">
+        <div class="fw-ico"><i class="fa-brands fa-whatsapp"></i></div>
+        <div class="fw-info">
+          <strong>Maria Santos</strong>
+          <span>"Olá! Gostaria de informações..."</span>
+        </div>
+        <button class="fw-btn">Abrir</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ╔══════════════════════════════════════════════════════════╗ -->
+<!--  STATS BAR                                                   -->
+<!-- ╚══════════════════════════════════════════════════════════╝ -->
+<div class="stats-bar">
+  <div class="stats-inner">
+    <div class="stat-item">
+      <span class="sn" data-count="500">0</span><span class="ss">+</span>
+      <span class="sl">Empresas ativas</span>
+    </div>
+    <div class="stat-sep"></div>
+    <div class="stat-item">
+      <span class="sn">99.9</span><span class="ss">%</span>
+      <span class="sl">Uptime garantido</span>
+    </div>
+    <div class="stat-sep"></div>
+    <div class="stat-item">
+      <span class="sn" data-count="2">0</span><span class="ss">M+</span>
+      <span class="sl">Chamadas processadas</span>
+    </div>
+    <div class="stat-sep"></div>
+    <div class="stat-item">
+      <span class="sn">24</span><span class="ss">/7</span>
+      <span class="sl">Suporte técnico</span>
+    </div>
+  </div>
+</div>
+
+<!-- ╔══════════════════════════════════════════════════════════╗ -->
+<!--  FEATURES                                                   -->
+<!-- ╚══════════════════════════════════════════════════════════╝ -->
+<section class="features" id="features">
+  <div class="sec-hdr reveal">
+    <span class="sec-badge">Recursos</span>
+    <h2>Tudo para <span class="grad">comunicação corporativa</span></h2>
+    <p>Integração nativa com sua central, WhatsApp Business e ferramentas de produtividade.</p>
+  </div>
+  <div class="feat-grid">
+
+    <div class="feat-card reveal">
+      <div class="feat-ico ico-purple"><i class="fa-solid fa-phone-volume"></i></div>
+      <h3>Chamadas SIP Nativas</h3>
+      <p>Integração direta com Issabel, Asterisk e FreePBX. Registro SIP em segundos com detecção automática de servidor e proxy.</p>
+      <div class="feat-tags"><span>SIP/TLS</span><span>Issabel</span><span>Asterisk</span></div>
+    </div>
+
+    <div class="feat-card reveal">
+      <div class="feat-ico ico-green"><i class="fa-brands fa-whatsapp"></i></div>
+      <h3>WhatsApp Business</h3>
+      <p>Popup automático com mensagens do WhatsApp Business via PABX. Suporte a múltiplos canais TIM e Vivo ao mesmo tempo.</p>
+      <div class="feat-tags"><span>Popup</span><span>TIM</span><span>Vivo</span></div>
+    </div>
+
+    <div class="feat-card reveal">
+      <div class="feat-ico ico-blue"><i class="fa-solid fa-chart-line"></i></div>
+      <h3>CDR Inteligente</h3>
+      <p>Histórico real direto do MySQL do Issabel. Identifica operador, duração, origem e destino com precisão, inclusive em filas.</p>
+      <div class="feat-tags"><span>MySQL CDR</span><span>Real-time</span><span>Export</span></div>
+    </div>
+
+    <div class="feat-card reveal">
+      <div class="feat-ico ico-orange"><i class="fa-solid fa-gauge-high"></i></div>
+      <h3>Dashboard em Tempo Real</h3>
+      <p>Painel com chamadas do dia, ramais online, tempo médio de atendimento e gravações — atualizado via AMI automaticamente.</p>
+      <div class="feat-tags"><span>Live</span><span>AMI</span><span>KPIs</span></div>
+    </div>
+
+    <div class="feat-card reveal">
+      <div class="feat-ico ico-purple"><i class="fa-brands fa-google"></i></div>
+      <h3>Google Contatos</h3>
+      <p>Sincronização automática com o Google Workspace. Identifica chamantes pelo nome com intervalo configurável entre 3s e 30min.</p>
+      <div class="feat-tags"><span>Google API</span><span>Sync</span><span>Busca rápida</span></div>
+    </div>
+
+    <div class="feat-card reveal">
+      <div class="feat-ico ico-teal"><i class="fa-solid fa-users"></i></div>
+      <h3>Conferência Multi-ramal</h3>
+      <p>Sala de conferência integrada ao Issabel. Convide ramais e números externos diretamente do softphone.</p>
+      <div class="feat-tags"><span>Sala 800</span><span>Multi-ramal</span><span>Externo</span></div>
+    </div>
+
+    <div class="feat-card reveal">
+      <div class="feat-ico ico-red"><i class="fa-solid fa-microphone"></i></div>
+      <h3>Gravações de Chamadas</h3>
+      <p>Acesso direto a gravações via URL ou caminho local. Player integrado no histórico com link ao arquivo no PABX.</p>
+      <div class="feat-tags"><span>URL</span><span>Local</span><span>Player</span></div>
+    </div>
+
+    <div class="feat-card reveal">
+      <div class="feat-ico ico-indigo"><i class="fa-solid fa-network-wired"></i></div>
+      <h3>AMI + Presença</h3>
+      <p>Integração AMI com Asterisk para sincronizar ramais, nomes e status de presença de toda a equipe em tempo real.</p>
+      <div class="feat-tags"><span>AMI</span><span>Presença</span><span>Ramais</span></div>
+    </div>
+
+    <div class="feat-card reveal">
+      <div class="feat-ico ico-purple"><i class="fa-solid fa-arrows-rotate"></i></div>
+      <h3>Atualização Automática</h3>
+      <p>Deploy silencioso sem nenhuma intervenção. Toda a equipe sempre na versão mais recente, sem burocracia ou aprovações.</p>
+      <div class="feat-tags"><span>Auto-update</span><span>Silent</span><span>Zero downtime</span></div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ╔══════════════════════════════════════════════════════════╗ -->
+<!--  APP SHOWCASE                                               -->
+<!-- ╚══════════════════════════════════════════════════════════╝ -->
+<section class="showcase" id="showcase">
+  <div class="sec-hdr reveal">
+    <span class="sec-badge">Interface</span>
+    <h2>WavenVoIP <span class="grad">em ação</span></h2>
+    <p>Interface real do aplicativo — cada tela que sua equipe usa diariamente.</p>
+  </div>
+
+  <div class="sc-tabs reveal">
+    <button class="sc-tab active" data-tab="dialer"><i class="fa-solid fa-phone"></i> Discagem</button>
+    <button class="sc-tab" data-tab="history"><i class="fa-solid fa-clock-rotate-left"></i> Histórico</button>
+    <button class="sc-tab" data-tab="dashboard"><i class="fa-solid fa-gauge-high"></i> Dashboard</button>
+    <button class="sc-tab" data-tab="contacts"><i class="fa-solid fa-address-book"></i> Contatos</button>
+    <button class="sc-tab" data-tab="conference"><i class="fa-solid fa-users"></i> Conferência</button>
+  </div>
+
+  <div class="sc-window-wrap reveal">
+    <div class="sc-win">
+      <!-- Title bar -->
+      <div class="scw-titlebar">
+        <div class="scw-dots"><span></span><span></span><span></span></div>
+        <span class="scw-title">WavenVoIP — v7.9</span>
+        <div class="scw-wbtns"><span>─</span><span>□</span><span>✕</span></div>
+      </div>
+      <!-- App header (real UI) -->
+      <div class="scw-appheader">
+        <img src="./assets/waven_logo.png" alt="" class="scw-logo">
+        <nav class="scw-appnav">
+          <button class="scw-nb active" data-screen="dialer"><i class="fa-solid fa-phone"></i> Discagem</button>
+          <button class="scw-nb" data-screen="contacts"><i class="fa-solid fa-address-book"></i> Contatos</button>
+          <button class="scw-nb" data-screen="history"><i class="fa-solid fa-clock-rotate-left"></i> Histórico</button>
+          <button class="scw-nb" data-screen="settings"><i class="fa-solid fa-gear"></i> Configurações</button>
+          <button class="scw-nb" data-screen="dashboard"><i class="fa-solid fa-gauge-high"></i> Dashboard</button>
+        </nav>
+        <button class="scw-statusbtn">
+          <span class="scw-sdot"></span>
+          <span class="scw-sinfo">
+            <span class="scw-sname">Rodrigo / 101</span>
+            <span class="scw-slabel">Online</span>
+          </span>
+          <i class="fa-solid fa-chevron-down fa-xs"></i>
+        </button>
+      </div>
+      <!-- Screens -->
+      <div class="scw-body">
+
+        <!-- DIALER -->
+        <div class="scw-screen active" id="scr-dialer">
+          <div class="scw-dialer">
+            <div class="scwd-display">
+              <input type="text" id="scDialInput" placeholder="Digite o número..." readonly>
+              <button id="scBksp" title="Apagar"><i class="fa-solid fa-delete-left"></i></button>
+            </div>
+            <div class="scwd-grid">
+              <button class="scdk" data-d="1">1<small></small></button>
+              <button class="scdk" data-d="2">2<small>ABC</small></button>
+              <button class="scdk" data-d="3">3<small>DEF</small></button>
+              <button class="scdk" data-d="4">4<small>GHI</small></button>
+              <button class="scdk" data-d="5">5<small>JKL</small></button>
+              <button class="scdk" data-d="6">6<small>MNO</small></button>
+              <button class="scdk" data-d="7">7<small>PQRS</small></button>
+              <button class="scdk" data-d="8">8<small>TUV</small></button>
+              <button class="scdk" data-d="9">9<small>WXYZ</small></button>
+              <button class="scdk" data-d="*">*</button>
+              <button class="scdk" data-d="0">0<small>+</small></button>
+              <button class="scdk" data-d="#">#</button>
+            </div>
+            <div class="scwd-acts">
+              <button class="scwd-call"><i class="fa-solid fa-phone"></i> Ligar</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- HISTORY -->
+        <div class="scw-screen" id="scr-history">
+          <div class="scw-history">
+            <div class="scwh-bar">
+              <div class="scwh-tabs">
+                <button class="scwh-tab active">Todas</button>
+                <button class="scwh-tab">Recebidas</button>
+                <button class="scwh-tab">Efetuadas</button>
+                <button class="scwh-tab">Perdidas</button>
+              </div>
+              <button class="scwh-sync"><i class="fa-solid fa-arrows-rotate"></i> Atualizar CDR</button>
+            </div>
+            <div class="scwh-list">
+              <div class="scwh-item">
+                <div class="scwh-type in"><i class="fa-solid fa-phone-arrow-down-left"></i></div>
+                <div class="scwh-info"><strong>Maria Eduarda</strong><span>(11) 9123-4567</span></div>
+                <div class="scwh-dur">3:24</div>
+                <div class="scwh-time">Hoje 14:32</div>
+                <button class="scwh-play"><i class="fa-solid fa-play"></i></button>
+              </div>
+              <div class="scwh-item">
+                <div class="scwh-type out"><i class="fa-solid fa-phone-arrow-up-right"></i></div>
+                <div class="scwh-info"><strong>João Silva</strong><span>Ramal 201</span></div>
+                <div class="scwh-dur">1:08</div>
+                <div class="scwh-time">Hoje 13:15</div>
+                <button class="scwh-play dimmed"><i class="fa-solid fa-play"></i></button>
+              </div>
+              <div class="scwh-item missed">
+                <div class="scwh-type miss"><i class="fa-solid fa-phone-missed"></i></div>
+                <div class="scwh-info"><strong>Chamada perdida</strong><span>(66) 9876-0000</span></div>
+                <div class="scwh-dur">—</div>
+                <div class="scwh-time">Hoje 12:01</div>
+                <button class="scwh-call"><i class="fa-solid fa-phone-arrow-up-right"></i></button>
+              </div>
+              <div class="scwh-item">
+                <div class="scwh-type in"><i class="fa-solid fa-phone-arrow-down-left"></i></div>
+                <div class="scwh-info"><strong>Carlos Ferreira</strong><span>(11) 9555-1234</span></div>
+                <div class="scwh-dur">8:47</div>
+                <div class="scwh-time">Ontem 17:45</div>
+                <button class="scwh-play"><i class="fa-solid fa-play"></i></button>
+              </div>
+              <div class="scwh-item">
+                <div class="scwh-type out"><i class="fa-solid fa-phone-arrow-up-right"></i></div>
+                <div class="scwh-info"><strong>Ana Lima</strong><span>(66) 3219-8800</span></div>
+                <div class="scwh-dur">0:42</div>
+                <div class="scwh-time">Ontem 16:20</div>
+                <button class="scwh-play dimmed"><i class="fa-solid fa-play"></i></button>
+              </div>
+              <div class="scwh-item missed">
+                <div class="scwh-type miss"><i class="fa-solid fa-phone-missed"></i></div>
+                <div class="scwh-info"><strong>Chamada perdida</strong><span>(66) 9999-1234</span></div>
+                <div class="scwh-dur">—</div>
+                <div class="scwh-time">Ontem 15:10</div>
+                <button class="scwh-call"><i class="fa-solid fa-phone-arrow-up-right"></i></button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- DASHBOARD -->
+        <div class="scw-screen" id="scr-dashboard">
+          <div class="scw-dashboard">
+            <div class="scwd-cards">
+              <div class="scwdc">
+                <div class="scwdc-ico purple"><i class="fa-solid fa-phone-volume"></i></div>
+                <div class="scwdc-val">47</div>
+                <div class="scwdc-lbl">Chamadas hoje</div>
+                <div class="scwdc-trend up">↑ 12% vs ontem</div>
+              </div>
+              <div class="scwdc">
+                <div class="scwdc-ico green"><i class="fa-solid fa-circle-dot"></i></div>
+                <div class="scwdc-val">8<small>/12</small></div>
+                <div class="scwdc-lbl">Ramais online</div>
+                <div class="scwdc-trend">4 disponíveis</div>
+              </div>
+              <div class="scwdc">
+                <div class="scwdc-ico blue"><i class="fa-regular fa-clock"></i></div>
+                <div class="scwdc-val">3:24</div>
+                <div class="scwdc-lbl">Tempo médio</div>
+                <div class="scwdc-trend down">↓ 8% vs ontem</div>
+              </div>
+              <div class="scwdc">
+                <div class="scwdc-ico orange"><i class="fa-solid fa-microphone"></i></div>
+                <div class="scwdc-val">12</div>
+                <div class="scwdc-lbl">Gravações</div>
+                <div class="scwdc-trend">Hoje</div>
+              </div>
+            </div>
+            <div class="scwd-ramais">
+              <div class="scwd-ramais-title">Ramais agora</div>
+              <div class="scwd-ramal online"><span></span><b>João Silva</b><em>101</em></div>
+              <div class="scwd-ramal online"><span></span><b>Maria Eduarda</b><em>102</em></div>
+              <div class="scwd-ramal busy"><span></span><b>Carlos Rodrigues</b><em>103</em><small>Em chamada</small></div>
+              <div class="scwd-ramal online"><span></span><b>Ana Lima</b><em>104</em></div>
+              <div class="scwd-ramal offline"><span></span><b>Pedro Martins</b><em>105</em></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CONTACTS -->
+        <div class="scw-screen" id="scr-contacts">
+          <div class="scw-contacts">
+            <div class="scwc-search">
+              <i class="fa-solid fa-magnifying-glass"></i>
+              <input type="text" placeholder="Buscar contato ou número...">
+            </div>
+            <div class="scwc-group">
+              <div class="scwc-glabel">Ramais internos</div>
+              <div class="scwc-item">
+                <div class="scwc-av" style="background:#7C3AED">JS</div>
+                <div class="scwc-info"><strong>João Silva</strong><span>Ramal 101</span></div>
+                <span class="scwc-pres online"></span>
+                <button class="scwc-call"><i class="fa-solid fa-phone"></i></button>
+              </div>
+              <div class="scwc-item">
+                <div class="scwc-av" style="background:#059669">ME</div>
+                <div class="scwc-info"><strong>Maria Eduarda</strong><span>Ramal 102</span></div>
+                <span class="scwc-pres online"></span>
+                <button class="scwc-call"><i class="fa-solid fa-phone"></i></button>
+              </div>
+              <div class="scwc-item">
+                <div class="scwc-av" style="background:#DC2626">CR</div>
+                <div class="scwc-info"><strong>Carlos Rodrigues</strong><span>Ramal 103 · Em chamada</span></div>
+                <span class="scwc-pres busy"></span>
+                <button class="scwc-call"><i class="fa-solid fa-phone"></i></button>
+              </div>
+              <div class="scwc-item">
+                <div class="scwc-av" style="background:#0284C7">PM</div>
+                <div class="scwc-info"><strong>Pedro Martins</strong><span>Ramal 105</span></div>
+                <span class="scwc-pres offline"></span>
+                <button class="scwc-call"><i class="fa-solid fa-phone"></i></button>
+              </div>
+            </div>
+            <div class="scwc-group">
+              <div class="scwc-glabel">Externos</div>
+              <div class="scwc-item">
+                <div class="scwc-av" style="background:#D97706">AL</div>
+                <div class="scwc-info"><strong>Ana Lima</strong><span>(66) 9876-3210</span></div>
+                <span class="scwc-pres wa"></span>
+                <button class="scwc-call"><i class="fa-solid fa-phone"></i></button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CONFERENCE -->
+        <div class="scw-screen" id="scr-conference">
+          <div class="scw-conference">
+            <div class="scwconf-hdr">
+              <div class="scwconf-room"><i class="fa-solid fa-users"></i> Sala de Conferência 800</div>
+              <div class="scwconf-status"><span class="scwconf-dot"></span> 3 participantes conectados</div>
+            </div>
+            <div class="scwconf-participants">
+              <div class="scwconf-p">
+                <div class="scwconf-av">JS</div>
+                <div class="scwconf-pi"><strong>João Silva</strong><span>Ramal 101 · Conectado</span></div>
+                <div class="scwconf-mic"><i class="fa-solid fa-microphone"></i></div>
+              </div>
+              <div class="scwconf-p">
+                <div class="scwconf-av" style="background:#059669">ME</div>
+                <div class="scwconf-pi"><strong>Maria Eduarda</strong><span>Ramal 102 · Conectado</span></div>
+                <div class="scwconf-mic muted"><i class="fa-solid fa-microphone-slash"></i></div>
+              </div>
+              <div class="scwconf-p">
+                <div class="scwconf-av" style="background:#1D4ED8">VC</div>
+                <div class="scwconf-pi"><strong>Você</strong><span>Ramal 104 · Conectado</span></div>
+                <div class="scwconf-mic"><i class="fa-solid fa-microphone"></i></div>
+              </div>
+            </div>
+            <div class="scwconf-acts">
+              <button class="scwconf-invite"><i class="fa-solid fa-user-plus"></i> Convidar ramal</button>
+              <button class="scwconf-leave"><i class="fa-solid fa-right-from-bracket"></i> Sair</button>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /scw-body -->
+    </div><!-- /sc-win -->
+  </div>
+</section>
+
+<!-- ╔══════════════════════════════════════════════════════════╗ -->
+<!--  INTEGRATIONS                                               -->
+<!-- ╚══════════════════════════════════════════════════════════╝ -->
+<section class="integrations" id="integrations">
+  <div class="sec-hdr reveal">
+    <span class="sec-badge">Integrações</span>
+    <h2>Conecta com o que <span class="grad">você já usa</span></h2>
+    <p>Integração nativa sem plugins externos ou configurações complexas.</p>
+  </div>
+  <div class="integ-grid">
+
+    <div class="integ-card reveal">
+      <div class="integ-ico" style="background:#F5F3FF">
+        <i class="fa-solid fa-server" style="color:#7C3AED"></i>
+      </div>
+      <h3>Issabel / Asterisk</h3>
+      <p>Registro SIP nativo, AMI para ramais e presença, CDR via MySQL e conferência diretamente do PABX.</p>
+      <ul class="integ-list">
+        <li><i class="fa-solid fa-check"></i> SIP/TLS com UDP e TCP</li>
+        <li><i class="fa-solid fa-check"></i> AMI: ramais, presença, eventos</li>
+        <li><i class="fa-solid fa-check"></i> CDR MySQL: histórico real</li>
+        <li><i class="fa-solid fa-check"></i> Transferência cega / assistida</li>
+        <li><i class="fa-solid fa-check"></i> Sala de conferência integrada</li>
+      </ul>
+    </div>
+
+    <div class="integ-card reveal">
+      <div class="integ-ico" style="background:#F0FDF4">
+        <i class="fa-brands fa-whatsapp" style="color:#16A34A"></i>
+      </div>
+      <h3>WhatsApp Business</h3>
+      <p>Popup automático integrado ao PABX com múltiplos canais TIM e Vivo. Notificação com nome, número e mensagem.</p>
+      <ul class="integ-list">
+        <li><i class="fa-solid fa-check"></i> Canal TIM WhatsApp</li>
+        <li><i class="fa-solid fa-check"></i> Canal Vivo WhatsApp</li>
+        <li><i class="fa-solid fa-check"></i> Popup com nome + mensagem</li>
+        <li><i class="fa-solid fa-check"></i> Abertura direta do chat</li>
+        <li><i class="fa-solid fa-check"></i> Detecção automática de canal</li>
+      </ul>
+    </div>
+
+    <div class="integ-card reveal">
+      <div class="integ-ico" style="background:#FFFBEB">
+        <i class="fa-brands fa-google" style="color:#D97706"></i>
+      </div>
+      <h3>Google Workspace</h3>
+      <p>Sync automático com a agenda do Google. Identifica chamadas pelo nome com intervalo configurável de 3s a 30min.</p>
+      <ul class="integ-list">
+        <li><i class="fa-solid fa-check"></i> Google Contacts API</li>
+        <li><i class="fa-solid fa-check"></i> Sync automático configurável</li>
+        <li><i class="fa-solid fa-check"></i> Identificação de chamante</li>
+        <li><i class="fa-solid fa-check"></i> Busca instantânea por nome</li>
+        <li><i class="fa-solid fa-check"></i> OAuth2 seguro</li>
+      </ul>
+    </div>
+
+  </div>
+</section>
+
+<!-- ╔══════════════════════════════════════════════════════════╗ -->
+<!--  DASHBOARD PREVIEW                                          -->
+<!-- ╚══════════════════════════════════════════════════════════╝ -->
+<section class="dash-section" id="dashboard-preview">
+  <div class="dash-inner">
+    <div class="dash-copy reveal">
+      <span class="sec-badge">Dashboard</span>
+      <h2>Visibilidade total da <span class="grad">sua equipe</span></h2>
+      <p>Acompanhe chamadas, ramais e métricas em tempo real — atualizado automaticamente via AMI do Asterisk.</p>
+      <ul class="dash-feats">
+        <li><i class="fa-solid fa-check"></i> Chamadas em andamento e do dia</li>
+        <li><i class="fa-solid fa-check"></i> Status de presença por ramal</li>
+        <li><i class="fa-solid fa-check"></i> Tempo médio de atendimento</li>
+        <li><i class="fa-solid fa-check"></i> Contagem de gravações disponíveis</li>
+        <li><i class="fa-solid fa-check"></i> Sync automático a cada 3–30s</li>
+      </ul>
+    </div>
+    <div class="dash-cards reveal">
+      <div class="dcard dcard-purple">
+        <i class="fa-solid fa-phone-volume"></i>
+        <div class="dcard-n" data-count="47">0</div>
+        <div class="dcard-l">Chamadas hoje</div>
+        <div class="dcard-trend up">↑ 12% vs ontem</div>
+      </div>
+      <div class="dcard dcard-green">
+        <i class="fa-solid fa-circle-dot"></i>
+        <div class="dcard-n">8<small>/12</small></div>
+        <div class="dcard-l">Ramais online</div>
+        <div class="dcard-trend">4 disponíveis</div>
+      </div>
+      <div class="dcard dcard-blue">
+        <i class="fa-regular fa-clock"></i>
+        <div class="dcard-n">3:24</div>
+        <div class="dcard-l">Tempo médio</div>
+        <div class="dcard-trend down">↓ 8% vs ontem</div>
+      </div>
+      <div class="dcard dcard-orange">
+        <i class="fa-solid fa-microphone"></i>
+        <div class="dcard-n" data-count="12">0</div>
+        <div class="dcard-l">Gravações</div>
+        <div class="dcard-trend">Hoje</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ╔══════════════════════════════════════════════════════════╗ -->
+<!--  CTA / DOWNLOAD                                             -->
+<!-- ╚══════════════════════════════════════════════════════════╝ -->
+<section class="cta-section" id="download">
+  <div class="cta-blob"></div>
+  <div class="cta-inner reveal">
+    <span class="sec-badge sec-badge-light">Download</span>
+    <h2>Comece hoje.<br><span class="grad-light">É grátis.</span></h2>
+    <p>Instale em menos de 2 minutos. Sem cartão de crédito. Sem burocracia.</p>
+    <div class="cta-acts">
+      <a href="https://almeidagas.com/waven/WavenVoIP_Setup.exe" class="btn-primary btn-xl">
+        <i class="fa-solid fa-download"></i>
+        Baixar WavenVoIP
+        <span class="btn-pill">v7.9 · Windows</span>
+      </a>
+      <a href="mailto:suporte@almeidagas.com" class="btn-outline-white btn-xl">
+        <i class="fa-solid fa-calendar-check"></i>
+        Solicitar demonstração
+      </a>
+    </div>
+    <p class="cta-note">
+      <i class="fa-brands fa-windows"></i>
+      Windows 10 / 11 &nbsp;·&nbsp; 64-bit &nbsp;·&nbsp; ~50 MB
+    </p>
+  </div>
+</section>
+
+<!-- ╔══════════════════════════════════════════════════════════╗ -->
+<!--  FOOTER                                                     -->
+<!-- ╚══════════════════════════════════════════════════════════╝ -->
+<footer class="footer">
+  <div class="footer-inner">
+    <div class="footer-brand">
+      <img src="./assets/waven_logo.png" alt="WavenVoIP" class="footer-logo">
+      <p>Softphone corporativo com SIP nativo, WhatsApp Business e CDR inteligente para equipes que não podem parar.</p>
+      <div class="footer-socials">
+        <a href="#" aria-label="WhatsApp"><i class="fa-brands fa-whatsapp"></i></a>
+        <a href="#" aria-label="LinkedIn"><i class="fa-brands fa-linkedin"></i></a>
+      </div>
+    </div>
+    <div class="footer-col">
+      <h4>Produto</h4>
+      <a href="#features">Recursos</a>
+      <a href="#showcase">Interface</a>
+      <a href="#integrations">Integrações</a>
+      <a href="#download">Download</a>
+    </div>
+    <div class="footer-col">
+      <h4>Integrações</h4>
+      <a href="#">Issabel / Asterisk</a>
+      <a href="#">WhatsApp Business</a>
+      <a href="#">Google Workspace</a>
+      <a href="#">FreePBX</a>
+    </div>
+    <div class="footer-col">
+      <h4>Empresa</h4>
+      <a href="#">Sobre nós</a>
+      <a href="#">Suporte técnico</a>
+      <a href="#">Contato</a>
+      <a href="#">Privacidade</a>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    <span>WavenVoIP © 2026 — Almeida Gás Tecnologia</span>
+    <span>Feito com <i class="fa-solid fa-heart"></i> para comunicação corporativa</span>
+  </div>
+</footer>
+
+<script src="./js/main.js?v=7.9"></script>
+</body>
+</html>

@@ -1,0 +1,1704 @@
+
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Text;
+using System.Linq;
+using System.Net;
+using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
+using SIPSorcery.Media;
+using SIPSorcery.Net;
+using SIPSorcery.SIP;
+using SIPSorcery.SIP.App;
+using SIPSorceryMedia.Windows;
+using WavenVoIP.Services;
+
+namespace WavenVoIP
+{
+    public class SipService
+    {
+        private SipConfig? _config;
+        private SIPTransport? _sipTransport;
+        private SIPRegistrationUserAgent? _registerUserAgent;
+        private SIPUserAgent? _userAgent;
+        private VoIPMediaSession? _mediaSession;
+        private SIPRequest? _pendingIncomingRequest;
+        private string _pendingIncomingCallId = string.Empty;
+        private DateTime _ultimoInviteRecebido = DateTime.MinValue;
+        private Timer? _monitorChamadaRecebidaTimer;
+        private readonly object _incomingLock = new object();
+        private readonly HashSet<string> _ignoredIncomingCallIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private bool _emEspera;
+        private volatile bool _cancelamentoSolicitado;
+        private volatile bool _chamadaSaindoEmAndamento;
+        private readonly List<SIPUserAgent> _conferenceAgents = new List<SIPUserAgent>();
+        private readonly List<VoIPMediaSession> _conferenceMediaSessions = new List<VoIPMediaSession>();
+
+        public bool IsRegistered { get; private set; }
+        public bool SupportsIncomingCallUi => true;
+        public bool IsInCall => _userAgent?.IsCallActive ?? false;
+        public bool IsOnHold => _emEspera;
+        public bool IsDialing => _chamadaSaindoEmAndamento;
+
+        public event Action<string>? StatusChanged;
+        public event Action<string>? IncomingCallReceived;
+        public event Action? IncomingCallEnded;
+        public event Action? CallEnded;
+
+        public string LastIncomingOrigin { get; private set; } = string.Empty;
+        public string LastCallError { get; private set; } = string.Empty;
+        public string LastConferenceError { get; private set; } = string.Empty;
+        public string LastDialedDestination { get; private set; } = string.Empty;
+
+        public void Inicializar(SipConfig config)
+        {
+            _config = config ?? throw new ArgumentNullException(nameof(config));
+
+            _sipTransport = new SIPTransport();
+            var channel = new SIPUDPChannel(new IPEndPoint(IPAddress.Any, 0));
+            _sipTransport.AddSIPChannel(channel);
+
+            _sipTransport.SIPTransportRequestReceived += async (localEP, remoteEP, sipRequest) =>
+            {
+                try
+                {
+                    if (sipRequest.Method == SIPMethodsEnum.OPTIONS ||
+                        sipRequest.Method == SIPMethodsEnum.NOTIFY)
+                    {
+                        var ok = SIPResponse.GetResponse(
+                            sipRequest,
+                            SIPResponseStatusCodesEnum.Ok,
+                            null);
+
+                        await _sipTransport.SendResponseAsync(ok);
+                    }
+
+                    if (sipRequest.Method == SIPMethodsEnum.INVITE)
+                    {
+                        var tsInvite = DateTime.Now;
+                        RegistrarSinalSip($"WHATSAPP_INCOMING_DETECTED ts={tsInvite:HH:mm:ss.fff} Call-ID={ObterCallId(sipRequest)} From={sipRequest.Header?.From?.FromURI?.User ?? "Unknown"} To={sipRequest.Header?.To?.ToURI?.User ?? string.Empty}");
+                        _ultimoInviteRecebido = tsInvite;
+
+                        // ESSENCIAL para funcionar igual MicroSIP/IP Phone:
+                        // responder 100 Trying e 180 Ringing no INVITE pendente.
+                        // Sem isso o Asterisk fica retransmitindo INVITE e pode não entregar o CANCEL
+                        // para o fluxo do softphone.
+                        EnviarRespostaTentandoETocando(sipRequest);
+                        RegistrarSinalSip($"SIP_INVITE_TO_ISSABEL_SENT elapsed={(DateTime.Now - tsInvite).TotalMilliseconds:0}ms Call-ID={ObterCallId(sipRequest)}");
+                    }
+
+                    // Quando a chamada vem de fila/ring group e outro atendente atende,
+                    // o Issabel/Asterisk envia CANCEL para os ramais que ainda estavam tocando.
+                    // Nesta versão fechamos o popup em QUALQUER CANCEL recebido no transporte,
+                    // porque em alguns cenários o SIPSorcery já limpou/alterou a transação antes
+                    // de mantermos a referência em _pendingIncomingRequest.
+                    if (sipRequest.Method == SIPMethodsEnum.CANCEL)
+                    {
+                        RegistrarSinalSip($"RX CANCEL Call-ID={ObterCallId(sipRequest)}");
+                        var okCancel = SIPResponse.GetResponse(
+                            sipRequest,
+                            SIPResponseStatusCodesEnum.Ok,
+                            null);
+
+                        await _sipTransport.SendResponseAsync(okCancel);
+
+                        var cancelCallId = ObterCallId(sipRequest);
+                        if (!string.IsNullOrWhiteSpace(cancelCallId))
+                            _ignoredIncomingCallIds.Add(cancelCallId);
+
+                        LimparChamadaRecebidaPendente(false);
+                        StatusChanged?.Invoke("Chamada cancelada pelo Issabel/remetente.");
+                        IncomingCallEnded?.Invoke();
+                        return;
+                    }
+
+                    // Algumas chamadas externas por tronco encerram a perna SIP pendente com BYE
+                    // ou o evento de hangup chega antes do usuário atender. Fecha o popup também.
+                    if (sipRequest.Method == SIPMethodsEnum.BYE)
+                    {
+                        RegistrarSinalSip($"RX BYE Call-ID={ObterCallId(sipRequest)}");
+                        var okBye = SIPResponse.GetResponse(
+                            sipRequest,
+                            SIPResponseStatusCodesEnum.Ok,
+                            null);
+
+                        await _sipTransport.SendResponseAsync(okBye);
+
+                        LimparChamadaRecebidaPendente(false);
+                        StatusChanged?.Invoke("Chamada encerrada pelo remetente/Issabel.");
+                        IncomingCallEnded?.Invoke();
+                        return;
+                    }
+                }
+                catch
+                {
+                }
+            };
+
+            CriarUserAgent();
+            StatusChanged?.Invoke($"SIP pronto em porta dinâmica -> {_config.ServerIp}:{_config.Port}/udp");
+        }
+
+        private void CriarUserAgent()
+        {
+            if (_sipTransport == null)
+                throw new InvalidOperationException("Transporte SIP não inicializado.");
+
+            _userAgent = new SIPUserAgent(_sipTransport, null);
+            _userAgent.OnIncomingCall += OnIncomingCall;
+            _userAgent.OnCallHungup += _ =>
+            {
+                _emEspera = false;
+                LimparChamadaRecebidaPendente(false);
+                try { IncomingCallEnded?.Invoke(); } catch { }
+                LimparEstadoChamada("Chamada encerrada pelo Issabel/cliente.");
+            };
+        }
+
+        private void OnIncomingCall(SIPUserAgent ua, SIPRequest req)
+        {
+            try
+            {
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                var callId = ObterCallId(req);
+                _ultimoInviteRecebido = DateTime.Now;
+                RegistrarSinalSip($"WHATSAPP_CALL_EVENT_RECEIVED Call-ID={callId}");
+
+                // 100 Trying + 180 Ringing already sent by transport handler — no duplicate.
+
+                // Evita reabrir o popup quando o usuário já recusou/fechou esta mesma chamada.
+                if (!string.IsNullOrWhiteSpace(callId) && _ignoredIncomingCallIds.Contains(callId))
+                {
+                    EnviarRespostaOcupado(req);
+                    return;
+                }
+
+                lock (_incomingLock)
+                {
+                    // Retransmissão do mesmo INVITE: ignora sem reabrir popup.
+                    if (_pendingIncomingRequest != null)
+                    {
+                        if (string.Equals(_pendingIncomingCallId, callId, StringComparison.OrdinalIgnoreCase))
+                        {
+                            RegistrarSinalSip($"WHATSAPP_DUPLICATE_EVENT_IGNORED Call-ID={callId}");
+                            return;
+                        }
+
+                        // Já existe outra chamada pendente: responde ocupado para a nova.
+                        EnviarRespostaOcupado(req);
+                        return;
+                    }
+
+                    _pendingIncomingRequest = req;
+                    _pendingIncomingCallId = callId;
+                }
+
+                IniciarMonitorChamadaRecebida();
+
+                var callerUser = req.Header?.From?.FromURI?.User ?? "Desconhecido";
+                var callerName = req.Header?.From?.FromName;
+                var caller = string.IsNullOrWhiteSpace(callerName)
+                    ? callerUser
+                    : $"{callerName} ({callerUser})";
+
+                // Fire event IMMEDIATELY — popup must not wait for origin detection (reflection + disk I/O)
+                RegistrarSinalSip($"WHATSAPP_FORWARD_TO_ISSABEL_START elapsed={sw.ElapsedMilliseconds}ms Call-ID={callId}");
+                StatusChanged?.Invoke($"Chamada recebida de {caller}");
+                IncomingCallReceived?.Invoke(caller);
+                RegistrarSinalSip($"EXTENSION_RING_STARTED elapsed={sw.ElapsedMilliseconds}ms Call-ID={callId}");
+
+                // Origin detection runs async — has reflection + file I/O, must not block popup
+                var reqCapture = req;
+                var swCapture = sw;
+                var callIdCapture = callId;
+                Task.Run(() =>
+                {
+                    try
+                    {
+                        LastIncomingOrigin = DetectarOrigemEntrada(reqCapture);
+                        RegistrarSinalSip($"WHATSAPP_FORWARD_TOTAL_DELAY_MS elapsed={swCapture.ElapsedMilliseconds}ms Call-ID={callIdCapture} origem={LastIncomingOrigin}");
+                    }
+                    catch { }
+                });
+            }
+            catch (Exception ex)
+            {
+                StatusChanged?.Invoke($"Erro ao tratar chamada recebida: {ex.Message}");
+                RegistrarSinalSip($"ERRO OnIncomingCall: {ex}");
+            }
+        }
+
+        private void EnviarRespostaTentandoETocando(SIPRequest req)
+        {
+            try
+            {
+                if (_sipTransport == null || req == null) return;
+
+                // MicroSIP faz isso automaticamente. No nosso app forçamos para o Asterisk
+                // parar de retransmitir INVITE e conseguir cancelar a chamada corretamente.
+                var trying = SIPResponse.GetResponse(req, SIPResponseStatusCodesEnum.Trying, null);
+                _sipTransport.SendResponseAsync(trying).GetAwaiter().GetResult();
+
+                var ringing = SIPResponse.GetResponse(req, SIPResponseStatusCodesEnum.Ringing, null);
+                _sipTransport.SendResponseAsync(ringing).GetAwaiter().GetResult();
+
+                RegistrarSinalSip($"TX 100 Trying + 180 Ringing Call-ID={ObterCallId(req)}");
+            }
+            catch (Exception ex)
+            {
+                RegistrarSinalSip($"ERRO ao enviar 100/180: {ex.Message}");
+            }
+        }
+
+        private void IniciarMonitorChamadaRecebida()
+        {
+            try
+            {
+                _monitorChamadaRecebidaTimer?.Dispose();
+                var inicioChamada = DateTime.Now;
+                _monitorChamadaRecebidaTimer = new Timer(_ =>
+                {
+                    try
+                    {
+                        if (_pendingIncomingRequest == null) return;
+
+                        // Timeout from call START — not from last INVITE.
+                        // After 180 Ringing, Asterisk correctly stops retransmitting INVITE;
+                        // the old "8s without INVITE" check was closing the popup too early.
+                        var segundosDecorridos = (DateTime.Now - inicioChamada).TotalSeconds;
+                        if (segundosDecorridos >= 45)
+                        {
+                            var callId = _pendingIncomingCallId;
+                            RegistrarSinalSip($"INCOMING_CALL_RING_TIMEOUT: {segundosDecorridos:0.0}s sem resposta. Limpando popup Call-ID={callId}");
+                            LimparChamadaRecebidaPendente(false);
+                            StatusChanged?.Invoke("Chamada expirada sem resposta.");
+                            IncomingCallEnded?.Invoke();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        RegistrarSinalSip($"ERRO monitor chamada recebida: {ex.Message}");
+                    }
+                }, null, 1000, 1000);
+            }
+            catch { }
+        }
+
+        private string DetectarOrigemEntrada(SIPRequest req)
+        {
+            try
+            {
+                var numeroOrigem = req?.Header?.From?.FromURI?.User ?? string.Empty;
+                if (DialPlanService.EhRamalInterno(numeroOrigem))
+                {
+                    RegistrarDebugEntrada(req, MontarTextoDiagnosticoEntrada(req), "Ramal interno");
+                    return "Ramal interno";
+                }
+
+                // Regra profissional: nunca identificar canal por palavra solta como TIM/VIVO.
+                // O canal de entrada precisa vir pelo DID/DDR, Request-URI, To, Diversion,
+                // P-Called-Party-ID, X-Original-DID, Alert-Info ou nome da rota enviado pelo Issabel.
+                var bruto = MontarTextoDiagnosticoEntrada(req);
+                var origem = CanalIdentificacaoService.IdentificarEntrada(
+                    bruto,
+                    req?.Header?.To?.ToURI?.User ?? string.Empty,
+                    req?.URI?.User ?? string.Empty,
+                    req?.Header?.From?.FromURI?.User ?? string.Empty);
+
+                RegistrarDebugEntrada(req, bruto, origem);
+                return origem;
+            }
+            catch { }
+
+            return "Entrada não identificada";
+        }
+
+        private static string MontarTextoDiagnosticoEntrada(SIPRequest? req)
+        {
+            var sb = new StringBuilder();
+            try { sb.AppendLine(req?.ToString() ?? string.Empty); } catch { }
+            try { sb.AppendLine(req?.URI?.ToString() ?? string.Empty); } catch { }
+            try { sb.AppendLine(req?.Header?.To?.ToString() ?? string.Empty); } catch { }
+            try { sb.AppendLine(req?.Header?.From?.ToString() ?? string.Empty); } catch { }
+
+            try
+            {
+                var header = req?.Header;
+                if (header != null)
+                {
+                    foreach (var prop in header.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
+                    {
+                        var nome = prop.Name ?? string.Empty;
+                        if (nome.IndexOf("unknown", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                            nome.IndexOf("extra", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                            nome.IndexOf("header", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                            nome.IndexOf("diversion", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                            nome.IndexOf("alert", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                            nome.IndexOf("called", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            object? valor = null;
+                            try { valor = prop.GetValue(header); } catch { }
+                            if (valor != null) sb.AppendLine($"{nome}: {valor}");
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            return sb.ToString();
+        }
+
+        private static void RegistrarSinalSip(string texto)
+        {
+            try
+            {
+                var pasta = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WavenVoIP");
+                Directory.CreateDirectory(pasta);
+                var linha = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} | {texto}{Environment.NewLine}";
+                File.AppendAllText(Path.Combine(pasta, "sip_signal_debug.log"), linha);
+                File.AppendAllText(Path.Combine(pasta, "ui_flow_debug.log"), linha);
+            }
+            catch { }
+        }
+
+        private static void RegistrarDebugEntrada(SIPRequest? req, string texto, string origem)
+        {
+            try
+            {
+                var pasta = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WavenVoIP");
+                Directory.CreateDirectory(pasta);
+                var path = Path.Combine(pasta, "sip_incoming_debug.log");
+                File.AppendAllText(path, $"\n===== {DateTime.Now:yyyy-MM-dd HH:mm:ss} | Origem detectada: {origem} =====\n{texto}\n");
+            }
+            catch { }
+        }
+
+        public void Registrar()
+        {
+            if (_config == null || _sipTransport == null)
+                throw new InvalidOperationException("SipService não inicializado.");
+
+            string registrarHost = !string.IsNullOrWhiteSpace(_config.ProxySip)
+                ? _config.ProxySip
+                : $"{_config.ServerIp}:{_config.Port}";
+
+            _registerUserAgent = new SIPRegistrationUserAgent(
+                _sipTransport,
+                _config.Login,
+                _config.Senha,
+                registrarHost,
+                120
+            );
+
+            _registerUserAgent.RegistrationSuccessful += (uri, resp) =>
+            {
+                IsRegistered = true;
+                StatusChanged?.Invoke($"Registrado com sucesso: {_config.Login}");
+            };
+
+            _registerUserAgent.RegistrationFailed += (uri, resp, err) =>
+            {
+                IsRegistered = false;
+                StatusChanged?.Invoke($"Falha no registro: {err}");
+            };
+
+            _registerUserAgent.RegistrationTemporaryFailure += (uri, resp, msg) =>
+            {
+                IsRegistered = false;
+                StatusChanged?.Invoke($"Falha temporária: {msg}");
+            };
+
+            _registerUserAgent.Start();
+        }
+
+        public async Task<bool> Ligar(string numeroFinal)
+        {
+            if (_config == null || _userAgent == null)
+                throw new InvalidOperationException("SipService não inicializado.");
+
+            string destination = $"sip:{numeroFinal}@{_config.ServerIp}:{_config.Port}";
+            LastCallError = string.Empty;
+            LastDialedDestination = destination;
+            RegistrarSinalSip($"TX CALL destino={destination} usuario={_config.Login}");
+
+            try
+            {
+                _cancelamentoSolicitado = false;
+                _chamadaSaindoEmAndamento = true;
+
+                _mediaSession = CriarMedia();
+                bool ok = await _userAgent.Call(destination, _config.Login, _config.Senha, _mediaSession);
+
+                _chamadaSaindoEmAndamento = false;
+
+                // Se o usuário clicou em desligar enquanto ainda estava chamando,
+                // não podemos considerar a chamada como ativa/atendida.
+                if (_cancelamentoSolicitado)
+                {
+                    EncerrarSinalizacaoAtiva();
+                    LimparEstadoChamada("Chamada cancelada antes do atendimento.");
+                    return false;
+                }
+
+                if (ok)
+                {
+                    StatusChanged?.Invoke($"Chamada enviada para {numeroFinal}");
+                    RegistrarSinalSip($"TX CALL OK destino={destination}");
+                }
+                else
+                {
+                    LastCallError = $"Issabel/SIP recusou ou não completou o INVITE para {numeroFinal}. Destino enviado: {destination}.";
+                    StatusChanged?.Invoke($"Falha ao chamar {numeroFinal}. Veja log SIP.");
+                    RegistrarSinalSip($"TX CALL FALHA destino={destination}");
+                    LimparEstadoChamada("Falha na chamada.");
+                }
+
+                return ok;
+            }
+            catch (Exception ex)
+            {
+                _chamadaSaindoEmAndamento = false;
+                LastCallError = $"Erro real da chamada para {numeroFinal}: {ex.Message}. Destino enviado: {destination}.";
+                RegistrarSinalSip($"TX CALL ERRO destino={destination} erro={ex}");
+                LimparEstadoChamada("Erro na chamada.");
+                StatusChanged?.Invoke($"Erro real da chamada: {ex.Message}");
+                throw;
+            }
+        }
+
+        public async Task<bool> ExecutarCodigoFuncao(string codigo)
+        {
+            if (string.IsNullOrWhiteSpace(codigo))
+                throw new InvalidOperationException("Código inválido.");
+
+            bool ok = await Ligar(codigo);
+
+            if (ok)
+            {
+                await Task.Delay(1800);
+                Desligar();
+            }
+
+            return ok;
+        }
+
+        public bool PossuiChamadaRecebidaPendente => _pendingIncomingRequest != null;
+
+        public async Task<bool> AtenderChamada()
+        {
+            if (_userAgent == null)
+                throw new InvalidOperationException("SipService não inicializado.");
+
+            if (_pendingIncomingRequest == null)
+                throw new InvalidOperationException("Não existe chamada pendente para atender.");
+
+            var uas = _userAgent.AcceptCall(_pendingIncomingRequest);
+            if (uas == null)
+            {
+                StatusChanged?.Invoke("Falha ao aceitar chamada recebida.");
+                return false;
+            }
+
+            _mediaSession = CriarMedia();
+            bool ok = await _userAgent.Answer(uas, _mediaSession);
+
+            if (ok)
+            {
+                StatusChanged?.Invoke("Chamada atendida.");
+                LimparChamadaRecebidaPendente(false);
+            }
+            else
+            {
+                LimparEstadoChamada("Falha ao atender.");
+            }
+
+            return ok;
+        }
+
+        public bool TransferenciaCega(string ramalDestino)
+        {
+            if (_userAgent == null || _config == null || string.IsNullOrWhiteSpace(ramalDestino) || !IsInCall)
+                return false;
+
+            ramalDestino = DialPlanService.NormalizarNumero(ramalDestino);
+            StatusChanged?.Invoke($"Transferência cega para {ramalDestino}...");
+
+            // Issabel/Asterisk: Transferência cega durante chamada = ## + ramal.
+            bool ok = EnviarDtmfEmPassos("##", ramalDestino);
+            if (!ok)
+            {
+                string sipDestino = $"sip:{ramalDestino}@{_config.ServerIp}:{_config.Port}";
+                ok = TentarTransferDireta("BlindTransfer", sipDestino, ramalDestino) ||
+                     TentarTransferDireta("Transfer", sipDestino, ramalDestino);
+            }
+
+            StatusChanged?.Invoke(ok ? $"Transferência cega enviada para {ramalDestino}." : "Falha ao enviar transferência cega.");
+            return ok;
+        }
+
+        public bool TransferenciaAssistida(string ramalDestino)
+        {
+            if (_userAgent == null || _config == null || string.IsNullOrWhiteSpace(ramalDestino) || !IsInCall)
+                return false;
+
+            ramalDestino = DialPlanService.NormalizarNumero(ramalDestino);
+            StatusChanged?.Invoke($"Transferência assistida para {ramalDestino}...");
+
+            // Issabel/Asterisk: Transferência assistida durante chamada = *2 + ramal.
+            bool ok = EnviarDtmfEmPassos("*2", ramalDestino);
+            if (!ok)
+            {
+                string sipDestino = $"sip:{ramalDestino}@{_config.ServerIp}:{_config.Port}";
+                ok = TentarTransferDireta("AttendedTransfer", sipDestino, ramalDestino) ||
+                     TentarTransferDireta("Transfer", sipDestino, ramalDestino);
+            }
+
+            StatusChanged?.Invoke(ok ? $"Transferência assistida enviada para {ramalDestino}." : "Falha ao enviar transferência assistida.");
+            return ok;
+        }
+
+        private bool TentarTransferDireta(string metodoNome, string sipDestino, string ramalDestino)
+        {
+            if (_userAgent == null) return false;
+
+            foreach (var metodo in _userAgent.GetType().GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
+            {
+                if (!string.Equals(metodo.Name, metodoNome, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var ps = metodo.GetParameters();
+
+                try
+                {
+                    if (ps.Length == 1 && ps[0].ParameterType == typeof(string))
+                    {
+                        var ret = metodo.Invoke(_userAgent, new object[] { sipDestino });
+                        return ResolverRetornoBool(ret);
+                    }
+
+                    if (ps.Length == 1 && ps[0].ParameterType.Name.Contains("SIPURI"))
+                    {
+                        var sipUri = SIPURI.ParseSIPURIRelaxed(sipDestino);
+                        var ret = metodo.Invoke(_userAgent, new object[] { sipUri });
+                        return ResolverRetornoBool(ret);
+                    }
+
+                    if (ps.Length == 2 &&
+                        ps[0].ParameterType == typeof(string) &&
+                        ps[1].ParameterType == typeof(bool))
+                    {
+                        var ret = metodo.Invoke(_userAgent, new object[] { sipDestino, true });
+                        return ResolverRetornoBool(ret);
+                    }
+
+                    if (ps.Length == 2 &&
+                        ps[0].ParameterType.Name.Contains("SIPURI") &&
+                        ps[1].ParameterType == typeof(bool))
+                    {
+                        var sipUri = SIPURI.ParseSIPURIRelaxed(sipDestino);
+                        var ret = metodo.Invoke(_userAgent, new object[] { sipUri, true });
+                        return ResolverRetornoBool(ret);
+                    }
+
+                    if (ps.Length == 2 &&
+                        ps[0].ParameterType == typeof(string) &&
+                        ps[1].ParameterType == typeof(string))
+                    {
+                        var ret = metodo.Invoke(_userAgent, new object[] { sipDestino, ramalDestino });
+                        return ResolverRetornoBool(ret);
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            return false;
+        }
+
+        private bool ResolverRetornoBool(object? ret)
+        {
+            if (ret == null) return true;
+            if (ret is bool b) return b;
+            if (ret is Task<bool> tb) return tb.GetAwaiter().GetResult();
+            if (ret is Task t)
+            {
+                t.GetAwaiter().GetResult();
+                return true;
+            }
+
+            return true;
+        }
+
+        public bool EnviarSequenciaDtmf(string sequencia)
+        {
+            if (!IsInCall || string.IsNullOrWhiteSpace(sequencia))
+                return false;
+
+            foreach (char c in sequencia)
+            {
+                if (!TentarEnviarDtmf(c))
+                    return false;
+
+                Thread.Sleep(220);
+            }
+
+            return true;
+        }
+
+        private bool EnviarDtmfEmPassos(params string[] passos)
+        {
+            foreach (var passo in passos)
+            {
+                if (!EnviarSequenciaDtmf(passo))
+                    return false;
+
+                Thread.Sleep(900);
+            }
+
+            return true;
+        }
+
+        private static byte ObterCodigoDtmf(char digito)
+        {
+            return digito switch
+            {
+                '0' => 0,
+                '1' => 1,
+                '2' => 2,
+                '3' => 3,
+                '4' => 4,
+                '5' => 5,
+                '6' => 6,
+                '7' => 7,
+                '8' => 8,
+                '9' => 9,
+                '*' => 10,
+                '#' => 11,
+                'A' or 'a' => 12,
+                'B' or 'b' => 13,
+                'C' or 'c' => 14,
+                'D' or 'd' => 15,
+                _ => 255
+            };
+        }
+
+        private bool TentarEnviarDtmf(char digito)
+        {
+            byte codigo = ObterCodigoDtmf(digito);
+            if (codigo == 255) return false;
+
+            // Importante: para RTP/RFC2833, * e # NÃO podem ser enviados como ASCII.
+            // Os códigos corretos são *=10 e #=11. Essa correção é essencial para
+            // os códigos do Issabel/Asterisk (*2, ##, *1) funcionarem durante chamada.
+            return TentarNoObjeto(_userAgent, digito, codigo)
+                || TentarNoObjeto(_mediaSession, digito, codigo)
+                || TentarEmPropriedadesConhecidas(_mediaSession, digito, codigo);
+        }
+
+        private bool TentarEmPropriedadesConhecidas(object? origem, char digito, byte codigo)
+        {
+            if (origem == null) return false;
+
+            var nomes = new[] { "AudioExtrasSource", "AudioSource", "AudioSink", "Media", "RtpSession", "RTPSession", "AudioSession" };
+            foreach (var nome in nomes)
+            {
+                try
+                {
+                    var prop = origem.GetType().GetProperty(nome, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (prop != null)
+                    {
+                        var valor = prop.GetValue(origem);
+                        if (TentarNoObjeto(valor, digito, codigo)) return true;
+                    }
+
+                    var field = origem.GetType().GetField(nome, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (field != null)
+                    {
+                        var valor = field.GetValue(origem);
+                        if (TentarNoObjeto(valor, digito, codigo)) return true;
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            return false;
+        }
+
+        private bool TentarNoObjeto(object? alvo, char digito, byte codigo)
+        {
+            if (alvo == null) return false;
+
+            var candidatos = new[]
+            {
+                "SendDtmf",
+                "SendDTMF",
+                "SendDtmfEvent",
+                "SendDTMFEvent",
+                "SendTone",
+                "SendRtpEvent",
+                "SendDtmfTone",
+                "SendDtmfAsync",
+                "SendDtmfEventAsync"
+            };
+
+            foreach (var metodo in alvo.GetType().GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
+            {
+                if (Array.IndexOf(candidatos, metodo.Name) < 0) continue;
+                var ps = metodo.GetParameters();
+
+                try
+                {
+                    if (ps.Length == 1 && ps[0].ParameterType == typeof(char))
+                    {
+                        return ResolverRetornoBool(metodo.Invoke(alvo, new object[] { digito }));
+                    }
+
+                    if (ps.Length == 1 && ps[0].ParameterType == typeof(string))
+                    {
+                        return ResolverRetornoBool(metodo.Invoke(alvo, new object[] { digito.ToString() }));
+                    }
+
+                    if (ps.Length == 1 && ps[0].ParameterType == typeof(int))
+                    {
+                        return ResolverRetornoBool(metodo.Invoke(alvo, new object[] { (int)codigo }));
+                    }
+
+                    if (ps.Length == 1 && ps[0].ParameterType == typeof(byte))
+                    {
+                        return ResolverRetornoBool(metodo.Invoke(alvo, new object[] { codigo }));
+                    }
+
+                    if (ps.Length == 2 && ps[0].ParameterType == typeof(char) && ps[1].ParameterType == typeof(int))
+                    {
+                        return ResolverRetornoBool(metodo.Invoke(alvo, new object[] { digito, 250 }));
+                    }
+
+                    if (ps.Length == 2 && ps[0].ParameterType == typeof(string) && ps[1].ParameterType == typeof(int))
+                    {
+                        return ResolverRetornoBool(metodo.Invoke(alvo, new object[] { digito.ToString(), 250 }));
+                    }
+
+                    if (ps.Length == 2 && ps[0].ParameterType == typeof(byte) && ps[1].ParameterType == typeof(int))
+                    {
+                        return ResolverRetornoBool(metodo.Invoke(alvo, new object[] { codigo, 250 }));
+                    }
+
+                    if (ps.Length == 2 && ps[0].ParameterType == typeof(int) && ps[1].ParameterType == typeof(int))
+                    {
+                        return ResolverRetornoBool(metodo.Invoke(alvo, new object[] { (int)codigo, 250 }));
+                    }
+
+                    if (ps.Length == 3 && ps[0].ParameterType == typeof(byte) && ps[1].ParameterType == typeof(int))
+                    {
+                        object terceiro = ps[2].HasDefaultValue ? ps[2].DefaultValue! : false;
+                        return ResolverRetornoBool(metodo.Invoke(alvo, new object[] { codigo, 250, terceiro }));
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            return false;
+        }
+
+        public bool TentarSegurarAlternar()
+        {
+            if (!IsInCall)
+                return false;
+
+            bool proximoEstado = !_emEspera;
+            bool ok = false;
+            try { ok = TentarSegurar(proximoEstado); } catch { ok = false; }
+
+            // Algumas versões do SIPSorcery/Asterisk não retornam confirmação confiável do hold,
+            // embora a sinalização/DTMF seja enviada. Para a interface não ficar presa no ícone errado,
+            // atualizamos o estado local sempre que existe chamada ativa.
+            _emEspera = proximoEstado;
+            StatusChanged?.Invoke(_emEspera ? "Chamada em espera." : "Chamada retomada.");
+            return ok || IsInCall;
+        }
+
+        private bool TentarSegurar(bool segurar)
+        {
+            if (segurar)
+            {
+                return TentarMetodo(_userAgent, "PutOnHold", true)
+                    || TentarMetodo(_userAgent, "Hold", true)
+                    || TentarMetodo(_mediaSession, "PutOnHold", true)
+                    || TentarMetodo(_mediaSession, "Hold", true)
+                    || EnviarSequenciaDtmf("*70");
+            }
+            else
+            {
+                return TentarMetodo(_userAgent, "TakeOffHold", false)
+                    || TentarMetodo(_userAgent, "Unhold", false)
+                    || TentarMetodo(_userAgent, "Resume", false)
+                    || TentarMetodo(_mediaSession, "TakeOffHold", false)
+                    || TentarMetodo(_mediaSession, "Unhold", false)
+                    || TentarMetodo(_mediaSession, "Resume", false)
+                    || EnviarSequenciaDtmf("*71");
+            }
+        }
+
+        private bool TentarMetodo(object? alvo, string nome, bool parametroBool = true)
+        {
+            if (alvo == null) return false;
+
+            foreach (var metodo in alvo.GetType().GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
+            {
+                if (!string.Equals(metodo.Name, nome, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                try
+                {
+                    var ps = metodo.GetParameters();
+                    if (ps.Length == 0)
+                    {
+                        return ResolverRetornoBool(metodo.Invoke(alvo, null));
+                    }
+
+                    if (ps.Length == 1 && ps[0].ParameterType == typeof(bool))
+                    {
+                        return ResolverRetornoBool(metodo.Invoke(alvo, new object[] { parametroBool }));
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            return false;
+        }
+
+        private bool TentarMetodoSemParametro(object? alvo, params string[] nomes)
+        {
+            if (alvo == null) return false;
+
+            foreach (var nome in nomes)
+            {
+                foreach (var metodo in alvo.GetType().GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
+                {
+                    if (!string.Equals(metodo.Name, nome, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    try
+                    {
+                        if (metodo.GetParameters().Length == 0)
+                            return ResolverRetornoBool(metodo.Invoke(alvo, null));
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private void EncerrarSinalizacaoAtiva()
+        {
+            try
+            {
+                // Durante chamada sainte ainda não atendida, alguns métodos Hangup não enviam CANCEL.
+                // Tentamos os nomes usados por versões diferentes do SIPSorcery e, por fim, Hangup.
+                TentarMetodoSemParametro(_userAgent, "Cancel", "CancelCall", "CancelInvite", "Hangup", "HangupCall", "Reject");
+                try { _userAgent?.Hangup(); } catch { }
+            }
+            catch
+            {
+            }
+        }
+
+        public bool VoltarTransferenciaAssistida()
+        {
+            bool ok = EnviarSequenciaDtmf("*") || TentarSegurar(false);
+            StatusChanged?.Invoke(ok ? "Voltando para a chamada original..." : "Não foi possível voltar automaticamente. Tente * no teclado DTMF.");
+            return ok;
+        }
+
+        public bool ConcluirTransferenciaAssistida()
+        {
+            bool ok = EnviarSequenciaDtmf("*2");
+            if (!ok)
+            {
+                try { _userAgent?.Hangup(); ok = true; } catch { ok = false; }
+            }
+            StatusChanged?.Invoke(ok ? "Transferência assistida concluída." : "Não foi possível concluir automaticamente.");
+            return ok;
+        }
+
+        public async Task<bool> AdicionarParticipanteConferenciaAsync(string destino)
+        {
+            var sala = _config?.SalaConferenciaIssabel;
+            if (string.IsNullOrWhiteSpace(sala)) sala = "800";
+            return await AdicionarParticipanteConferenciaIssabelAsync(destino, sala);
+        }
+
+        public async Task<bool> AdicionarParticipanteConferenciaIssabelAsync(string destino, string salaConferencia)
+        {
+            LastConferenceError = string.Empty;
+            if (_config == null || string.IsNullOrWhiteSpace(destino) || string.IsNullOrWhiteSpace(salaConferencia) || !IsInCall)
+            {
+                LastConferenceError = "Sem configuração, destino, sala ou chamada ativa.";
+                return false;
+            }
+
+            destino = DialPlanService.NormalizarNumero(destino);
+            salaConferencia = DialPlanService.NormalizarNumero(salaConferencia);
+            if (string.IsNullOrWhiteSpace(destino) || string.IsNullOrWhiteSpace(salaConferencia))
+            {
+                LastConferenceError = "Destino ou sala inválidos depois da normalização.";
+                return false;
+            }
+
+            StatusChanged?.Invoke($"Criando conferência no Issabel sala {salaConferencia}...");
+            RegistrarSinalSip($"CONF AMI INICIO sala={salaConferencia} participante={destino}");
+
+            try
+            {
+                var ok = await ExecutarConferenciaViaAmiAsync(destino, salaConferencia);
+                StatusChanged?.Invoke(ok
+                    ? $"Conferência enviada para sala {salaConferencia}."
+                    : "Não foi possível montar conferência via Issabel/AMI.");
+                RegistrarSinalSip($"CONF AMI FIM ok={ok} sala={salaConferencia} participante={destino}");
+                return ok;
+            }
+            catch (Exception ex)
+            {
+                RegistrarSinalSip($"CONF AMI ERRO sala={salaConferencia} participante={destino} erro={ex}");
+                StatusChanged?.Invoke($"Erro na conferência AMI: {ex.Message}");
+                return false;
+            }
+        }
+
+        private sealed class AmiSession
+        {
+            private readonly System.Net.Sockets.NetworkStream _stream;
+            private readonly StreamWriter _writer;
+            private readonly StringBuilder _buffer = new StringBuilder();
+            private readonly byte[] _bytes = new byte[8192];
+
+            public AmiSession(System.Net.Sockets.NetworkStream stream, StreamWriter writer)
+            {
+                _stream = stream;
+                _writer = writer;
+            }
+
+            public async Task SendAsync(string action, Dictionary<string, string> campos)
+            {
+                await _writer.WriteLineAsync($"Action: {action}");
+                foreach (var kv in campos)
+                    await _writer.WriteLineAsync($"{kv.Key}: {kv.Value}");
+                await _writer.WriteLineAsync();
+                await _writer.FlushAsync();
+            }
+
+            // ReadBannerAsync: lê apenas a primeira linha do banner do Asterisk.
+            // O banner (ex: "Asterisk Call Manager/7.0.3") termina com \r\n simples, nunca com
+            // \r\n\r\n. ReadBlockAsync esperaria o timeout completo (5s) sem encontrar \r\n\r\n.
+            // Este método retorna assim que a primeira linha completa chega (~50ms).
+            public async Task<string> ReadBannerAsync(int timeoutMs)
+            {
+                var limite = DateTime.UtcNow.AddMilliseconds(timeoutMs <= 0 ? 3000 : timeoutMs);
+
+                while (DateTime.UtcNow < limite)
+                {
+                    try
+                    {
+                        if (_stream.DataAvailable)
+                        {
+                            var lidos = await _stream.ReadAsync(_bytes, 0, _bytes.Length);
+                            if (lidos > 0)
+                                _buffer.Append(Encoding.ASCII.GetString(_bytes, 0, lidos));
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        return "AMI_READ_EXCEPTION: " + ex.Message;
+                    }
+
+                    var atual = _buffer.ToString();
+                    var idx = atual.IndexOf('\n');
+                    if (idx >= 0)
+                    {
+                        var linha = atual.Substring(0, idx).TrimEnd('\r');
+                        _buffer.Remove(0, idx + 1);
+                        return linha;
+                    }
+
+                    await Task.Delay(25);
+                }
+
+                var resto = _buffer.ToString().Trim();
+                _buffer.Clear();
+                return resto;
+            }
+
+            public async Task<string> ReadBlockAsync(int timeoutMs)
+            {
+                var limite = DateTime.UtcNow.AddMilliseconds(timeoutMs <= 0 ? 5000 : timeoutMs);
+
+                while (DateTime.UtcNow < limite)
+                {
+                    var atual = _buffer.ToString();
+                    var idx = atual.IndexOf("\r\n\r\n", StringComparison.Ordinal);
+                    var tamanhoSeparador = 4;
+                    if (idx < 0)
+                    {
+                        idx = atual.IndexOf("\n\n", StringComparison.Ordinal);
+                        tamanhoSeparador = 2;
+                    }
+
+                    if (idx >= 0)
+                    {
+                        var bloco = atual.Substring(0, idx);
+                        _buffer.Remove(0, idx + tamanhoSeparador);
+                        if (!string.IsNullOrWhiteSpace(bloco))
+                            return bloco;
+                        continue;
+                    }
+
+                    try
+                    {
+                        if (_stream.DataAvailable)
+                        {
+                            var lidos = await _stream.ReadAsync(_bytes, 0, _bytes.Length);
+                            if (lidos <= 0) break;
+                            _buffer.Append(Encoding.ASCII.GetString(_bytes, 0, lidos));
+                            continue;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        return "AMI_READ_EXCEPTION: " + ex.Message;
+                    }
+
+                    await Task.Delay(25);
+                }
+
+                if (_buffer.Length > 0)
+                {
+                    var texto = _buffer.ToString();
+                    _buffer.Clear();
+                    return texto;
+                }
+
+                return string.Empty;
+            }
+        }
+
+        private sealed class AmiChannelInfo
+        {
+            public string Channel { get; set; } = string.Empty;
+            public string Uniqueid { get; set; } = string.Empty;
+            public string Linkedid { get; set; } = string.Empty;
+            public string CallerIDNum { get; set; } = string.Empty;
+            public string ConnectedLineNum { get; set; } = string.Empty;
+            public string Exten { get; set; } = string.Empty;
+            public string Context { get; set; } = string.Empty;
+        }
+
+        public async Task<bool> MoverChamadaAtualParaConferenciaIssabelAsync(string salaConferencia)
+        {
+            LastConferenceError = string.Empty;
+            if (_config == null || string.IsNullOrWhiteSpace(salaConferencia) || !IsInCall)
+            {
+                LastConferenceError = "Sem configuração, sala ou chamada ativa para mover.";
+                return false;
+            }
+
+            salaConferencia = DialPlanService.NormalizarNumero(salaConferencia);
+            try
+            {
+                var ok = await ExecutarRedirectChamadaAtualParaSalaAsync(salaConferencia);
+                RegistrarSinalSip($"CONF AMI JOIN_CALL sala={salaConferencia} ok={ok} erro={LastConferenceError}");
+                return ok;
+            }
+            catch (Exception ex)
+            {
+                LastConferenceError = ex.Message;
+                RegistrarSinalSip($"CONF AMI JOIN_CALL ERRO sala={salaConferencia} erro={ex}");
+                return false;
+            }
+        }
+
+        public async Task<bool> DesligarParticipanteConferenciaAsync(string numero)
+        {
+            LastConferenceError = string.Empty;
+            if (_config == null || string.IsNullOrWhiteSpace(numero))
+            {
+                LastConferenceError = "Número inválido para remover.";
+                return false;
+            }
+
+            try
+            {
+                var ami = await AbrirAmiAsync();
+                using (ami.Client)
+                using (ami.Stream)
+                using (ami.Writer)
+                {
+                    var canais = await ObterCanaisAmiAsync(ami.Session);
+                    var n = DialPlanService.NormalizarNumero(numero);
+                    var ultimos = n.Length > 8 ? n.Substring(n.Length - 8) : n;
+                    var ramal = string.IsNullOrWhiteSpace(_config.Ramal) ? _config.Login : _config.Ramal;
+                    var candidatos = canais
+                        .Where(c => !CanalPertenceAoRamal(c, ramal, _config.Login))
+                        .Where(c => (c.Channel ?? "").Contains(n, StringComparison.OrdinalIgnoreCase)
+                                 || (c.CallerIDNum ?? "").Contains(n, StringComparison.OrdinalIgnoreCase)
+                                 || (c.ConnectedLineNum ?? "").Contains(n, StringComparison.OrdinalIgnoreCase)
+                                 || (c.Exten ?? "").Contains(n, StringComparison.OrdinalIgnoreCase)
+                                 || (!string.IsNullOrWhiteSpace(ultimos) && ((c.Channel ?? "").Contains(ultimos, StringComparison.OrdinalIgnoreCase)
+                                     || (c.CallerIDNum ?? "").Contains(ultimos, StringComparison.OrdinalIgnoreCase)
+                                     || (c.ConnectedLineNum ?? "").Contains(ultimos, StringComparison.OrdinalIgnoreCase)
+                                     || (c.Exten ?? "").Contains(ultimos, StringComparison.OrdinalIgnoreCase))))
+                        .GroupBy(c => c.Channel)
+                        .Select(g => g.First())
+                        .ToList();
+
+                    if (candidatos.Count == 0)
+                    {
+                        LastConferenceError = "Nenhum canal do participante localizado para desligar.";
+                        RegistrarSinalSip($"CONF AMI HANGUP SEM_CANAL numero={numero} canais={canais.Count}");
+                        return false;
+                    }
+
+                    foreach (var c in candidatos)
+                    {
+                        await ami.Session.SendAsync("Hangup", new Dictionary<string, string> { ["Channel"] = c.Channel });
+                        var resp = await ami.Session.ReadBlockAsync(3000);
+                        RegistrarSinalSip($"CONF AMI HANGUP canal={c.Channel} numero={numero} resp={ResumoAmi(resp)}");
+                    }
+
+                    await ami.Session.SendAsync("Logoff", new Dictionary<string, string>());
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                LastConferenceError = ex.Message;
+                RegistrarSinalSip($"CONF AMI HANGUP ERRO numero={numero} erro={ex}");
+                return false;
+            }
+        }
+
+        public async Task<bool> MutarParticipanteConferenciaAsync(string numero, bool mute, string salaConferencia = "800")
+        {
+            LastConferenceError = string.Empty;
+            if (_config == null || string.IsNullOrWhiteSpace(numero))
+            {
+                LastConferenceError = "Número inválido para mute.";
+                return false;
+            }
+
+            try
+            {
+                using var ami = await AbrirAmiAsync();
+                var canais = await ObterCanaisAmiAsync(ami.Session);
+                var n = DialPlanService.NormalizarNumero(numero);
+                var ultimos = n.Length > 8 ? n.Substring(n.Length - 8) : n;
+                var ramal = string.IsNullOrWhiteSpace(_config.Ramal) ? _config.Login : _config.Ramal;
+                var candidatos = canais
+                    .Where(c => !CanalPertenceAoRamal(c, ramal, _config.Login))
+                    .Where(c => (c.Channel ?? "").Contains(n, StringComparison.OrdinalIgnoreCase)
+                             || (c.CallerIDNum ?? "").Contains(n, StringComparison.OrdinalIgnoreCase)
+                             || (c.ConnectedLineNum ?? "").Contains(n, StringComparison.OrdinalIgnoreCase)
+                             || (c.Exten ?? "").Contains(n, StringComparison.OrdinalIgnoreCase)
+                             || (!string.IsNullOrWhiteSpace(ultimos) && ((c.Channel ?? "").Contains(ultimos, StringComparison.OrdinalIgnoreCase)
+                                 || (c.CallerIDNum ?? "").Contains(ultimos, StringComparison.OrdinalIgnoreCase)
+                                 || (c.ConnectedLineNum ?? "").Contains(ultimos, StringComparison.OrdinalIgnoreCase)
+                                 || (c.Exten ?? "").Contains(ultimos, StringComparison.OrdinalIgnoreCase))))
+                    .GroupBy(c => c.Channel)
+                    .Select(g => g.First())
+                    .ToList();
+
+                if (candidatos.Count == 0)
+                {
+                    LastConferenceError = $"Nenhum canal do participante {numero} localizado para mute.";
+                    RegistrarSinalSip($"CONF AMI MUTE SEM_CANAL numero={numero} mute={mute}");
+                    await ami.Session.SendAsync("Logoff", new Dictionary<string, string>());
+                    return false;
+                }
+
+                var acao = mute ? "ConfbridgeMute" : "ConfbridgeUnmute";
+                foreach (var c in candidatos)
+                {
+                    await ami.Session.SendAsync(acao, new Dictionary<string, string>
+                    {
+                        ["Conference"] = salaConferencia,
+                        ["Channel"] = c.Channel
+                    });
+                    var resp = await ami.Session.ReadBlockAsync(3000);
+                    RegistrarSinalSip($"CONF AMI {(mute ? "MUTE_REQUEST" : "UNMUTE_REQUEST")} canal={c.Channel} numero={numero} sala={salaConferencia} resp={ResumoAmi(resp)}");
+                    var ok = resp.Contains("Success", StringComparison.OrdinalIgnoreCase);
+                    RegistrarSinalSip($"CONF AMI {(mute ? "MUTE_OK" : "UNMUTE_OK")}={ok} canal={c.Channel}");
+                }
+
+                await ami.Session.SendAsync("Logoff", new Dictionary<string, string>());
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LastConferenceError = ex.Message;
+                RegistrarSinalSip($"CONF AMI MUTE ERRO numero={numero} mute={mute} erro={ex}");
+                return false;
+            }
+        }
+
+        private sealed class AmiConnection : IDisposable
+        {
+            public System.Net.Sockets.TcpClient Client { get; init; } = null!;
+            public System.Net.Sockets.NetworkStream Stream { get; init; } = null!;
+            public StreamWriter Writer { get; init; } = null!;
+            public AmiSession Session { get; init; } = null!;
+            public void Dispose()
+            {
+                try { Writer.Dispose(); } catch { }
+                try { Stream.Dispose(); } catch { }
+                try { Client.Dispose(); } catch { }
+            }
+        }
+
+        private async Task<AmiConnection> AbrirAmiAsync()
+        {
+            if (_config == null) throw new InvalidOperationException("Configuração SIP/AMI não carregada.");
+            _config.AplicarPadroes();
+            var host = string.IsNullOrWhiteSpace(_config.AmiHost) ? _config.ServerIp : _config.AmiHost.Trim();
+            var porta = _config.AmiPorta <= 0 ? 5038 : _config.AmiPorta;
+            if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(_config.AmiUsuario) || string.IsNullOrWhiteSpace(_config.AmiSenha))
+                throw new InvalidOperationException($"Configuração AMI incompleta. Host={host}, Porta={porta}, Usuario={_config.AmiUsuario}");
+
+            RegistrarSinalSip($"CONF AMI CONECTANDO host={host} porta={porta} usuario={_config.AmiUsuario}");
+            var client = new System.Net.Sockets.TcpClient();
+            await client.ConnectAsync(host, porta);
+            var stream = client.GetStream();
+            var writer = new StreamWriter(stream, Encoding.ASCII, 4096, leaveOpen: true) { NewLine = "\r\n", AutoFlush = true };
+            var session = new AmiSession(stream, writer);
+
+            var banner = await session.ReadBannerAsync(3000);
+            RegistrarSinalSip("CONF AMI BANNER " + ResumoAmi(banner));
+            await session.SendAsync("Login", new Dictionary<string, string>
+            {
+                ["Username"] = _config.AmiUsuario,
+                ["Secret"] = _config.AmiSenha,
+                ["Events"] = "off"
+            });
+
+            var login = await session.ReadBlockAsync(5000);
+            if (!login.Contains("Success", StringComparison.OrdinalIgnoreCase))
+            {
+                try { writer.Dispose(); stream.Dispose(); client.Dispose(); } catch { }
+                LastConferenceError = "Falha no login AMI: " + ResumoAmi(login);
+                RegistrarSinalSip($"CONF AMI LOGIN FALHA resposta={login.Replace("\r", " ").Replace("\n", " ")}");
+                throw new InvalidOperationException(LastConferenceError);
+            }
+
+            return new AmiConnection { Client = client, Stream = stream, Writer = writer, Session = session };
+        }
+
+        private async Task<bool> ExecutarConferenciaViaAmiAsync(string participante, string salaConferencia)
+        {
+            if (_config == null) return false;
+
+            // MODO SEGURO:
+            // Participante é originado diretamente para a sala ConfBridge.
+            // A chamada atual do host só entra na sala quando o usuário clicar em "Unir chamada atual à sala".
+            // Isso evita que falha na rota do participante derrube a chamada do host.
+            try
+            {
+                var numSemPrefixo = DialPlanService.RemoverPrefixoDeRota(participante);
+                var prefixo = participante.Length > numSemPrefixo.Length ? participante[0].ToString() : "(sem prefixo)";
+                var troncoNome = prefixo switch
+                {
+                    "1" => "Operadora",
+                    "2" => "WhatsApp TIM",
+                    "3" => "WhatsApp Vivo",
+                    _ => "Ramal interno"
+                };
+
+                using var ami = await AbrirAmiAsync();
+                var ramal = string.IsNullOrWhiteSpace(_config.Ramal) ? _config.Login : _config.Ramal;
+                var canalOriginate = $"Local/{participante}@from-internal/n";
+
+                RegistrarSinalSip($"CONF AMI ORIGINATE | participante={participante} | numSemPrefixo={numSemPrefixo} | prefixo={prefixo} | tronco={troncoNome} | canal={canalOriginate} | sala={salaConferencia}");
+
+                await ami.Session.SendAsync("Originate", new Dictionary<string, string>
+                {
+                    ["Channel"] = canalOriginate,
+                    ["Application"] = "ConfBridge",
+                    ["Data"] = salaConferencia,
+                    ["CallerID"] = $"WavenConf <{ramal}>",
+                    ["Timeout"] = "30000",
+                    ["Async"] = "true"
+                });
+
+                var origem = await ami.Session.ReadBlockAsync(5000);
+                var okOrigem = origem.Contains("Success", StringComparison.OrdinalIgnoreCase) ||
+                               origem.Contains("Originate successfully queued", StringComparison.OrdinalIgnoreCase);
+
+                RegistrarSinalSip($"CONF AMI ORIGINATE_RESP | ok={okOrigem} | tronco={troncoNome} | canal={canalOriginate} | sala={salaConferencia} | resp={ResumoAmi(origem)}");
+
+                if (okOrigem)
+                {
+                    RegistrarSinalSip($"CONF AMI ORIGINATE_OK | participante={participante} | sala={salaConferencia} | aguardando_atendimento=true | audio_controlado_pelo_Asterisk_ConfBridge");
+                }
+                else
+                {
+                    LastConferenceError = "Originate AMI recusado: " + ResumoAmi(origem);
+                    RegistrarSinalSip($"CONF AMI ORIGINATE_FALHOU | tronco={troncoNome} | canal={canalOriginate} | motivo={LastConferenceError}");
+                }
+
+                await ami.Session.SendAsync("Logoff", new Dictionary<string, string>());
+                return okOrigem;
+            }
+            catch (Exception ex)
+            {
+                LastConferenceError = ex.Message;
+                RegistrarSinalSip($"CONF AMI ORIGINATE_ERRO | participante={participante} | sala={salaConferencia} | erro={ex.Message}");
+                return false;
+            }
+        }
+
+        private async Task<bool> ExecutarRedirectChamadaAtualParaSalaAsync(string salaConferencia)
+        {
+            if (_config == null) return false;
+            using var ami = await AbrirAmiAsync();
+
+            var canais = await ObterCanaisAmiAsync(ami.Session);
+            var ramal = string.IsNullOrWhiteSpace(_config.Ramal) ? _config.Login : _config.Ramal;
+            var loginRamal = _config.Login;
+
+            RegistrarSinalSip($"CONF AMI JOIN_INIT | sala={salaConferencia} | ramal={ramal} | login={loginRamal} | canais_totais={canais.Count} | momento={DateTime.Now:HH:mm:ss.fff}");
+            foreach (var c in canais)
+                RegistrarSinalSip($"CONF AMI JOIN_CANAL | channel={c.Channel} | callerIdNum={c.CallerIDNum} | connectedLine={c.ConnectedLineNum} | linkedid={c.Linkedid} | exten={c.Exten}");
+
+            // Prefer SIP/PJSIP channels over Local/* — Originate sets CallerID to the ramal, so
+            // Local channels can falsely match CanalPertenceAoRamal before the real SIP channel.
+            var canalBase = canais.FirstOrDefault(c => CanalPertenceAoRamal(c, ramal, loginRamal) &&
+                                                        !c.Channel.StartsWith("Local/", StringComparison.OrdinalIgnoreCase))
+                            ?? canais.FirstOrDefault(c => CanalPertenceAoRamal(c, ramal, loginRamal));
+            if (canalBase == null)
+            {
+                LastConferenceError = $"AMI não encontrou o canal ativo do ramal {ramal}. Canais lidos: {canais.Count}. Verifique se o ramal no SipConfig corresponde ao CallerIDNum/ConnectedLineNum/Exten/Channel dos canais acima.";
+                RegistrarSinalSip($"CONF AMI JOIN_SEM_CANAL | ramal={ramal} | login={loginRamal} | canais={canais.Count} | ERRO={LastConferenceError}");
+                return false;
+            }
+
+            RegistrarSinalSip($"CONF AMI JOIN_CANAL_BASE | channel={canalBase.Channel} | callerIdNum={canalBase.CallerIDNum} | linkedid={canalBase.Linkedid}");
+
+            var linkedid = string.IsNullOrWhiteSpace(canalBase.Linkedid) ? canalBase.Uniqueid : canalBase.Linkedid;
+            var canaisDaChamada = canais
+                .Where(c => string.Equals(c.Linkedid, linkedid, StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(c.Uniqueid, linkedid, StringComparison.OrdinalIgnoreCase))
+                .Where(c => !string.IsNullOrWhiteSpace(c.Channel))
+                .GroupBy(c => c.Channel)
+                .Select(g => g.First())
+                .Take(2)
+                .ToList();
+
+            RegistrarSinalSip($"CONF AMI JOIN_CANAIS_CHAMADA | linkedid={linkedid} | qtd={canaisDaChamada.Count} | canais={string.Join("|", canaisDaChamada.Select(c => c.Channel))}");
+
+            if (canaisDaChamada.Count == 0)
+            {
+                LastConferenceError = "Nenhum canal ativo encontrado para unir à conferência. O linkedid não corresponde a nenhum canal ativo.";
+                RegistrarSinalSip($"CONF AMI JOIN_VAZIO | linkedid={linkedid} | ERRO={LastConferenceError}");
+                return false;
+            }
+
+            var contexto = "from-internal";
+            RegistrarSinalSip($"CONF AMI REDIRECT_INICIO | contexto={contexto} | exten={salaConferencia} | qtd_canais={canaisDaChamada.Count} | momento={DateTime.Now:HH:mm:ss.fff}");
+
+            if (canaisDaChamada.Count >= 2)
+            {
+                await ami.Session.SendAsync("Redirect", new Dictionary<string, string>
+                {
+                    ["Channel"] = canaisDaChamada[0].Channel,
+                    ["Context"] = contexto,
+                    ["Exten"] = salaConferencia,
+                    ["Priority"] = "1",
+                    ["ExtraChannel"] = canaisDaChamada[1].Channel,
+                    ["ExtraContext"] = contexto,
+                    ["ExtraExten"] = salaConferencia,
+                    ["ExtraPriority"] = "1"
+                });
+                var resp = await ami.Session.ReadBlockAsync(7000);
+                var ok = resp.Contains("Success", StringComparison.OrdinalIgnoreCase);
+                RegistrarSinalSip($"CONF AMI REDIRECT_ATOMICO | ok={ok} | canal1={canaisDaChamada[0].Channel} | canal2={canaisDaChamada[1].Channel} | sala={salaConferencia} | resp={ResumoAmi(resp)} | momento={DateTime.Now:HH:mm:ss.fff}");
+                if (!ok)
+                {
+                    LastConferenceError = "Redirect atômico recusado pelo AMI: " + ResumoAmi(resp) + ". Verifique se os canais ainda estão ativos e se a extensão " + salaConferencia + " existe no contexto " + contexto + ".";
+                    RegistrarSinalSip($"CONF AMI REDIRECT_FALHOU | ERRO={LastConferenceError}");
+                    return false;
+                }
+                RegistrarSinalSip($"CONF AMI REDIRECT_OK | ambos_canais_na_sala={salaConferencia} | audio_RTP_bidirecional_via_ConfBridge");
+            }
+            else
+            {
+                await ami.Session.SendAsync("Redirect", new Dictionary<string, string>
+                {
+                    ["Channel"] = canaisDaChamada[0].Channel,
+                    ["Context"] = contexto,
+                    ["Exten"] = salaConferencia,
+                    ["Priority"] = "1"
+                });
+                var resp = await ami.Session.ReadBlockAsync(7000);
+                var ok = resp.Contains("Success", StringComparison.OrdinalIgnoreCase);
+                RegistrarSinalSip($"CONF AMI REDIRECT_UNICO | ok={ok} | canal={canaisDaChamada[0].Channel} | sala={salaConferencia} | resp={ResumoAmi(resp)} | momento={DateTime.Now:HH:mm:ss.fff}");
+                if (!ok)
+                {
+                    LastConferenceError = "Redirect do canal atual recusado pelo AMI: " + ResumoAmi(resp);
+                    RegistrarSinalSip($"CONF AMI REDIRECT_FALHOU | ERRO={LastConferenceError}");
+                    return false;
+                }
+                RegistrarSinalSip($"CONF AMI REDIRECT_OK | canal_na_sala={salaConferencia}");
+            }
+
+            await ami.Session.SendAsync("Logoff", new Dictionary<string, string>());
+            return true;
+        }
+
+        private static bool CanalPertenceAoRamal(AmiChannelInfo c, string ramal, string login)
+        {
+            bool Match(string? valor) => !string.IsNullOrWhiteSpace(valor) &&
+                (string.Equals(valor.Trim(), ramal, StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(valor.Trim(), login, StringComparison.OrdinalIgnoreCase));
+
+            return Match(c.CallerIDNum) || Match(c.ConnectedLineNum) || Match(c.Exten) ||
+                   (!string.IsNullOrWhiteSpace(ramal) && c.Channel.Contains("/" + ramal, StringComparison.OrdinalIgnoreCase)) ||
+                   (!string.IsNullOrWhiteSpace(login) && c.Channel.Contains("/" + login, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static async Task EnviarAmiAsync(StreamWriter writer, string action, Dictionary<string, string> campos)
+        {
+            await writer.WriteLineAsync($"Action: {action}");
+            foreach (var kv in campos)
+                await writer.WriteLineAsync($"{kv.Key}: {kv.Value}");
+            await writer.WriteLineAsync();
+        }
+
+        private static async Task<string> LerBlocoAmiAsync(StreamReader reader, int timeoutMs)
+        {
+            // IMPORTANTE: não criar várias chamadas ReadLineAsync simultâneas no mesmo StreamReader.
+            // Isso causava resposta vazia no login AMI, mesmo com usuário/senha corretos.
+            var sb = new StringBuilder();
+            var limite = DateTime.UtcNow.AddMilliseconds(timeoutMs <= 0 ? 5000 : timeoutMs);
+
+            try
+            {
+                while (DateTime.UtcNow < limite)
+                {
+                    var restante = limite - DateTime.UtcNow;
+                    if (restante.TotalMilliseconds <= 0) break;
+
+                    var lineTask = reader.ReadLineAsync();
+                    var done = await Task.WhenAny(lineTask, Task.Delay(restante));
+                    if (done != lineTask) break;
+
+                    var line = await lineTask;
+                    if (line == null) break;
+
+                    if (line.Length == 0)
+                    {
+                        if (sb.Length > 0) break;
+                        continue;
+                    }
+
+                    sb.AppendLine(line);
+                }
+            }
+            catch (Exception ex)
+            {
+                if (sb.Length == 0) sb.AppendLine("AMI_READ_EXCEPTION: " + ex.Message);
+            }
+
+            return sb.ToString();
+        }
+
+        private static async Task<List<AmiChannelInfo>> ObterCanaisAmiAsync(AmiSession ami)
+        {
+            await ami.SendAsync("CoreShowChannels", new Dictionary<string, string>());
+            var canais = new List<AmiChannelInfo>();
+            var atual = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var limite = DateTime.Now.AddSeconds(8);
+
+            while (DateTime.Now < limite)
+            {
+                var bloco = await ami.ReadBlockAsync(1200);
+                if (string.IsNullOrWhiteSpace(bloco)) continue;
+
+                atual.Clear();
+                foreach (var line in bloco.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var idx = line.IndexOf(':');
+                    if (idx > 0) atual[line.Substring(0, idx).Trim()] = line.Substring(idx + 1).Trim();
+                }
+
+                if (atual.TryGetValue("Event", out var ev) && ev.Equals("CoreShowChannel", StringComparison.OrdinalIgnoreCase))
+                {
+                    canais.Add(new AmiChannelInfo
+                    {
+                        Channel = atual.TryGetValue("Channel", out var v) ? v : string.Empty,
+                        Uniqueid = atual.TryGetValue("Uniqueid", out v) ? v : string.Empty,
+                        Linkedid = atual.TryGetValue("Linkedid", out v) ? v : string.Empty,
+                        CallerIDNum = atual.TryGetValue("CallerIDNum", out v) ? v : string.Empty,
+                        ConnectedLineNum = atual.TryGetValue("ConnectedLineNum", out v) ? v : string.Empty,
+                        Exten = atual.TryGetValue("Exten", out v) ? v : string.Empty,
+                        Context = atual.TryGetValue("Context", out v) ? v : string.Empty
+                    });
+                }
+                else if (atual.TryGetValue("Event", out ev) && ev.Equals("CoreShowChannelsComplete", StringComparison.OrdinalIgnoreCase))
+                {
+                    break;
+                }
+            }
+
+            return canais;
+        }
+
+        private static string ResumoAmi(string texto)
+        {
+            if (string.IsNullOrWhiteSpace(texto)) return "vazio";
+            return texto.Replace("\r", " ").Replace("\n", " ").Trim();
+        }
+
+        public bool AdicionarParticipanteConferencia(string destino)
+        {
+            _ = AdicionarParticipanteConferenciaAsync(destino);
+            return true;
+        }
+
+        public void RecusarChamada()
+        {
+            try
+            {
+                // Recusar aqui deve encerrar somente ESTE ramal.
+                // Em fila/ring group do Issabel, Busy Here derruba apenas esta perna da chamada
+                // e os outros ramais continuam tocando normalmente.
+                if (_pendingIncomingRequest != null)
+                {
+                    var callId = _pendingIncomingCallId;
+                    if (!string.IsNullOrWhiteSpace(callId))
+                        _ignoredIncomingCallIds.Add(callId);
+
+                    EnviarRespostaOcupado(_pendingIncomingRequest);
+                    LimparChamadaRecebidaPendente(false);
+                    StatusChanged?.Invoke("Chamada recusada neste ramal. Outros usuários continuam recebendo.");
+                    IncomingCallEnded?.Invoke();
+                    return;
+                }
+
+                StatusChanged?.Invoke("Nenhuma chamada pendente para recusar.");
+            }
+            catch (Exception ex)
+            {
+                StatusChanged?.Invoke($"Erro ao recusar: {ex.Message}");
+            }
+        }
+
+        public void IgnorarChamadaLocal()
+        {
+            try
+            {
+                // Usado pelo X do popup: silencia/fecha neste computador e evita que a mesma
+                // chamada reabra a janela caso o Issabel retransmita o INVITE.
+                if (!string.IsNullOrWhiteSpace(_pendingIncomingCallId))
+                    _ignoredIncomingCallIds.Add(_pendingIncomingCallId);
+
+                LimparChamadaRecebidaPendente(false);
+                StatusChanged?.Invoke("Chamada ignorada neste computador.");
+                IncomingCallEnded?.Invoke();
+            }
+            catch (Exception ex)
+            {
+                StatusChanged?.Invoke($"Erro ao ignorar chamada: {ex.Message}");
+            }
+        }
+
+        public void Desligar()
+        {
+            _cancelamentoSolicitado = true;
+
+            try { EncerrarSinalizacaoAtiva(); }
+            catch (Exception ex) { StatusChanged?.Invoke($"Aviso ao cancelar chamada: {ex.Message}"); }
+
+            _chamadaSaindoEmAndamento = false;
+
+            try { LimparEstadoChamada("Chamada desligada."); }
+            catch (Exception ex) { StatusChanged?.Invoke($"Chamada desligada com aviso: {ex.Message}"); }
+
+            try { IncomingCallEnded?.Invoke(); } catch { }
+        }
+
+        private void LimparEstadoChamada(string mensagem)
+        {
+            try
+            {
+                LimparChamadaRecebidaPendente(false);
+                _emEspera = false;
+
+                if (_mediaSession != null)
+                {
+                    _mediaSession.Close("encerrando");
+                    _mediaSession.Dispose();
+                    _mediaSession = null;
+                }
+            }
+            catch
+            {
+            }
+
+            StatusChanged?.Invoke(mensagem);
+            CallEnded?.Invoke();
+        }
+
+        private static string ObterCallId(SIPRequest? req)
+        {
+            try { return req?.Header?.CallId ?? string.Empty; } catch { return string.Empty; }
+        }
+
+        private void LimparChamadaRecebidaPendente(bool esquecerIgnorados)
+        {
+            lock (_incomingLock)
+            {
+                _pendingIncomingRequest = null;
+                _pendingIncomingCallId = string.Empty;
+            }
+
+            try { _monitorChamadaRecebidaTimer?.Dispose(); _monitorChamadaRecebidaTimer = null; } catch { }
+
+            if (esquecerIgnorados && _ignoredIncomingCallIds.Count > 80)
+            {
+                var recentes = _ignoredIncomingCallIds.Take(20).ToList();
+                _ignoredIncomingCallIds.Clear();
+                foreach (var id in recentes) _ignoredIncomingCallIds.Add(id);
+            }
+        }
+
+        private void EnviarRespostaOcupado(SIPRequest req)
+        {
+            try
+            {
+                var busy = SIPResponse.GetResponse(req, SIPResponseStatusCodesEnum.BusyHere, null);
+                _sipTransport?.SendResponseAsync(busy).GetAwaiter().GetResult();
+            }
+            catch
+            {
+            }
+        }
+
+        private VoIPMediaSession CriarMedia()
+        {
+            var audio = new WindowsAudioEndPoint(new AudioEncoder());
+            return new VoIPMediaSession(audio.ToMediaEndPoints())
+            {
+                AcceptRtpFromAny = true
+            };
+        }
+    }
+}

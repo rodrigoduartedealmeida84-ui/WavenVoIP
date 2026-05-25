@@ -1,0 +1,11 @@
+Correção aplicada nesta versão:
+- Removido o seletor de saída dentro da tela de conferência.
+- A conferência agora usa saída padrão automática: Operadora (prefixo 1) para números externos.
+- Isso elimina o erro 'A operação foi concluída com êxito' que cancelava a adição.
+- Ramais internos continuam sem prefixo.
+- Sala padrão: 800.
+
+Compilação:
+1) Restaurar pacotes NuGet
+2) Limpar Solução
+3) Recompilar Solução

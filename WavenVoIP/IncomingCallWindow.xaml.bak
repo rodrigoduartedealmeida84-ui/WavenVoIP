@@ -1,0 +1,17 @@
+<Window x:Class="WavenVoIP.IncomingCallWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Chamada recebida" Height="300" Width="420" WindowStartupLocation="CenterScreen" ResizeMode="NoResize" Topmost="True">
+    <Grid Margin="18">
+        <Border Background="#111827" CornerRadius="24" Padding="24">
+            <StackPanel>
+                <TextBlock Text="Chamada recebida" FontSize="26" FontWeight="Bold" Foreground="White"/>
+                <TextBlock x:Name="txtCaller" Margin="0,14,0,20" FontSize="18" TextWrapping="Wrap" Foreground="#E5E7EB"/>
+                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                    <Button Content="Atender" Height="46" Margin="0,0,8,0" Background="#16A34A" Foreground="White" BorderThickness="0" FontWeight="Bold" Click="Atender_Click"/>
+                    <Button Grid.Column="1" Content="Recusar" Height="46" Margin="8,0,0,0" Style="{StaticResource DangerButtonStyle}" Click="Recusar_Click"/>
+                </Grid>
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

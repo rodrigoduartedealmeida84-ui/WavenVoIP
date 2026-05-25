@@ -1,0 +1,108 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.17763.0</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ApplicationIcon>Assets\wavenvoip.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <!-- Assembly identity & version info (visible no Explorer / Properties) -->
+    <AssemblyTitle>WavenVoIP</AssemblyTitle>
+    <AssemblyVersion>1.2.0.0</AssemblyVersion>
+    <FileVersion>1.2.0.0</FileVersion>
+    <Company>Almeida Gás</Company>
+    <Product>WavenVoIP</Product>
+    <Copyright>Copyright © 2026 Almeida Gás</Copyright>
+    <AssemblyDescription>Softphone corporativo — Discagem VoIP e telefonia IP</AssemblyDescription>
+    <NeutralLanguage>pt-BR</NeutralLanguage>
+  </PropertyGroup>
+
+  <!-- Explicit guard: never allow user-data files to enter the build/publish output -->
+  <ItemGroup>
+    <None   Remove="sipconfig.json;sipconfig.backup.json;contatos.json;historico.json;audio-config.json;whatsapp_config.json;whatsapp_envios.json;google_contacts_cache.json;user.config;settings.json" />
+    <Content Remove="sipconfig.json;sipconfig.backup.json;contatos.json;historico.json;audio-config.json;whatsapp_config.json;whatsapp_envios.json;google_contacts_cache.json;user.config;settings.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Google.Apis.PeopleService.v1" Version="1.69.0.3785" />
+    <PackageReference Include="SIPSorcery" Version="8.0.23" />
+    <PackageReference Include="SIPSorceryMedia.Windows" Version="8.0.14" />
+    <PackageReference Include="NAudio" Version="2.3.0" />
+    <PackageReference Include="MySqlConnector" Version="2.4.0" />
+  </ItemGroup>
+
+  <!-- Build WavenUpdater before WavenVoIP; do NOT reference its assembly -->
+  <ItemGroup>
+    <ProjectReference Include="..\WavenUpdater\WavenUpdater.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <Private>false</Private>
+    </ProjectReference>
+  </ItemGroup>
+
+  <!-- After build: copy WavenUpdater runtime files to WavenVoIP output directory -->
+  <Target Name="CopyWavenUpdater" AfterTargets="Build">
+    <PropertyGroup>
+      <UpdaterBin>$(MSBuildThisFileDirectory)..\WavenUpdater\bin\$(Configuration)\net8.0-windows10.0.17763.0\</UpdaterBin>
+    </PropertyGroup>
+    <Copy SourceFiles="$(UpdaterBin)WavenUpdater.exe;$(UpdaterBin)WavenUpdater.dll;$(UpdaterBin)WavenUpdater.deps.json;$(UpdaterBin)WavenUpdater.runtimeconfig.json"
+          DestinationFolder="$(OutputPath)"
+          SkipUnchangedFiles="true"
+          ContinueOnError="true"/>
+  </Target>
+
+  <!-- After publish: copy ico to Assets\ and Assets\Brand\ (Inno Setup uses both paths) -->
+  <Target Name="CopyBrandIcoOnPublish" AfterTargets="Publish">
+    <MakeDir Directories="$(PublishDir)Assets\Brand"/>
+    <Copy SourceFiles="$(MSBuildThisFileDirectory)Assets\wavenvoip.ico"
+          DestinationFolder="$(PublishDir)Assets"
+          SkipUnchangedFiles="true"
+          ContinueOnError="true"/>
+    <Copy SourceFiles="$(MSBuildThisFileDirectory)Assets\wavenvoip.ico"
+          DestinationFolder="$(PublishDir)Assets\Brand"
+          SkipUnchangedFiles="true"
+          ContinueOnError="true"/>
+  </Target>
+
+  <!-- After publish: also copy WavenUpdater runtime files to publish output -->
+  <Target Name="CopyWavenUpdaterOnPublish" AfterTargets="Publish">
+    <PropertyGroup>
+      <UpdaterBin>$(MSBuildThisFileDirectory)..\WavenUpdater\bin\$(Configuration)\net8.0-windows10.0.17763.0\</UpdaterBin>
+    </PropertyGroup>
+    <Copy SourceFiles="$(UpdaterBin)WavenUpdater.exe;$(UpdaterBin)WavenUpdater.dll;$(UpdaterBin)WavenUpdater.deps.json;$(UpdaterBin)WavenUpdater.runtimeconfig.json"
+          DestinationFolder="$(PublishDir)"
+          SkipUnchangedFiles="true"
+          ContinueOnError="true"/>
+  </Target>
+
+  <ItemGroup>
+    <Resource Include="Assets\logo_wavenvoip.jpg" />
+    <Resource Include="Assets\Brand\waven_logo_dark.png" />
+    <Resource Include="Assets\Brand\waven_logo_light.png" />
+    <Resource Include="Assets\Brand\waven_logo_compact_dark.png" />
+    <Resource Include="Assets\Brand\waven_logo_compact_light.png" />
+    <Resource Include="Assets\call_icon.png" />
+    <Resource Include="Assets\whatsapp_icon.png" />
+    <Resource Include="Assets\phone_white.png" />
+    <Resource Include="Assets\phone_purple.png" />
+    <Resource Include="Assets\phone_green.png" />
+    <Resource Include="Assets\whatsapp_green_clean.png" />
+    <Resource Include="Assets\whatsapp_white.png" />
+    <!-- ICO: copied as Assets\wavenvoip.ico (WPF runtime/tray) -->
+    <Content Include="Assets\wavenvoip.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Assets\toque_padrao.mp3">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Assets\ringback_tuuu.wav">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Config\google_credentials.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+</Project>

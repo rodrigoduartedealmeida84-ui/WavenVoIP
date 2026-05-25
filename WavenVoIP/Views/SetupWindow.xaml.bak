@@ -1,0 +1,147 @@
+<Window x:Class="WavenVoIP.Views.SetupWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Waven VoIP — Configuração inicial"
+        Icon="/Assets/wavenvoip.ico"
+        Height="640" Width="520"
+        MinHeight="600" MinWidth="480"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="CanMinimize">
+    <Grid Background="{StaticResource WindowBgBrush}" Margin="20">
+        <Border Style="{StaticResource CardStyle}" Padding="0">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <!-- Header -->
+                <Border Background="#F4F1FF" CornerRadius="22,22,0,0" Padding="24,18">
+                    <StackPanel>
+                        <Border Width="160" Height="52" ClipToBounds="True" HorizontalAlignment="Left">
+                            <Image Source="/Assets/Brand/waven_logo_dark.png" Stretch="Uniform"
+                                   RenderOptions.BitmapScalingMode="HighQuality">
+                                <Image.RenderTransform>
+                                    <ScaleTransform ScaleX="2.0" ScaleY="2.0"/>
+                                </Image.RenderTransform>
+                            </Image>
+                        </Border>
+                        <TextBlock x:Name="txtTitulo" Text="Configuração inicial do ramal"
+                                   FontSize="18" FontWeight="Bold" Margin="0,8,0,0"/>
+                        <TextBlock x:Name="txtSubtitulo"
+                                   Text="Informe os dados do Issabel para conectar o softphone."
+                                   Foreground="{StaticResource MutedBrush}" FontSize="13"
+                                   TextWrapping="Wrap" Margin="0,4,0,0"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- Form -->
+                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled" Padding="24,16">
+                    <StackPanel>
+
+                        <!-- SIP -->
+                        <TextBlock Text="Conta SIP / Issabel" FontSize="15" FontWeight="Bold" Margin="0,0,0,10"/>
+
+                        <UniformGrid Columns="2" Margin="0,0,0,10">
+                            <StackPanel Margin="0,0,6,0">
+                                <TextBlock Text="Ramal *" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                <TextBox x:Name="txtRamal" Height="36" VerticalContentAlignment="Center"/>
+                            </StackPanel>
+                            <StackPanel Margin="6,0,0,0">
+                                <TextBlock Text="Login / Auth User *" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                <TextBox x:Name="txtLogin" Height="36" VerticalContentAlignment="Center"/>
+                            </StackPanel>
+                        </UniformGrid>
+
+                        <StackPanel Margin="0,0,0,10">
+                            <TextBlock Text="Senha SIP *" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                            <PasswordBox x:Name="txtSenha" Height="36"/>
+                        </StackPanel>
+
+                        <UniformGrid Columns="2" Margin="0,0,0,10">
+                            <StackPanel Margin="0,0,6,0">
+                                <TextBlock Text="Servidor SIP *" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                <TextBox x:Name="txtServidor" Height="36" VerticalContentAlignment="Center"
+                                         TextChanged="TxtServidor_TextChanged"/>
+                            </StackPanel>
+                            <StackPanel Margin="6,0,0,0">
+                                <TextBlock Text="Porta SIP *" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                <TextBox x:Name="txtPorta" Height="36" VerticalContentAlignment="Center" Text="5061"/>
+                            </StackPanel>
+                        </UniformGrid>
+
+                        <UniformGrid Columns="2" Margin="0,0,0,10">
+                            <StackPanel Margin="0,0,6,0">
+                                <TextBlock Text="Domínio" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                <TextBox x:Name="txtDominio" Height="36" VerticalContentAlignment="Center"/>
+                            </StackPanel>
+                            <StackPanel Margin="6,0,0,0">
+                                <TextBlock Text="Proxy SIP" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                <TextBox x:Name="txtProxy" Height="36" VerticalContentAlignment="Center"/>
+                            </StackPanel>
+                        </UniformGrid>
+
+                        <StackPanel Margin="0,0,0,16">
+                            <TextBlock Text="Nome do operador" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                            <TextBox x:Name="txtNomeOperador" Height="36" VerticalContentAlignment="Center"
+                                     ToolTip="Exibido no botão Online/Offline"/>
+                        </StackPanel>
+
+                        <!-- AMI -->
+                        <Border Height="1" Background="{StaticResource BorderSoftBrush}" Margin="0,0,0,14"/>
+                        <TextBlock Text="Issabel AMI (Asterisk Manager)" FontSize="15" FontWeight="Bold" Margin="0,0,0,4"/>
+                        <TextBlock Text="Usado para sincronização de ramais e histórico."
+                                   Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,0,0,10"/>
+
+                        <UniformGrid Columns="2" Margin="0,0,0,10">
+                            <StackPanel Margin="0,0,6,0">
+                                <TextBlock Text="Host AMI *" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                <TextBox x:Name="txtAmiHost" Height="36" VerticalContentAlignment="Center"/>
+                            </StackPanel>
+                            <StackPanel Margin="6,0,0,0">
+                                <TextBlock Text="Porta AMI" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                <TextBox x:Name="txtAmiPorta" Height="36" VerticalContentAlignment="Center" Text="5038"/>
+                            </StackPanel>
+                        </UniformGrid>
+
+                        <UniformGrid Columns="2" Margin="0,0,0,4">
+                            <StackPanel Margin="0,0,6,0">
+                                <TextBlock Text="Usuário AMI *" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                <TextBox x:Name="txtAmiUsuario" Height="36" VerticalContentAlignment="Center" Text="waven"/>
+                            </StackPanel>
+                            <StackPanel Margin="6,0,0,0">
+                                <TextBlock Text="Senha AMI *" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                <PasswordBox x:Name="txtAmiSenha" Height="36"/>
+                            </StackPanel>
+                        </UniformGrid>
+
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- Footer -->
+                <Border Grid.Row="2" BorderBrush="{StaticResource BorderSoftBrush}"
+                        BorderThickness="0,1,0,0" Padding="24,14" CornerRadius="0,0,22,22">
+                    <StackPanel>
+                        <TextBlock x:Name="txtErro" Text="" Foreground="#DC2626"
+                                   FontSize="12" TextWrapping="Wrap" Margin="0,0,0,8"
+                                   Visibility="Collapsed"/>
+                        <StackPanel Orientation="Horizontal">
+                            <Button x:Name="btnTestar" Content="Testar conexão"
+                                    Height="40" MinWidth="140" Padding="12,0"
+                                    Style="{StaticResource SecondaryButtonStyle}"
+                                    Click="BtnTestar_Click"/>
+                            <Button x:Name="btnSalvar" Content="Salvar e entrar"
+                                    Height="40" MinWidth="150" Padding="12,0"
+                                    Margin="10,0,0,0"
+                                    Style="{StaticResource PrimaryButtonStyle}"
+                                    Click="BtnSalvar_Click"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

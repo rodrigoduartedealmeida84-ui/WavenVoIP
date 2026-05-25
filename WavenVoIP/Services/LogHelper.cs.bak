@@ -1,0 +1,45 @@
+using System;
+using System.IO;
+
+namespace WavenVoIP.Services
+{
+    internal static class LogHelper
+    {
+        private static readonly string _logFile = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "WavenVoIP", "ui_flow_debug.log");
+
+        private static readonly string _logOld = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "WavenVoIP", "ui_flow_debug.old.log");
+
+        private const long MaxBytes = 2 * 1024 * 1024; // 2 MB
+
+        internal static void Write(string msg)
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(_logFile)!);
+
+                // Rotate when file exceeds 2 MB; truncate if rename fails (e.g. file locked by AV)
+                var info = new FileInfo(_logFile);
+                if (info.Exists && info.Length > MaxBytes)
+                {
+                    try
+                    {
+                        if (File.Exists(_logOld)) File.Delete(_logOld);
+                        File.Move(_logFile, _logOld);
+                    }
+                    catch
+                    {
+                        try { File.WriteAllText(_logFile, string.Empty); } catch { }
+                    }
+                }
+
+                File.AppendAllText(_logFile,
+                    $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} | {msg}{Environment.NewLine}");
+            }
+            catch { }
+        }
+    }
+}

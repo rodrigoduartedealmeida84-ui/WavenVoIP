@@ -1,0 +1,133 @@
+<Window x:Class="WavenVoIP.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:svc="clr-namespace:WavenVoIP.Services"
+        Title="{x:Static svc:VersionService.VersaoCompleta}"
+        Icon="Assets/wavenvoip.ico"
+        Height="650" Width="760"
+        MinHeight="620" MinWidth="720"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="CanMinimize">
+    <Grid Background="{StaticResource WindowBgBrush}" Margin="22">
+        <Border CornerRadius="28" Background="#FDFDFE" BorderBrush="#E7EAF3" BorderThickness="1">
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="22" ShadowDepth="0" Opacity="0.10"/>
+            </Border.Effect>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="0.95*"/>
+                    <ColumnDefinition Width="1.25*"/>
+                </Grid.ColumnDefinitions>
+
+                <Border CornerRadius="28,0,0,28" Background="#F4F1FF" Padding="28">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <StackPanel VerticalAlignment="Center">
+                            <Border CornerRadius="20" Padding="0" Margin="0,0,0,22"
+                                    Background="White" BorderBrush="#E2D9FF" BorderThickness="1"
+                                    ClipToBounds="True" Width="220" Height="80">
+                                <Border.Effect>
+                                    <DropShadowEffect BlurRadius="18" ShadowDepth="2" Opacity="0.12" Color="#7C3AED"/>
+                                </Border.Effect>
+                                <Image Source="Assets/Brand/waven_logo_dark.png"
+                                       Stretch="Uniform"
+                                       RenderTransformOrigin="0.5,0.5"
+                                       RenderOptions.BitmapScalingMode="HighQuality"
+                                       SnapsToDevicePixels="True" UseLayoutRounding="True">
+                            <Image.RenderTransform>
+                                <ScaleTransform ScaleX="2.2" ScaleY="2.2"/>
+                            </Image.RenderTransform>
+                        </Image>
+                            </Border>
+                            <TextBlock Text="Softphone corporativo conectado ao Issabel" Margin="0,8,0,0" FontSize="15" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
+                            <Border Margin="0,24,0,0" Padding="14" CornerRadius="18" Background="#FFFFFF" BorderBrush="#E8E2FF" BorderThickness="1">
+                                <StackPanel>
+                                    <TextBlock Text="Pronto para atendimento" FontWeight="SemiBold" Foreground="#16091F"/>
+                                    <TextBlock Text="Configure o ramal uma vez e inicie o discador." Margin="0,4,0,0" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                        <TextBlock Grid.Row="1" Text="{x:Static svc:VersionService.VersaoCompleta}" Foreground="{StaticResource MutedBrush}" FontSize="12"/>
+                    </Grid>
+                </Border>
+
+                <Grid Grid.Column="1" Margin="28">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Margin="0,0,0,18">
+                        <TextBlock Text="Configuração do ramal" FontSize="24" FontWeight="Bold"/>
+                        <TextBlock Text="Dados do Issabel / SIP" Margin="0,4,0,0" Foreground="{StaticResource MutedBrush}" FontSize="14"/>
+                    </StackPanel>
+
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <StackPanel>
+                            <UniformGrid Columns="2">
+                                <StackPanel Margin="0,0,8,0">
+                                    <TextBlock Text="Ramal" FontWeight="SemiBold"/>
+                                    <TextBox x:Name="txtRamal" Text="100"/>
+                                </StackPanel>
+                                <StackPanel Margin="8,0,0,0">
+                                    <TextBlock Text="Login/Auth User" FontWeight="SemiBold"/>
+                                    <TextBox x:Name="txtLogin" Text="100"/>
+                                </StackPanel>
+                            </UniformGrid>
+
+                            <TextBlock Text="Senha" FontWeight="SemiBold"/>
+                            <PasswordBox x:Name="txtSenha"/>
+
+                            <UniformGrid Columns="2">
+                                <StackPanel Margin="0,0,8,0">
+                                    <TextBlock Text="Domínio" FontWeight="SemiBold"/>
+                                    <TextBox x:Name="txtDomain" Text="191.252.202.208"/>
+                                </StackPanel>
+                                <StackPanel Margin="8,0,0,0">
+                                    <TextBlock Text="Servidor SIP" FontWeight="SemiBold"/>
+                                    <TextBox x:Name="txtServerIp" Text="191.252.202.208"/>
+                                </StackPanel>
+                            </UniformGrid>
+
+                            <UniformGrid Columns="2">
+                                <StackPanel Margin="0,0,8,0">
+                                    <TextBlock Text="Proxy SIP" FontWeight="SemiBold"/>
+                                    <TextBox x:Name="txtProxySip" Text="191.252.202.208:5061"/>
+                                </StackPanel>
+                                <StackPanel Margin="8,0,0,0">
+                                    <TextBlock Text="Porta remota" FontWeight="SemiBold"/>
+                                    <TextBox x:Name="txtPort" Text="5061"/>
+                                </StackPanel>
+                            </UniformGrid>
+
+                            <TextBlock Text="Nome de exibição (SIP)" FontWeight="SemiBold"/>
+                            <TextBox x:Name="txtDisplayName" Text="100"/>
+
+                            <TextBlock Text="Seu nome (identificação no sistema)" FontWeight="SemiBold"/>
+                            <TextBox x:Name="txtNomeUsuario"/>
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <StackPanel Grid.Row="2" Margin="0,18,0,0">
+                        <Button x:Name="btnEntrar"
+                                Content="Iniciar Waven VoIP"
+                                Height="48"
+                                Style="{StaticResource PrimaryButtonStyle}"
+                                Click="Entrar_Click"/>
+
+                        <Border Margin="4,12,4,0" Padding="13" Background="#F8FAFC" CornerRadius="16" BorderBrush="#E4E7EC" BorderThickness="1">
+                            <StackPanel Orientation="Horizontal">
+                                <Border Width="10" Height="10" CornerRadius="5" Background="#A855F7" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                <TextBlock x:Name="txtStatus" Text="Aguardando conexão" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </Grid>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

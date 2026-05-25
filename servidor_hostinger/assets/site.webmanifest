@@ -1,0 +1,23 @@
+{
+  "name": "WavenVoIP",
+  "short_name": "WavenVoIP",
+  "description": "Softphone corporativo WavenVoIP — Discagem VoIP e telefonia IP",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1A1025",
+  "theme_color": "#7C3AED",
+  "icons": [
+    {
+      "src": "/assets/android-chrome-256x256.png",
+      "sizes": "256x256",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/assets/android-chrome-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

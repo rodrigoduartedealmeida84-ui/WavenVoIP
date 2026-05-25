@@ -1,0 +1,123 @@
+using System;
+using System.ComponentModel;
+using System.IO;
+using System.Windows;
+using System.Threading.Tasks;
+using System.Windows.Threading;
+using WavenVoIP.Services;
+using WavenVoIP.Views;
+
+namespace WavenVoIP;
+
+public partial class App : Application
+{
+    private static readonly string CrashLogPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "WavenVoIP", "crash.log");
+
+    public static void LogCrash(string tag, string context, Exception? ex)
+    {
+        try
+        {
+            var pasta = Path.GetDirectoryName(CrashLogPath);
+            if (!string.IsNullOrWhiteSpace(pasta)) Directory.CreateDirectory(pasta);
+            var linha = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {tag} | {context}\n{ex}\n---\n";
+            File.AppendAllText(CrashLogPath, linha);
+        }
+        catch { }
+    }
+
+    protected override void OnStartup(StartupEventArgs e)
+    {
+        AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
+        DispatcherUnhandledException += App_DispatcherUnhandledException;
+        TaskScheduler.UnobservedTaskException += (_, ex) => { ex.SetObserved(); };
+
+        base.OnStartup(e);
+
+        _ = UpdateService.VerificarAtualizacaoAsync();
+
+        var config = SipConfig.CarregarSalva();
+        if (config?.EstaCompleta == true)
+        {
+            var sip = new SipService();
+            try
+            {
+                sip.Inicializar(config);
+                sip.Registrar();
+            }
+            catch
+            {
+                // Mesmo se a rede ainda não estiver pronta, abre o discador.
+            }
+
+            var shell = new DialerShellWindow(sip);
+            MainWindow = shell;
+            shell.Show();
+            _ = System.Threading.Tasks.Task.Run(WavenVoIP.Services.ContatoStorageService.MigrarContatosAntigos);
+            return;
+        }
+
+        var setup = new MainWindow();
+        MainWindow = setup;
+        setup.Show();
+    }
+
+    private void CurrentDomain_UnhandledException(object sender, UnhandledExceptionEventArgs e)
+    {
+        // Catches exceptions thrown on background/NAudio threads (e.g. PlaybackStopped).
+        var ex = e.ExceptionObject as Exception;
+        LogCrash("RECORDING_PLAYER_CRASH_PREVENTED", "AppDomain.UnhandledException — thread background", ex);
+
+        // Show message on UI thread if possible, then keep running.
+        try
+        {
+            Current.Dispatcher.Invoke(() =>
+            {
+                if (!e.IsTerminating)
+                    MessageBox.Show("Ocorreu um erro interno e foi registrado.\nO aplicativo continuará em execução.",
+                        "Waven VoIP", MessageBoxButton.OK, MessageBoxImage.Warning);
+            });
+        }
+        catch { }
+    }
+
+    private void App_DispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
+    {
+        try
+        {
+            LogCrash("RECORDING_PLAYER_CRASH_PREVENTED", "DispatcherUnhandledException", e.Exception);
+
+            // Win32Exception ao fechar janelas auxiliares — silencioso.
+            if (e.Exception is Win32Exception)
+            {
+                e.Handled = true;
+                return;
+            }
+
+            if (e.Exception is InvalidOperationException inv &&
+                (inv.Message.Contains("DialogResult", StringComparison.OrdinalIgnoreCase) ||
+                 inv.Message.Contains("janela", StringComparison.OrdinalIgnoreCase) ||
+                 inv.Message.Contains("Window", StringComparison.OrdinalIgnoreCase)))
+            {
+                e.Handled = true;
+                return;
+            }
+
+            // Erros do player de gravação — não deixar derrubar o app.
+            if (e.Exception is ObjectDisposedException ||
+                e.Exception is InvalidOperationException ||
+                e.Exception is System.Threading.Tasks.TaskCanceledException)
+            {
+                e.Handled = true;
+                return;
+            }
+
+            // Qualquer outra exceção: logar e mostrar mensagem, mas não fechar.
+            MessageBox.Show("Ocorreu um erro inesperado.\nO aplicativo tentará continuar em execução.\n\nLog salvo em:\n" + CrashLogPath,
+                "Waven VoIP — Erro", MessageBoxButton.OK, MessageBoxImage.Warning);
+            e.Handled = true;
+        }
+        catch { }
+    }
+}

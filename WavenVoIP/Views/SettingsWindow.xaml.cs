@@ -1,0 +1,704 @@
+using System;
+using System.Net.Http;
+using System.Net.Sockets;
+using System.Text;
+using System.Threading.Tasks;
+using System.Linq;
+using System.Windows;
+using System.Windows.Media;
+using System.Windows.Shapes;
+using Microsoft.Win32;
+using MySqlConnector;
+using NAudio.CoreAudioApi;
+using WavenVoIP.Models;
+using WavenVoIP.Services;
+
+namespace WavenVoIP.Views
+{
+    public partial class SettingsWindow : Window
+    {
+        private ConfiguracaoAudio _config;
+        private WhatsAppConfig _whatsConfig;
+        private SipConfig _sipConfig;
+
+        public SettingsWindow()
+        {
+            InitializeComponent();
+            _config     = ConfiguracaoAudioService.Carregar();
+            _whatsConfig = WhatsAppConfigService.Carregar();
+            _sipConfig  = SipConfig.CarregarSalva() ?? new SipConfig();
+            _sipConfig.RepairDefaults();
+
+            LogHelper.Sip($"CONFIG_LOADED_PATH: {SipConfig.ConfigFilePath}");
+            LogHelper.Sip($"CONFIG_AFTER_REPAIR: ServerIp={_sipConfig.ServerIp} Port={_sipConfig.Port} Domain={_sipConfig.Domain} AmiHost={_sipConfig.AmiHost} AmiPorta={_sipConfig.AmiPorta} AmiUsuario={_sipConfig.AmiUsuario}");
+
+            CarregarDispositivos();
+
+            // Áudio
+            txtToque.Text            = _config.Toque;
+            chkInvadirTela.IsChecked = _config.TocarEmTelaCheia;
+            chkIniciarWindows.IsChecked = EstaConfiguradoParaIniciarComWindows();
+
+            // WhatsApp
+            txtWhatsApiUrl.Text       = _whatsConfig.ApiUrl;
+            txtWhatsToken.Password    = _whatsConfig.BearerToken;
+            txtWhatsNumeroTeste.Text  = _whatsConfig.NumeroTeste;
+            txtWhatsMensagemTeste.Text = _whatsConfig.MensagemTeste;
+
+            // SIP
+            txtSipServidor.Text  = _sipConfig.ServerIp;
+            txtSipPorta.Text     = _sipConfig.Port.ToString();
+            txtSipDominio.Text   = _sipConfig.Domain;
+            txtSipAmiHost.Text   = _sipConfig.AmiHost;
+            txtSipAmiPorta.Text  = _sipConfig.AmiPorta.ToString();
+            txtSipAmiUsuario.Text = _sipConfig.AmiUsuario;
+            txtSipAmiSenha.Password = _sipConfig.AmiSenha;
+
+            // CDR
+            chkCdrAtivo.IsChecked = _sipConfig.CdrAtivo;
+            txtCdrHost.Text    = string.IsNullOrWhiteSpace(_sipConfig.CdrHost) ? _sipConfig.ServerIp : _sipConfig.CdrHost;
+            txtCdrPorta.Text   = _sipConfig.CdrPorta > 0 ? _sipConfig.CdrPorta.ToString() : "3306";
+            txtCdrBanco.Text   = _sipConfig.CdrBanco;
+            txtCdrTabela.Text  = _sipConfig.CdrTabela;
+            txtCdrUsuario.Text = _sipConfig.CdrUsuario;
+            txtCdrSenha.Password = _sipConfig.CdrSenha;
+
+            // Sync intervals
+            SelecionarComboBoxPorTag(cmbAmiSyncInterval,  _sipConfig.AmiSyncIntervalSeconds.ToString());
+            SelecionarComboBoxPorTag(cmbCdrSyncInterval,  _sipConfig.HistoricoSyncIntervalSeconds.ToString());
+            SelecionarComboBoxPorTag(cmbGoogleSyncInterval, _sipConfig.GoogleSyncIntervalSeconds.ToString());
+            SelecionarComboBoxPorTag(cmbHistoricoModo, _sipConfig.HistoricoModoExibicao);
+
+            // Atualizações
+            chkAutoUpdate.IsChecked = _sipConfig.AutoUpdateEnabled;
+            txtUpdateVerLocal.Text  = VersionService.Versao;
+            AtualizarPainelUpdate(UpdateService.EstadoAtual);
+            UpdateService.ProgressoChanged += OnUpdateProgresso;
+            Closed += (_, _) => UpdateService.ProgressoChanged -= OnUpdateProgresso;
+
+            // Status das integrações
+            IntegrationStatusService.StatusChanged += OnIntegrationStatusChanged;
+            Closed += (_, _) => IntegrationStatusService.StatusChanged -= OnIntegrationStatusChanged;
+            AtualizarStatusIntegracoes();
+
+            if (UpdateService.TemFalhaFlag())
+            {
+                borderUpdateFailed.Visibility    = Visibility.Visible;
+                btnLimparFlagUpdate.Visibility   = Visibility.Visible;
+            }
+
+            LogHelper.Sip($"CONFIG_UI_BIND_START");
+            LogHelper.Sip($"CONFIG_UI_FIELD ServidorSip={_sipConfig.ServerIp}");
+            LogHelper.Sip($"CONFIG_UI_FIELD AmiHost={_sipConfig.AmiHost}");
+            LogHelper.Sip($"CONFIG_UI_FIELD Toque={_config.Toque}");
+        }
+
+        private void CarregarDispositivos()
+        {
+            cmbMicrofone.Items.Clear();
+            cmbAltoFalante.Items.Clear();
+
+            cmbMicrofone.Items.Add("Padrão do sistema");
+            cmbAltoFalante.Items.Add("Padrão do sistema");
+
+            try
+            {
+                using var enumerator = new MMDeviceEnumerator();
+
+                foreach (var mic in enumerator.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active))
+                    cmbMicrofone.Items.Add(mic.FriendlyName);
+
+                foreach (var speaker in enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active))
+                    cmbAltoFalante.Items.Add(speaker.FriendlyName);
+            }
+            catch
+            {
+            }
+
+            cmbMicrofone.SelectedItem = cmbMicrofone.Items.Cast<object>().FirstOrDefault(i => i?.ToString() == _config.Microfone) ?? "Padrão do sistema";
+            cmbAltoFalante.SelectedItem = cmbAltoFalante.Items.Cast<object>().FirstOrDefault(i => i?.ToString() == _config.AltoFalante) ?? "Padrão do sistema";
+        }
+
+        private void BtnTrocarToque_Click(object sender, RoutedEventArgs e)
+        {
+            var dlg = new OpenFileDialog
+            {
+                Filter = "Áudio (*.mp3;*.wav)|*.mp3;*.wav|Todos os arquivos (*.*)|*.*"
+            };
+            if (dlg.ShowDialog() == true)
+                txtToque.Text = dlg.FileName;
+        }
+
+
+        private async void BtnEnviarTesteWhatsApp_Click(object sender, RoutedEventArgs e)
+        {
+            _whatsConfig.ApiUrl = txtWhatsApiUrl.Text?.Trim() ?? string.Empty;
+            _whatsConfig.BearerToken = txtWhatsToken.Password?.Trim() ?? string.Empty;
+            _whatsConfig.NumeroTeste = txtWhatsNumeroTeste.Text?.Trim() ?? string.Empty;
+            _whatsConfig.MensagemTeste = txtWhatsMensagemTeste.Text?.Trim() ?? string.Empty;
+            WhatsAppConfigService.Salvar(_whatsConfig);
+
+            btnEnviarTesteWhatsApp.IsEnabled = false;
+            txtWhatsResultado.Text = "Enviando teste...";
+            try
+            {
+                var resultado = await WhatsAppService.EnviarMensagemAsync(_whatsConfig.NumeroTeste, _whatsConfig.MensagemTeste, "teste_configuracao");
+                txtWhatsResultado.Text = $"HTTP {resultado.HttpStatusCode} | Número: {resultado.NumeroNormalizado} | Sucesso: {resultado.Sucesso}\n{resultado.RespostaBruta}\n{resultado.Debug}";
+            }
+            catch (System.Exception ex)
+            {
+                txtWhatsResultado.Text = ex.Message;
+            }
+            finally
+            {
+                btnEnviarTesteWhatsApp.IsEnabled = true;
+            }
+        }
+
+        private void BtnSalvar_Click(object sender, RoutedEventArgs e)
+        {
+            // Áudio
+            _config.Microfone        = cmbMicrofone.SelectedItem?.ToString() ?? "Padrão do sistema";
+            _config.AltoFalante      = cmbAltoFalante.SelectedItem?.ToString() ?? "Padrão do sistema";
+            _config.Toque            = string.IsNullOrWhiteSpace(txtToque.Text?.Trim()) ? "Assets\\toque_padrao.mp3" : txtToque.Text.Trim();
+            _config.TocarEmTelaCheia = chkInvadirTela.IsChecked == true;
+            ConfiguracaoAudioService.Salvar(_config);
+
+            // WhatsApp
+            _whatsConfig.ApiUrl        = txtWhatsApiUrl.Text?.Trim() ?? string.Empty;
+            _whatsConfig.BearerToken   = txtWhatsToken.Password?.Trim() ?? string.Empty;
+            _whatsConfig.NumeroTeste   = txtWhatsNumeroTeste.Text?.Trim() ?? string.Empty;
+            _whatsConfig.MensagemTeste = txtWhatsMensagemTeste.Text?.Trim() ?? string.Empty;
+            WhatsAppConfigService.Salvar(_whatsConfig);
+
+            // SIP — merge visible fields into existing config (never wipe hidden fields)
+            var srv = txtSipServidor.Text.Trim();
+            if (!string.IsNullOrWhiteSpace(srv)) _sipConfig.ServerIp = srv;
+            if (int.TryParse(txtSipPorta.Text.Trim(), out var sipPorta) && sipPorta > 0) _sipConfig.Port = sipPorta;
+            var dom = txtSipDominio.Text.Trim();
+            if (!string.IsNullOrWhiteSpace(dom)) _sipConfig.Domain = dom;
+            var amiHost = txtSipAmiHost.Text.Trim();
+            if (!string.IsNullOrWhiteSpace(amiHost)) _sipConfig.AmiHost = amiHost;
+            if (int.TryParse(txtSipAmiPorta.Text.Trim(), out var amiPorta) && amiPorta > 0) _sipConfig.AmiPorta = amiPorta;
+            var amiUser = txtSipAmiUsuario.Text.Trim();
+            if (!string.IsNullOrWhiteSpace(amiUser)) _sipConfig.AmiUsuario = amiUser;
+            var amiPwd = txtSipAmiSenha.Password;
+            if (!string.IsNullOrWhiteSpace(amiPwd)) _sipConfig.AmiSenha = amiPwd;
+            _sipConfig.ProxySip = $"{_sipConfig.ServerIp}:{_sipConfig.Port}";
+
+            // CDR
+            _sipConfig.CdrAtivo  = chkCdrAtivo.IsChecked == true;
+            var cdrHost = txtCdrHost.Text.Trim();
+            if (!string.IsNullOrWhiteSpace(cdrHost)) _sipConfig.CdrHost = cdrHost;
+            if (int.TryParse(txtCdrPorta.Text.Trim(), out var cdrPorta) && cdrPorta > 0) _sipConfig.CdrPorta = cdrPorta;
+            var cdrBanco = txtCdrBanco.Text.Trim();
+            if (!string.IsNullOrWhiteSpace(cdrBanco)) _sipConfig.CdrBanco = cdrBanco;
+            var cdrTabela = txtCdrTabela.Text.Trim();
+            if (!string.IsNullOrWhiteSpace(cdrTabela)) _sipConfig.CdrTabela = cdrTabela;
+            var cdrUser = txtCdrUsuario.Text.Trim();
+            if (!string.IsNullOrWhiteSpace(cdrUser)) _sipConfig.CdrUsuario = cdrUser;
+            var cdrPwd = txtCdrSenha.Password;
+            if (!string.IsNullOrWhiteSpace(cdrPwd)) _sipConfig.CdrSenha = cdrPwd;
+
+            // Sync intervals
+            if (TagDaCombo(cmbAmiSyncInterval)   is string amiTag   && int.TryParse(amiTag,   out var amiSec))    _sipConfig.AmiSyncIntervalSeconds       = amiSec;
+            if (TagDaCombo(cmbCdrSyncInterval)   is string cdrTag   && int.TryParse(cdrTag,   out var cdrSec))    _sipConfig.HistoricoSyncIntervalSeconds  = cdrSec;
+            if (TagDaCombo(cmbGoogleSyncInterval) is string gTag    && int.TryParse(gTag,     out var gSec))      _sipConfig.GoogleSyncIntervalSeconds     = gSec;
+            if (TagDaCombo(cmbHistoricoModo)     is string modoTag && !string.IsNullOrWhiteSpace(modoTag))        _sipConfig.HistoricoModoExibicao         = modoTag;
+
+            _sipConfig.AutoUpdateEnabled = chkAutoUpdate.IsChecked == true;
+            _sipConfig.Salvar();
+
+            ConfigurarInicializacaoWindows(chkIniciarWindows.IsChecked == true);
+            MessageBox.Show("Configurações salvas.", "Waven VoIP");
+            Close();
+        }
+        private static bool EstaConfiguradoParaIniciarComWindows()
+        {
+            try
+            {
+                using var key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", false);
+                return key?.GetValue("WavenVoIP") != null;
+            }
+            catch { return false; }
+        }
+
+        private void BtnTrocarUsuario_Click(object sender, RoutedEventArgs e)
+        {
+            // Delegate to DialerShellWindow so SIP/timer shutdown happens there
+            if (Owner is DialerShellWindow shell)
+            {
+                Close();
+                shell.TrocarUsuario();
+                return;
+            }
+
+            // Fallback: no owner — do the clear here and relaunch
+            var confirma = MessageBox.Show(
+                "Trocar usuário?\n\nNome, Ramal, Login e Senha serão limpos.\nConfigurações da empresa serão mantidas.",
+                "Waven VoIP — Trocar Usuário",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+
+            if (confirma != MessageBoxResult.Yes) return;
+
+            try
+            {
+                var config = SipConfig.CarregarSalva() ?? new SipConfig();
+                config.NomeUsuario = string.Empty;
+                config.RamalNome   = string.Empty;
+                config.DisplayName = string.Empty;
+                config.Ramal       = string.Empty;
+                config.Login       = string.Empty;
+                config.Senha       = string.Empty;
+                config.Salvar();
+            }
+            catch { }
+
+            var setup = new SetupWindow();
+            System.Windows.Application.Current.MainWindow = setup;
+            setup.Show();
+            Close();
+        }
+
+        private async void BtnTestarAmi_Click(object sender, RoutedEventArgs e)
+        {
+            btnTestarAmi.IsEnabled = false;
+            SetResultado(txtAmiResultado, "Testando AMI...", null);
+            var host  = txtSipAmiHost.Text.Trim();
+            var porta = int.TryParse(txtSipAmiPorta.Text.Trim(), out var p) ? p : 5038;
+            var user  = txtSipAmiUsuario.Text.Trim();
+            var pwd   = txtSipAmiSenha.Password;
+            try
+            {
+                using var client = new TcpClient();
+                var connectTask = client.ConnectAsync(host, porta);
+                var done = await Task.WhenAny(connectTask, Task.Delay(5000));
+                if (!client.Connected) throw new TimeoutException("Conexão TCP expirou em 5 s.");
+                await connectTask;
+                using var stream = client.GetStream();
+                stream.ReadTimeout = 3000;
+                var buf = new byte[512];
+                var n = await stream.ReadAsync(buf, 0, buf.Length);
+                var banner = Encoding.ASCII.GetString(buf, 0, n);
+                var login = $"Action: Login\r\nUsername: {user}\r\nSecret: {pwd}\r\nEvents: off\r\nActionID: WTEST\r\n\r\n";
+                var lb = Encoding.ASCII.GetBytes(login);
+                await stream.WriteAsync(lb, 0, lb.Length);
+                n = 0;
+                var sb = new StringBuilder();
+                var deadline = DateTime.UtcNow.AddSeconds(5);
+                while (DateTime.UtcNow < deadline)
+                {
+                    if (stream.DataAvailable)
+                    {
+                        n = await stream.ReadAsync(buf, 0, buf.Length);
+                        sb.Append(Encoding.ASCII.GetString(buf, 0, n));
+                        if (sb.ToString().Contains("ActionID: WTEST")) break;
+                    }
+                    else await Task.Delay(80);
+                }
+                var resp = sb.ToString();
+                if (resp.IndexOf("Success", StringComparison.OrdinalIgnoreCase) >= 0)
+                    SetResultado(txtAmiResultado, "✔ AMI OK — login aceito", true);
+                else
+                    SetResultado(txtAmiResultado, $"✘ AMI recusou login: {resp.Replace("\r\n", " ")}", false);
+                LogHelper.Ami($"AMI_TEST host={host}:{porta} resultado={resp.Substring(0, Math.Min(200, resp.Length))}");
+            }
+            catch (Exception ex)
+            {
+                SetResultado(txtAmiResultado, $"✘ {ex.Message}", false);
+                LogHelper.Ami($"AMI_TEST_ERROR {ex.Message}", LogLevel.ERROR);
+            }
+            finally { btnTestarAmi.IsEnabled = true; }
+        }
+
+        private async void BtnTestarCdr_Click(object sender, RoutedEventArgs e)
+        {
+            btnTestarCdr.IsEnabled = false;
+            SetResultado(txtCdrResultado, "Testando MySQL...", null);
+            var cs = new MySqlConnectionStringBuilder
+            {
+                Server          = txtCdrHost.Text.Trim(),
+                Port            = uint.TryParse(txtCdrPorta.Text.Trim(), out var pr) ? pr : 3306,
+                Database        = txtCdrBanco.Text.Trim(),
+                UserID          = txtCdrUsuario.Text.Trim(),
+                Password        = txtCdrSenha.Password,
+                ConnectionTimeout = 8,
+                AllowZeroDateTime = true,
+                ConvertZeroDateTime = true
+            };
+            try
+            {
+                await using var conn = new MySqlConnection(cs.ConnectionString);
+                await conn.OpenAsync();
+                var tabela = txtCdrTabela.Text.Trim();
+                long count = 0;
+                if (!string.IsNullOrWhiteSpace(tabela))
+                {
+                    await using var cmd = conn.CreateCommand();
+                    cmd.CommandText = $"SELECT COUNT(*) FROM `{tabela}` LIMIT 1";
+                    count = Convert.ToInt64(await cmd.ExecuteScalarAsync() ?? 0);
+                }
+                SetResultado(txtCdrResultado, $"✔ MySQL OK — {count:N0} registros na tabela", true);
+                LogHelper.Cdr($"CDR_TEST OK count={count}");
+            }
+            catch (Exception ex)
+            {
+                SetResultado(txtCdrResultado, $"✘ {ex.Message}", false);
+                LogHelper.Cdr($"CDR_TEST_ERROR {ex.Message}", LogLevel.ERROR);
+            }
+            finally { btnTestarCdr.IsEnabled = true; }
+        }
+
+        private async void BtnTestarGoogle_Click(object sender, RoutedEventArgs e)
+        {
+            btnTestarGoogle.IsEnabled = false;
+            SetResultado(txtGoogleResultado, "Verificando Google...", null);
+            try
+            {
+                if (!GoogleContactsService.EstaConectado())
+                {
+                    SetResultado(txtGoogleResultado, "Não autenticado — abrirá o navegador para login.", null);
+                    var contatos = await GoogleContactsService.SincronizarContatosAsync();
+                    SetResultado(txtGoogleResultado, $"✔ Google OK — {contatos.Contatos.Count} contatos sincronizados", true);
+                }
+                else
+                {
+                    var cache = await GoogleContactsService.CarregarCacheAsync();
+                    SetResultado(txtGoogleResultado, $"✔ Autenticado — {cache.Count} contatos em cache", true);
+                }
+                LogHelper.Info("GOOGLE_TEST OK");
+            }
+            catch (Exception ex)
+            {
+                SetResultado(txtGoogleResultado, $"✘ {ex.Message}", false);
+                LogHelper.Error($"GOOGLE_TEST_ERROR {ex.Message}", ex);
+            }
+            finally { btnTestarGoogle.IsEnabled = true; }
+        }
+
+        private async void BtnTestarWhatsConexao_Click(object sender, RoutedEventArgs e)
+        {
+            btnTestarWhatsConexao.IsEnabled = false;
+            SetResultado(txtWhatsConexaoResultado, "Testando API...", null);
+            var url   = txtWhatsApiUrl.Text.Trim();
+            var token = txtWhatsToken.Password.Trim();
+            try
+            {
+                if (string.IsNullOrWhiteSpace(url)) throw new Exception("URL da API não informada.");
+                using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+                if (!string.IsNullOrWhiteSpace(token))
+                    http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+                var resp = await http.GetAsync(url);
+                var status = (int)resp.StatusCode;
+                if (status < 500)
+                    SetResultado(txtWhatsConexaoResultado, $"✔ API respondeu HTTP {status}", true);
+                else
+                    SetResultado(txtWhatsConexaoResultado, $"✘ API retornou HTTP {status}", false);
+                LogHelper.Info($"WHATS_CONN_TEST HTTP {status}");
+            }
+            catch (Exception ex)
+            {
+                SetResultado(txtWhatsConexaoResultado, $"✘ {ex.Message}", false);
+                LogHelper.Error($"WHATS_CONN_TEST_ERROR {ex.Message}", ex);
+            }
+            finally { btnTestarWhatsConexao.IsEnabled = true; }
+        }
+
+        private static void SetResultado(System.Windows.Controls.TextBlock tb, string msg, bool? sucesso)
+        {
+            tb.Text = msg;
+            tb.Foreground = sucesso switch
+            {
+                true  => new SolidColorBrush(Color.FromRgb(21, 128, 61)),
+                false => new SolidColorBrush(Color.FromRgb(185, 28, 28)),
+                null  => new SolidColorBrush(Color.FromRgb(100, 116, 139))
+            };
+        }
+
+        private static void SelecionarComboBoxPorTag(System.Windows.Controls.ComboBox cmb, string tag)
+        {
+            foreach (System.Windows.Controls.ComboBoxItem item in cmb.Items)
+            {
+                if (item.Tag?.ToString() == tag) { cmb.SelectedItem = item; return; }
+            }
+            if (cmb.Items.Count > 0) cmb.SelectedIndex = 0;
+        }
+
+        private static string? TagDaCombo(System.Windows.Controls.ComboBox cmb)
+            => (cmb.SelectedItem as System.Windows.Controls.ComboBoxItem)?.Tag?.ToString();
+
+        private void BtnLimparFlagUpdate_Click(object sender, RoutedEventArgs e)
+        {
+            UpdateService.LimparFlagFalha();
+            borderUpdateFailed.Visibility  = Visibility.Collapsed;
+            btnLimparFlagUpdate.Visibility = Visibility.Collapsed;
+            txtUpdateStatus.Text = "Falha de atualização limpa. Atualizações automáticas reativadas.";
+            txtUpdateStatus.Foreground = new SolidColorBrush(Color.FromRgb(21, 128, 61));
+        }
+
+        private async void BtnVerificarUpdate_Click(object sender, RoutedEventArgs e)
+        {
+            btnVerificarUpdate.IsEnabled = false;
+            progressUpdate.Visibility = Visibility.Visible;
+
+            var result = await UpdateService.VerificarManualAsync();
+
+            progressUpdate.Visibility = Visibility.Collapsed;
+            btnVerificarUpdate.IsEnabled = true;
+
+            switch (result)
+            {
+                case UpdateCheckResult.EmDia:
+                    MessageBox.Show($"Você já está na versão mais recente ({VersionService.Versao}).",
+                        "Waven VoIP — Sem atualizações", MessageBoxButton.OK, MessageBoxImage.Information);
+                    break;
+
+                case UpdateCheckResult.AtualizacaoIniciada when UpdateService.TemAtualizacaoPendente:
+                    var versaoNova = UpdateService.VersaoPendente;
+                    var confirmar  = MessageBox.Show(
+                        $"Nova versão disponível: {versaoNova}\n\nDeseja instalar agora?\n\nO aplicativo será reiniciado durante a atualização.",
+                        "Waven VoIP — Atualização Disponível",
+                        MessageBoxButton.YesNo,
+                        MessageBoxImage.Information);
+                    if (confirmar == MessageBoxResult.Yes)
+                    {
+                        btnVerificarUpdate.IsEnabled = false;
+                        await UpdateService.LancarPendenteAsync();
+                    }
+                    break;
+
+                case UpdateCheckResult.JaVerificando:
+                    MessageBox.Show("Uma verificação já está em andamento.",
+                        "Waven VoIP", MessageBoxButton.OK, MessageBoxImage.Information);
+                    break;
+
+                case UpdateCheckResult.Erro:
+                    var erro = UpdateService.EstadoAtual.ErrorMessage ?? "Erro desconhecido";
+                    MessageBox.Show($"Não foi possível verificar atualizações.\n\n{erro}",
+                        "Waven VoIP — Erro de Atualização", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    break;
+            }
+        }
+
+        private void OnUpdateProgresso(UpdateProgress p)
+        {
+            Dispatcher.Invoke(() => AtualizarPainelUpdate(p));
+        }
+
+        private void AtualizarPainelUpdate(UpdateProgress p)
+        {
+            if (string.IsNullOrEmpty(p.Message))
+            {
+                txtUpdateStatus.Text = string.Empty;
+            }
+            else
+            {
+                txtUpdateStatus.Text = p.Message;
+                txtUpdateStatus.Foreground = p.Stage switch
+                {
+                    UpdateStage.Error     => new SolidColorBrush(Color.FromRgb(185, 28, 28)),
+                    UpdateStage.UpToDate  => new SolidColorBrush(Color.FromRgb(21, 128, 61)),
+                    UpdateStage.UpdateAvailable => new SolidColorBrush(Color.FromRgb(14, 116, 144)),
+                    _ => (System.Windows.Media.Brush)(FindResource("MutedBrush") ?? new SolidColorBrush(Color.FromRgb(100, 116, 139)))
+                };
+            }
+
+            progressUpdate.IsIndeterminate = true;
+            progressUpdate.Visibility      = p.Stage == UpdateStage.Checking ? Visibility.Visible : Visibility.Collapsed;
+
+            if (!string.IsNullOrWhiteSpace(p.RemoteVersion))
+                txtUpdateVerRemota.Text = p.RemoteVersion;
+
+            if (p.CheckedAt.HasValue)
+                txtUpdateUltimaVer.Text = p.CheckedAt.Value.ToString("dd/MM/yyyy HH:mm:ss");
+        }
+
+        // ── Integration status section ──────────────────────────────────────────
+
+        private void OnIntegrationStatusChanged(IntegracaoNome nome, IntegracaoStatus status)
+            => Dispatcher.Invoke(AtualizarStatusIntegracoes);
+
+        private void AtualizarStatusIntegracoes()
+        {
+            AtualizarDotLinha(IntegracaoNome.Google,   dotGoogle,   txtIntGoogle,
+                "Google conectado", "Google desconectado", "Google: erro de autenticação");
+            AtualizarDotLinha(IntegracaoNome.WhatsApp, dotWhatsApp, txtIntWhatsApp,
+                "WhatsApp conectado", "WhatsApp desconectado", "WhatsApp: erro");
+            AtualizarDotLinha(IntegracaoNome.Ami, dotAmi, txtIntAmi,
+                "AMI conectado", "AMI desconectado", "AMI: erro de conexão");
+            AtualizarDotLinha(IntegracaoNome.Cdr, dotCdr, txtIntCdr,
+                "CDR conectado", "CDR desconectado", "CDR indisponível");
+
+            var googleConectado = IntegrationStatusService.ObterStatus(IntegracaoNome.Google) == IntegracaoStatus.Conectado;
+            btnIntConectarGoogle.Visibility    = googleConectado ? Visibility.Collapsed : Visibility.Visible;
+            btnIntDesconectarGoogle.Visibility = googleConectado ? Visibility.Visible   : Visibility.Collapsed;
+            btnIntDesconectarGoogle.IsEnabled  = googleConectado;
+        }
+
+        private static void AtualizarDotLinha(IntegracaoNome nome, Ellipse dot, System.Windows.Controls.TextBlock txt,
+            string textoConectado, string textoDesconectado, string textoErro)
+        {
+            var status = IntegrationStatusService.ObterStatus(nome);
+            Brush fill;
+            string texto;
+            switch (status)
+            {
+                case IntegracaoStatus.Conectado:
+                    fill  = new SolidColorBrush(Color.FromRgb(34, 197, 94));   // green
+                    texto = textoConectado;
+                    break;
+                case IntegracaoStatus.Reconectando:
+                    fill  = new SolidColorBrush(Color.FromRgb(245, 158, 11));  // amber
+                    texto = "Reconectando automaticamente…";
+                    break;
+                case IntegracaoStatus.Erro:
+                    fill  = new SolidColorBrush(Color.FromRgb(239, 68, 68));   // red
+                    texto = textoErro;
+                    break;
+                default:
+                    fill  = new SolidColorBrush(Color.FromRgb(148, 163, 184)); // gray
+                    texto = textoDesconectado;
+                    break;
+            }
+            dot.Fill = fill;
+            txt.Text = texto;
+        }
+
+        private async void BtnIntConectarGoogle_Click(object sender, RoutedEventArgs e)
+        {
+            btnIntConectarGoogle.IsEnabled = false;
+            txtIntGoogle.Text = "Aguardando autenticação Google...";
+            try
+            {
+                var resultado = await GoogleContactsService.SincronizarContatosAsync();
+                IntegrationStatusService.Atualizar(IntegracaoNome.Google, IntegracaoStatus.Conectado);
+                AtualizarStatusIntegracoes();
+                txtIntGoogle.Text = $"Google conectado — {resultado.Total} contatos";
+            }
+            catch (Exception ex)
+            {
+                IntegrationStatusService.Atualizar(IntegracaoNome.Google, IntegracaoStatus.Erro);
+                AtualizarStatusIntegracoes();
+                txtIntGoogle.Text = $"Erro: {ex.Message}";
+            }
+            finally { btnIntConectarGoogle.IsEnabled = true; }
+        }
+
+        private async void BtnIntDesconectarGoogle_Click(object sender, RoutedEventArgs e)
+        {
+            btnIntDesconectarGoogle.IsEnabled = false;
+            try
+            {
+                await GoogleContactsService.LimparTokenAsync();
+                LogHelper.Info("[GOOGLE_DISCONNECTED] Usuário desconectou Google via configurações");
+                IntegrationStatusService.Atualizar(IntegracaoNome.Google, IntegracaoStatus.Desconectado);
+                AtualizarStatusIntegracoes();
+            }
+            finally { btnIntDesconectarGoogle.IsEnabled = true; }
+        }
+
+        private async void BtnIntTestarWhatsApp_Click(object sender, RoutedEventArgs e)
+        {
+            btnIntTestarWhatsApp.IsEnabled = false;
+            txtIntWhatsApp.Text = "Testando WhatsApp...";
+            var config = WhatsAppConfigService.Carregar();
+            try
+            {
+                if (string.IsNullOrWhiteSpace(config.ApiUrl))
+                {
+                    IntegrationStatusService.Atualizar(IntegracaoNome.WhatsApp, IntegracaoStatus.Desconectado);
+                    AtualizarStatusIntegracoes();
+                    txtIntWhatsApp.Text = "WhatsApp: URL da API não configurada";
+                    return;
+                }
+                using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+                if (!string.IsNullOrWhiteSpace(config.BearerToken))
+                    http.DefaultRequestHeaders.Authorization =
+                        new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", config.BearerToken);
+                var resp   = await http.GetAsync(config.ApiUrl);
+                var status = (int)resp.StatusCode;
+                if (status < 500)
+                {
+                    IntegrationStatusService.Atualizar(IntegracaoNome.WhatsApp, IntegracaoStatus.Conectado);
+                    AtualizarStatusIntegracoes();
+                    txtIntWhatsApp.Text = $"WhatsApp conectado — HTTP {status}";
+                }
+                else
+                {
+                    IntegrationStatusService.Atualizar(IntegracaoNome.WhatsApp, IntegracaoStatus.Erro);
+                    AtualizarStatusIntegracoes();
+                    txtIntWhatsApp.Text = $"WhatsApp: erro HTTP {status}";
+                }
+                LogHelper.Info($"WHATS_INT_TEST HTTP {status}");
+            }
+            catch (Exception ex)
+            {
+                IntegrationStatusService.Atualizar(IntegracaoNome.WhatsApp, IntegracaoStatus.Erro);
+                AtualizarStatusIntegracoes();
+                txtIntWhatsApp.Text = $"WhatsApp: {ex.Message}";
+                LogHelper.Error($"WHATS_INT_TEST_ERROR {ex.Message}", ex);
+            }
+            finally { btnIntTestarWhatsApp.IsEnabled = true; }
+        }
+
+        private async void BtnIntReconectarAmi_Click(object sender, RoutedEventArgs e)
+        {
+            if (!IntegrationStatusService.PermitirReconexao(IntegracaoNome.Ami))
+            {
+                MessageBox.Show("Reconexão AMI já iniciada recentemente. Aguarde 10 minutos antes de tentar novamente.", "Waven VoIP");
+                return;
+            }
+            IntegrationStatusService.RegistrarTentativa(IntegracaoNome.Ami);
+            btnIntReconectarAmi.IsEnabled = false;
+            try
+            {
+                if (Owner is DialerShellWindow shell)
+                    await shell.ReconectarAmiPublicoAsync();
+                AtualizarStatusIntegracoes();
+            }
+            finally { btnIntReconectarAmi.IsEnabled = true; }
+        }
+
+        private async void BtnIntReconectarCdr_Click(object sender, RoutedEventArgs e)
+        {
+            if (!IntegrationStatusService.PermitirReconexao(IntegracaoNome.Cdr))
+            {
+                MessageBox.Show("Reconexão CDR já iniciada recentemente. Aguarde 10 minutos antes de tentar novamente.", "Waven VoIP");
+                return;
+            }
+            IntegrationStatusService.RegistrarTentativa(IntegracaoNome.Cdr);
+            btnIntReconectarCdr.IsEnabled = false;
+            try
+            {
+                if (Owner is DialerShellWindow shell)
+                    await shell.ReconectarCdrPublicoAsync();
+                AtualizarStatusIntegracoes();
+            }
+            finally { btnIntReconectarCdr.IsEnabled = true; }
+        }
+
+        private void BtnCancelar_Click(object sender, RoutedEventArgs e) => Close();
+
+        private static void ConfigurarInicializacaoWindows(bool ativo)
+        {
+            try
+            {
+                using var key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true);
+                if (key == null) return;
+
+                if (ativo)
+                {
+                    var exe = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
+                    if (!string.IsNullOrWhiteSpace(exe))
+                        key.SetValue("WavenVoIP", "\"" + exe + "\"");
+                }
+                else
+                {
+                    key.DeleteValue("WavenVoIP", false);
+                }
+            }
+            catch { }
+        }
+    }
+}

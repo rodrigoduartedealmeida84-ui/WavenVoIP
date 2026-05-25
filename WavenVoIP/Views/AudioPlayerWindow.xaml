@@ -1,0 +1,86 @@
+<Window x:Class="WavenVoIP.Views.AudioPlayerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Gravação" Height="175" Width="540"
+        ResizeMode="NoResize" WindowStyle="SingleBorderWindow"
+        WindowStartupLocation="CenterOwner"
+        Background="#F8FAFC"
+        Icon="/Assets/wavenvoip.ico">
+    <Grid Margin="18,14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="14"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="12"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Filename -->
+        <StackPanel Orientation="Horizontal">
+            <TextBlock Text="🎙 " FontSize="14" VerticalAlignment="Center"/>
+            <TextBlock x:Name="txtFileName" Text="Carregando…" FontWeight="SemiBold" FontSize="13"
+                       TextTrimming="CharacterEllipsis" Foreground="#1E293B" VerticalAlignment="Center"/>
+        </StackPanel>
+
+        <!-- Play controls -->
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="44"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="96"/>
+            </Grid.ColumnDefinitions>
+
+            <Button x:Name="btnPlayPause" Content="▶" Width="38" Height="38"
+                    Foreground="White" FontSize="13" BorderThickness="0" Cursor="Hand"
+                    VerticalAlignment="Center" Click="BtnPlayPause_Click">
+                <Button.Template>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bd" Background="#7C3AED" CornerRadius="8">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="#6D28D9"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="#5B21B6"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Button.Template>
+            </Button>
+
+            <Slider x:Name="sldProgress" Grid.Column="1" VerticalAlignment="Center"
+                    Margin="10,0" Minimum="0" Value="0" IsEnabled="False"
+                    ValueChanged="SldProgress_ValueChanged"/>
+
+            <TextBlock x:Name="txtTime" Grid.Column="2" Text="00:00 / 00:00"
+                       VerticalAlignment="Center" FontSize="11"
+                       Foreground="#64748B" FontFamily="Consolas" TextAlignment="Right"/>
+        </Grid>
+
+        <!-- Volume + close -->
+        <StackPanel Grid.Row="4" Orientation="Horizontal">
+            <TextBlock Text="🔊" VerticalAlignment="Center" Margin="0,0,6,0" FontSize="13"/>
+            <Slider x:Name="sldVolume" Width="90" Minimum="0" Maximum="1" Value="0.8"
+                    VerticalAlignment="Center" ValueChanged="SldVolume_ValueChanged"/>
+            <Button Content="Fechar" Height="28" Margin="22,0,0,0" Padding="16,0"
+                    Foreground="#475569" FontSize="11" Cursor="Hand"
+                    Click="BtnFechar_Click">
+                <Button.Template>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bd" Background="Transparent" BorderBrush="#CBD5E1"
+                                BorderThickness="1" CornerRadius="6">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="#F1F5F9"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Button.Template>
+            </Button>
+        </StackPanel>
+    </Grid>
+</Window>

@@ -1,0 +1,17 @@
+<Window x:Class="WavenVoIP.RouteSelectorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Escolha a saída" Height="460" Width="430" WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
+    <Grid Margin="20">
+        <Border Style="{StaticResource CardStyle}">
+            <StackPanel>
+                <TextBlock Text="Escolha a saída" FontSize="28" FontWeight="Bold"/>
+                <TextBlock x:Name="txtNumeroOriginal" Margin="0,8,0,18" Foreground="{StaticResource MutedBrush}" FontSize="14"/>
+                <Button Content="1  Operadora" Height="56" Style="{StaticResource SecondaryButtonStyle}" Click="Operadora_Click"/>
+                <Button Content="2  WhatsApp TIM" Height="56" Style="{StaticResource SecondaryButtonStyle}" Click="WhatsAppTim_Click"/>
+                <Button Content="3  WhatsApp Vivo" Height="56" Style="{StaticResource SecondaryButtonStyle}" Click="WhatsAppVivo_Click"/>
+                <Button Content="Cancelar" Height="48" Style="{StaticResource SoftDangerButtonStyle}" Click="Cancelar_Click" Margin="4,14,4,4"/>
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

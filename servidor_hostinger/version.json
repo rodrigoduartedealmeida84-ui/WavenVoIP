@@ -1,0 +1,7 @@
+﻿{
+    "versao":  "1.2.10",
+    "zip":  "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v1.2.10/WavenVoIP.zip",
+    "sha256":  "72924870c2fe28b60eb0b3d8b14f492b2ae9561d604d5f05fbc78ac671fb4b50",
+    "data":  "2026-05-25",
+    "notas":  "v1.2.10 â€” Migracao GitHub Releases (25/05/2026)\n[INFRA] Distribuicao migrada de Hostinger para GitHub Releases\n[FIX] SHA256 do pacote agora identico no download (sem recompressao do servidor)\n[FIX] Updater nao precisa mais de headers anti-WAF/ModSecurity"
+}

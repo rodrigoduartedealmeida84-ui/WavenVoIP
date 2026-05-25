@@ -1,0 +1,51 @@
+# ── Build artifacts ──────────────────────────────────────────────────────────
+**/bin/
+**/obj/
+publish/
+
+# ── Release artifacts (uploaded to GitHub Releases, não vão no repo) ─────────
+WavenVoIP.zip
+WavenVoIP_Setup.exe
+_tmp_waven.zip
+
+# ── Credenciais OAuth do app (NUNCA commitar) ─────────────────────────────────
+WavenVoIP/Config/google_credentials.json
+
+# ── Configs de usuário (nunca devem entrar no repo) ───────────────────────────
+sipconfig.json
+sipconfig.backup.json
+contatos.json
+historico.json
+audio-config.json
+whatsapp_config.json
+whatsapp_envios.json
+google_contacts_cache.json
+user.config
+settings.json
+fresh_install.flag
+update_failed.flag
+update_attempts.txt
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+Logs/
+
+# ── IDE e sistema ─────────────────────────────────────────────────────────────
+.vs/
+*.user
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Memória Claude (privado) ──────────────────────────────────────────────────
+.claude/
+
+# ── Arquivos temporários e backups do projeto ─────────────────────────────────
+Backup_*/
+Output/
+waven_site_hostinger*.zip
+_tmp_*/
+
+# ── NuGet ─────────────────────────────────────────────────────────────────────
+*.nupkg
+packages/

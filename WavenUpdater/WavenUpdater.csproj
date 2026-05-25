@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.17763.0</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <AssemblyName>WavenUpdater</AssemblyName>
+    <RootNamespace>WavenUpdater</RootNamespace>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationIcon>Assets\wavenvoip.ico</ApplicationIcon>
+    <Optimize>true</Optimize>
+    <!-- Assembly identity & version info -->
+    <AssemblyTitle>WavenUpdater</AssemblyTitle>
+    <AssemblyVersion>1.2.0.0</AssemblyVersion>
+    <FileVersion>1.2.0.0</FileVersion>
+    <Company>Almeida Gás</Company>
+    <Product>WavenVoIP</Product>
+    <Copyright>Copyright © 2026 Almeida Gás</Copyright>
+    <AssemblyDescription>Atualizador automático do WavenVoIP</AssemblyDescription>
+    <NeutralLanguage>pt-BR</NeutralLanguage>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="Assets\wavenvoip.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Resource Include="Assets\waven_logo_light.png"/>
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,8 @@
+Antes de compilar no Visual Studio:
+1) Abra a solução .sln.
+2) Clique com botão direito na Solução > Restaurar Pacotes NuGet.
+3) Compilação > Limpar Solução.
+4) Compilação > Recompilar Solução.
+
+Se ainda aparecer project.assets.json, execute no Terminal dentro da pasta do projeto:
+dotnet restore

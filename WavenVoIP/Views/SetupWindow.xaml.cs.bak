@@ -1,0 +1,201 @@
+using System;
+using System.Net.Sockets;
+using System.Threading.Tasks;
+using System.Windows;
+using WavenVoIP.Services;
+
+namespace WavenVoIP.Views
+{
+    public partial class SetupWindow : Window
+    {
+        // null = standalone (first run); set = alterar mode
+        private readonly SipService? _sipService;
+
+        // Standalone — primeiro acesso
+        public SetupWindow()
+        {
+            InitializeComponent();
+            CarregarConfigNaTela();
+        }
+
+        // Alterar — reabre com SipService existente para reinicializar
+        public SetupWindow(SipService sipService)
+        {
+            _sipService = sipService;
+            InitializeComponent();
+            txtTitulo.Text = "Alterar configuração SIP";
+            txtSubtitulo.Text = "Edite os dados e salve para reconectar o ramal.";
+            btnSalvar.Content = "Salvar e reconectar";
+            CarregarConfigNaTela();
+        }
+
+        private void CarregarConfigNaTela()
+        {
+            try
+            {
+                var config = SipConfig.CarregarSalva();
+                if (config == null) return;
+
+                txtRamal.Text       = config.Ramal;
+                txtLogin.Text       = config.Login;
+                txtSenha.Password   = config.Senha;
+                txtServidor.Text    = config.ServerIp;
+                txtPorta.Text       = config.Port.ToString();
+                txtDominio.Text     = config.Domain;
+                txtProxy.Text       = config.ProxySip;
+                txtNomeOperador.Text = config.NomeUsuario;
+                txtAmiHost.Text     = string.IsNullOrWhiteSpace(config.AmiHost) ? config.ServerIp : config.AmiHost;
+                txtAmiPorta.Text    = config.AmiPorta > 0 ? config.AmiPorta.ToString() : "5038";
+                txtAmiUsuario.Text  = string.IsNullOrWhiteSpace(config.AmiUsuario) ? "waven" : config.AmiUsuario;
+                txtAmiSenha.Password = config.AmiSenha;
+            }
+            catch { }
+        }
+
+        private void TxtServidor_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
+        {
+            if (txtAmiHost != null && string.IsNullOrWhiteSpace(txtAmiHost.Text))
+                txtAmiHost.Text = txtServidor.Text.Trim();
+        }
+
+        private SipConfig ValidarEConstruirConfig()
+        {
+            var ramal   = txtRamal.Text.Trim();
+            var login   = txtLogin.Text.Trim();
+            var senha   = txtSenha.Password;
+            var server  = txtServidor.Text.Trim();
+            var portaStr = txtPorta.Text.Trim();
+            var amiHost = txtAmiHost.Text.Trim();
+            var amiUser = txtAmiUsuario.Text.Trim();
+            var amiSenha = txtAmiSenha.Password;
+
+            if (string.IsNullOrWhiteSpace(ramal))   throw new InvalidOperationException("Informe o ramal.");
+            if (string.IsNullOrWhiteSpace(senha))   throw new InvalidOperationException("Informe a senha SIP.");
+            if (string.IsNullOrWhiteSpace(server))  throw new InvalidOperationException("Informe o servidor SIP.");
+            if (!int.TryParse(portaStr, out var porta) || porta <= 0)
+                throw new InvalidOperationException("Porta SIP inválida.");
+            if (string.IsNullOrWhiteSpace(amiHost)) throw new InvalidOperationException("Informe o host AMI.");
+            if (string.IsNullOrWhiteSpace(amiUser)) throw new InvalidOperationException("Informe o usuário AMI.");
+            if (string.IsNullOrWhiteSpace(amiSenha)) throw new InvalidOperationException("Informe a senha AMI.");
+
+            var amiPortaStr = txtAmiPorta.Text.Trim();
+            int.TryParse(amiPortaStr, out var amiPorta);
+            if (amiPorta <= 0) amiPorta = 5038;
+
+            var dominio = txtDominio.Text.Trim();
+            var proxy   = txtProxy.Text.Trim();
+            var nome    = txtNomeOperador.Text.Trim();
+
+            return new SipConfig
+            {
+                Ramal        = ramal,
+                Login        = string.IsNullOrWhiteSpace(login) ? ramal : login,
+                Senha        = senha,
+                ServerIp     = server,
+                Port         = porta,
+                Domain       = string.IsNullOrWhiteSpace(dominio) ? server : dominio,
+                ProxySip     = string.IsNullOrWhiteSpace(proxy) ? $"{server}:{porta}" : proxy,
+                DisplayName  = string.IsNullOrWhiteSpace(nome) ? ramal : nome,
+                NomeUsuario  = nome,
+                RamalNome    = nome,
+                AmiAtivo     = true,
+                AmiHost      = amiHost,
+                AmiPorta     = amiPorta,
+                AmiUsuario   = amiUser,
+                AmiSenha     = amiSenha,
+            };
+        }
+
+        private void MostrarErro(string msg)
+        {
+            txtErro.Text = msg;
+            txtErro.Visibility = Visibility.Visible;
+        }
+
+        private void LimparErro()
+        {
+            txtErro.Text = string.Empty;
+            txtErro.Visibility = Visibility.Collapsed;
+        }
+
+        private void BtnSalvar_Click(object sender, RoutedEventArgs e)
+        {
+            LimparErro();
+            try
+            {
+                var config = ValidarEConstruirConfig();
+                config.Salvar();
+
+                if (_sipService != null)
+                {
+                    // Alterar mode: reinicializa o SipService existente
+                    try { _sipService.Inicializar(config); _sipService.Registrar(); } catch { }
+                    DialogResult = true;
+                    Close();
+                }
+                else
+                {
+                    // Standalone: cria SipService e abre DialerShellWindow
+                    var sip = new SipService();
+                    try { sip.Inicializar(config); sip.Registrar(); } catch { }
+
+                    var shell = new DialerShellWindow(sip);
+                    Application.Current.MainWindow = shell;
+                    shell.Show();
+                    Close();
+                }
+            }
+            catch (Exception ex)
+            {
+                MostrarErro(ex.Message);
+            }
+        }
+
+        private async void BtnTestar_Click(object sender, RoutedEventArgs e)
+        {
+            LimparErro();
+            var servidor = txtServidor.Text.Trim();
+            if (string.IsNullOrWhiteSpace(servidor))
+            {
+                MostrarErro("Informe o servidor SIP antes de testar.");
+                return;
+            }
+            if (!int.TryParse(txtPorta.Text.Trim(), out var porta) || porta <= 0)
+            {
+                MostrarErro("Porta SIP inválida.");
+                return;
+            }
+
+            btnTestar.IsEnabled = false;
+            txtErro.Visibility = Visibility.Visible;
+            txtErro.Foreground = System.Windows.Media.Brushes.Gray;
+            txtErro.Text = "Testando conexão...";
+
+            try
+            {
+                using var tcp = new TcpClient();
+                var connect = tcp.ConnectAsync(servidor, porta);
+                if (await Task.WhenAny(connect, Task.Delay(5000)) == connect && tcp.Connected)
+                {
+                    txtErro.Foreground = new System.Windows.Media.SolidColorBrush(
+                        System.Windows.Media.Color.FromRgb(22, 163, 74));
+                    txtErro.Text = $"Conexão OK — {servidor}:{porta} respondeu.";
+                }
+                else
+                {
+                    txtErro.Foreground = System.Windows.Media.Brushes.DarkRed;
+                    txtErro.Text = $"Sem resposta de {servidor}:{porta} em 5 s. Verifique o servidor e a porta.";
+                }
+            }
+            catch (Exception ex)
+            {
+                txtErro.Foreground = System.Windows.Media.Brushes.DarkRed;
+                txtErro.Text = $"Falha: {ex.Message}";
+            }
+            finally
+            {
+                btnTestar.IsEnabled = true;
+            }
+        }
+    }
+}
