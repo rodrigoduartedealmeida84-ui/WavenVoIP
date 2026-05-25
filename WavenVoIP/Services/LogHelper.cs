@@ -17,7 +17,7 @@ namespace WavenVoIP.Services
 
     /// <summary>
     /// Thread-safe, rotating file logger with per-channel output.
-    /// Channels: UI (default), SIP, AMI, CDR, UPDATE.
+    /// Channels: UI (default), SIP, AMI, CDR, UPDATE, GOOGLE, WHATSAPP.
     /// </summary>
     internal static class LogHelper
     {
@@ -28,6 +28,17 @@ namespace WavenVoIP.Services
         private const long MaxBytes = 3 * 1024 * 1024; // 3 MB per file before rotation
 
         private static readonly object _lock = new object();
+
+        internal static bool IsEnabled         { get; private set; } = true;
+        internal static bool IsDetailedEnabled { get; private set; } = false;
+
+        internal static void ConfigurarDeSettings(SipConfig cfg)
+        {
+            IsEnabled         = cfg.LogEnabled;
+            IsDetailedEnabled = cfg.LogDetailedEnabled;
+        }
+
+        internal static string LogDir => _logDir;
 
         /// Fired on every log call — subscribers must be fast and non-throwing.
         internal static event Action<LogEntry>? LogWritten;
@@ -60,10 +71,19 @@ namespace WavenVoIP.Services
         internal static void Update(string msg, LogLevel level = LogLevel.INFO, [CallerMemberName] string caller = "")
             => Append("update", level, caller, msg);
 
+        internal static void Google(string msg, LogLevel level = LogLevel.INFO, [CallerMemberName] string caller = "")
+            => Append("google", level, caller, msg);
+
+        internal static void WhatsApp(string msg, LogLevel level = LogLevel.INFO, [CallerMemberName] string caller = "")
+            => Append("whatsapp", level, caller, msg);
+
         // ── Internal ─────────────────────────────────────────────────────────────
 
         private static void Append(string channel, LogLevel level, string caller, string msg)
         {
+            // ERRORs always written regardless of enable flags
+            if (!IsEnabled && level != LogLevel.ERROR) return;
+
             var ts = DateTime.Now;
             try
             {

@@ -4,7 +4,7 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "1.2.10";
+        public const string Versao  = "1.2.11";
         public const string NomeApp = "WavenVoIP";
 
         public static readonly DateTime DataBuild = new DateTime(2026, 5, 25);
@@ -13,6 +13,20 @@ namespace WavenVoIP.Services
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v1.2.11 — Logs e Diagnóstico (25/05/2026)\n" +
+            "• [NEW] Seção 'Logs e Diagnóstico' em Configurações\n" +
+            "• [NEW] Checkbox: Ativar logs do sistema (persiste em SipConfig)\n" +
+            "• [NEW] Checkbox: Ativar logs detalhados — SIP, AMI, CDR\n" +
+            "• [NEW] Indicador visual de status dos logs (verde=ativo, cinza=desativado)\n" +
+            "• [NEW] Botão 'Abrir pasta de logs' — abre %LOCALAPPDATA%\\WavenVoIP\\Logs\n" +
+            "• [NEW] Botão 'Copiar diagnóstico' — copia resumo + últimas 30 linhas de cada canal\n" +
+            "• [NEW] Botão 'Limpar logs' — remove todos os arquivos .log (com confirmação)\n" +
+            "• [NEW] Botão 'Exportar diagnóstico ZIP' — gera ZIP com logs + resumo de ambiente\n" +
+            "• [NEW] LogHelper.ConfigurarDeSettings(SipConfig): aplica flags ao iniciar\n" +
+            "• [NEW] LogHelper.IsEnabled / IsDetailedEnabled — ERRORs sempre gravados\n" +
+            "• [NEW] LogHelper.Google() e LogHelper.WhatsApp() — canais dedicados\n" +
+            "• [FIX] Flags de log lidas no startup via App.xaml.cs\n" +
+            "\n" +
             "v1.2.10 — Migração GitHub Releases (25/05/2026)\n" +
             "• [INFRA] Distribuição migrada de Hostinger para GitHub Releases\n" +
             "• [FIX] SHA256 do pacote agora idêntico no download (sem recompressão do servidor)\n" +

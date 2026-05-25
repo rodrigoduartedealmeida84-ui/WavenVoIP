@@ -161,5 +161,8 @@ namespace WavenVoIP
         public string GravacaoCaminhoLocal { get; set; } = string.Empty;
 
         public bool AutoUpdateEnabled { get; set; } = true;
+
+        public bool LogEnabled         { get; set; } = true;
+        public bool LogDetailedEnabled { get; set; } = false;
     }
 }

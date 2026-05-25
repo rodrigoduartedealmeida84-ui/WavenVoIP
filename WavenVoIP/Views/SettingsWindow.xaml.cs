@@ -1,4 +1,7 @@
 using System;
+using System.IO;
+using System.IO.Compression;
+using System.Diagnostics;
 using System.Net.Http;
 using System.Net.Sockets;
 using System.Text;
@@ -75,6 +78,11 @@ namespace WavenVoIP.Views
             AtualizarPainelUpdate(UpdateService.EstadoAtual);
             UpdateService.ProgressoChanged += OnUpdateProgresso;
             Closed += (_, _) => UpdateService.ProgressoChanged -= OnUpdateProgresso;
+
+            // Logs e Diagnóstico
+            chkLogAtivo.IsChecked      = _sipConfig.LogEnabled;
+            chkLogDetalhado.IsChecked  = _sipConfig.LogDetailedEnabled;
+            AtualizarStatusLog();
 
             // Status das integrações
             IntegrationStatusService.StatusChanged += OnIntegrationStatusChanged;
@@ -206,7 +214,10 @@ namespace WavenVoIP.Views
             if (TagDaCombo(cmbGoogleSyncInterval) is string gTag    && int.TryParse(gTag,     out var gSec))      _sipConfig.GoogleSyncIntervalSeconds     = gSec;
             if (TagDaCombo(cmbHistoricoModo)     is string modoTag && !string.IsNullOrWhiteSpace(modoTag))        _sipConfig.HistoricoModoExibicao         = modoTag;
 
-            _sipConfig.AutoUpdateEnabled = chkAutoUpdate.IsChecked == true;
+            _sipConfig.AutoUpdateEnabled    = chkAutoUpdate.IsChecked    == true;
+            _sipConfig.LogEnabled           = chkLogAtivo.IsChecked      == true;
+            _sipConfig.LogDetailedEnabled   = chkLogDetalhado.IsChecked  == true;
+            LogHelper.ConfigurarDeSettings(_sipConfig);
             _sipConfig.Salvar();
 
             ConfigurarInicializacaoWindows(chkIniciarWindows.IsChecked == true);
@@ -676,6 +687,155 @@ namespace WavenVoIP.Views
                 AtualizarStatusIntegracoes();
             }
             finally { btnIntReconectarCdr.IsEnabled = true; }
+        }
+
+        // ── Logs e Diagnóstico ──────────────────────────────────────────────────
+
+        private void AtualizarStatusLog()
+        {
+            bool ativo = chkLogAtivo.IsChecked == true;
+            ellLogStatus.Fill = ativo
+                ? new SolidColorBrush(Color.FromRgb(34, 197, 94))
+                : new SolidColorBrush(Color.FromRgb(148, 163, 184));
+            txtLogStatus.Text = ativo ? "Logs ativos" : "Logs desativados";
+        }
+
+        private void BtnAbrirPastaLogs_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var dir = LogHelper.LogDir;
+                Directory.CreateDirectory(dir);
+                Process.Start(new ProcessStartInfo { FileName = dir, UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                txtLogResultado.Text = $"Erro ao abrir pasta: {ex.Message}";
+                txtLogResultado.Foreground = new SolidColorBrush(Color.FromRgb(185, 28, 28));
+            }
+        }
+
+        private void BtnCopiarDiagnostico_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var sb = new StringBuilder();
+                sb.AppendLine($"=== WavenVoIP Diagnóstico — {DateTime.Now:yyyy-MM-dd HH:mm:ss} ===");
+                sb.AppendLine($"Versão: {VersionService.VersaoCompleta}");
+                sb.AppendLine($"OS: {Environment.OSVersion}");
+                sb.AppendLine($"Runtime: {System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription}");
+                sb.AppendLine($"Logs ativos: {_sipConfig.LogEnabled}  Detalhados: {_sipConfig.LogDetailedEnabled}");
+                sb.AppendLine($"SIP: {_sipConfig.ServerIp}:{_sipConfig.Port} ({_sipConfig.Transport})");
+                sb.AppendLine($"AMI: {_sipConfig.AmiHost}:{_sipConfig.AmiPorta}");
+                sb.AppendLine($"CDR: {(_sipConfig.CdrAtivo ? _sipConfig.CdrHost : "desativado")}");
+                sb.AppendLine();
+
+                var logDir = LogHelper.LogDir;
+                if (Directory.Exists(logDir))
+                {
+                    foreach (var f in Directory.GetFiles(logDir, "*.log"))
+                    {
+                        sb.AppendLine($"--- {System.IO.Path.GetFileName(f)} (últimas 30 linhas) ---");
+                        try
+                        {
+                            var lines = File.ReadAllLines(f);
+                            var tail = lines.Skip(Math.Max(0, lines.Length - 30));
+                            foreach (var l in tail) sb.AppendLine(l);
+                        }
+                        catch { sb.AppendLine("[erro ao ler arquivo]"); }
+                        sb.AppendLine();
+                    }
+                }
+
+                Clipboard.SetText(sb.ToString());
+                txtLogResultado.Text = "Diagnóstico copiado para a área de transferência.";
+                txtLogResultado.Foreground = new SolidColorBrush(Color.FromRgb(21, 128, 61));
+            }
+            catch (Exception ex)
+            {
+                txtLogResultado.Text = $"Erro: {ex.Message}";
+                txtLogResultado.Foreground = new SolidColorBrush(Color.FromRgb(185, 28, 28));
+            }
+        }
+
+        private void BtnLimparLogs_Click(object sender, RoutedEventArgs e)
+        {
+            var confirm = MessageBox.Show(
+                "Limpar todos os arquivos de log?\n\nEsta ação não pode ser desfeita.",
+                "Waven VoIP — Limpar Logs",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+            if (confirm != MessageBoxResult.Yes) return;
+
+            try
+            {
+                var logDir = LogHelper.LogDir;
+                if (Directory.Exists(logDir))
+                {
+                    foreach (var f in Directory.GetFiles(logDir, "*.log"))
+                        try { File.Delete(f); } catch { }
+                }
+                txtLogResultado.Text = "Logs limpos com sucesso.";
+                txtLogResultado.Foreground = new SolidColorBrush(Color.FromRgb(21, 128, 61));
+            }
+            catch (Exception ex)
+            {
+                txtLogResultado.Text = $"Erro ao limpar logs: {ex.Message}";
+                txtLogResultado.Foreground = new SolidColorBrush(Color.FromRgb(185, 28, 28));
+            }
+        }
+
+        private void BtnExportarDiagnostico_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var dlg = new SaveFileDialog
+                {
+                    Filter   = "ZIP (*.zip)|*.zip",
+                    FileName = $"WavenVoIP_Diagnostico_{DateTime.Now:yyyyMMdd_HHmm}.zip",
+                    Title    = "Exportar diagnóstico"
+                };
+                if (dlg.ShowDialog() != true) return;
+
+                using var zip = ZipFile.Open(dlg.FileName, ZipArchiveMode.Create);
+
+                // Summary file
+                var sb = new StringBuilder();
+                sb.AppendLine($"WavenVoIP Diagnóstico — {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                sb.AppendLine($"Versão: {VersionService.VersaoCompleta}");
+                sb.AppendLine($"OS: {Environment.OSVersion}");
+                sb.AppendLine($"Runtime: {System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription}");
+                sb.AppendLine($"ProcessorCount: {Environment.ProcessorCount}");
+                sb.AppendLine($"Logs ativos: {_sipConfig.LogEnabled}  Detalhados: {_sipConfig.LogDetailedEnabled}");
+                sb.AppendLine($"SIP: {_sipConfig.ServerIp}:{_sipConfig.Port} ({_sipConfig.Transport})");
+                sb.AppendLine($"AMI: {_sipConfig.AmiHost}:{_sipConfig.AmiPorta}");
+                sb.AppendLine($"CDR ativo: {_sipConfig.CdrAtivo}");
+                sb.AppendLine($"AutoUpdate: {_sipConfig.AutoUpdateEnabled}");
+
+                var entry = zip.CreateEntry("diagnostico.txt");
+                using (var w = new StreamWriter(entry.Open()))
+                    w.Write(sb.ToString());
+
+                // Log files
+                var logDir = LogHelper.LogDir;
+                if (Directory.Exists(logDir))
+                {
+                    foreach (var f in Directory.GetFiles(logDir, "*.log"))
+                    {
+                        try { zip.CreateEntryFromFile(f, $"logs/{System.IO.Path.GetFileName(f)}"); } catch { }
+                    }
+                }
+
+                txtLogResultado.Text = $"ZIP exportado: {dlg.FileName}";
+                txtLogResultado.Foreground = new SolidColorBrush(Color.FromRgb(21, 128, 61));
+                LogHelper.Info($"DIAG_EXPORTED path={dlg.FileName}");
+            }
+            catch (Exception ex)
+            {
+                txtLogResultado.Text = $"Erro ao exportar: {ex.Message}";
+                txtLogResultado.Foreground = new SolidColorBrush(Color.FromRgb(185, 28, 28));
+                LogHelper.Error("DIAG_EXPORT_ERROR", ex);
+            }
         }
 
         private void BtnCancelar_Click(object sender, RoutedEventArgs e) => Close();

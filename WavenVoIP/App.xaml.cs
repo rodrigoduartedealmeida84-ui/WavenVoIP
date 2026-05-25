@@ -143,6 +143,7 @@ public partial class App : Application
         {
             // Repair any empty/zero fields and persist — fixes configs saved before RepairDefaults existed
             config.RepairDefaults();
+            LogHelper.ConfigurarDeSettings(config);
             try { config.Salvar(); } catch { }
 
             var sip = new SipService();
