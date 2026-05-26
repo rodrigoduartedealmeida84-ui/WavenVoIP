@@ -76,6 +76,9 @@ namespace WavenVoIP
             // Recordings
             if (string.IsNullOrWhiteSpace(GravacaoTipoAcesso)) GravacaoTipoAcesso = "URL";
             if (string.IsNullOrWhiteSpace(GravacaoUrlBase))    GravacaoUrlBase    = "http://pabx.almeidagas.com/gravacoes/monitor/";
+
+            // Áudio
+            if (RingVolume <= 0) RingVolume = 80;
         }
 
         // Kept for call-site compatibility — delegates to RepairDefaults.
@@ -164,5 +167,12 @@ namespace WavenVoIP
 
         public bool LogEnabled         { get; set; } = true;
         public bool LogDetailedEnabled { get; set; } = false;
+
+        // ── Áudio v1.2.13 ──────────────────────────────────────────────────────
+        // Friendly names dos dispositivos; vazio = padrão do sistema (auto-detectado)
+        public string AudioInputDevice  { get; set; } = string.Empty;  // microfone da ligação
+        public string CallOutputDevice  { get; set; } = string.Empty;  // áudio da ligação
+        public string RingOutputDevice  { get; set; } = string.Empty;  // saída do toque
+        public int    RingVolume        { get; set; } = 80;            // 0-100
     }
 }

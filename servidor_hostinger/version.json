@@ -1,7 +1,7 @@
 {
-    "versao": "1.2.12",
-    "zip": "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v1.2.12/WavenVoIP.zip",
-    "sha256": "dc4218387614ddb0045514e9d65801b4f91995017c94a1b730c6f3c56fca3a8b",
-    "data": "2026-05-25",
-    "notas": "v1.2.12 - Hotfix Configuracoes (25/05/2026)\n[FIX] Janela Configuracoes nao abria apos atualizacao v1.2.11\n[FIX] Secao Logs e Diagnostico reescrita com estilos corretos\n[FIX] StaticResource inexistentes removidos do XAML"
+    "versao": "1.2.13",
+    "zip": "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v1.2.13/WavenVoIP.zip",
+    "sha256": "A9455243BB008610DCF400B4D74A347AD2BED8EE9101E0902BB423FFFBC9BAA9",
+    "data": "2026-05-26",
+    "notas": "v1.2.13 - Audio inteligente\n[FIX] Separacao entre audio da conversa e toque\n[NEW] Toque pode sair no alto-falante enquanto chamada usa headset\n[NEW] Volume do toque configuravel\n[FIX] Compatibilidade com headset Intelbras USB"
 }

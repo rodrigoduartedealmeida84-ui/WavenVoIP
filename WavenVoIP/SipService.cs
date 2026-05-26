@@ -1695,7 +1695,24 @@ namespace WavenVoIP
 
         private VoIPMediaSession CriarMedia()
         {
-            var audio = new WindowsAudioEndPoint(new AudioEncoder());
+            int outIdx = -1;
+            int inIdx  = -1;
+
+            if (_config != null)
+            {
+                if (!string.IsNullOrEmpty(_config.CallOutputDevice))
+                {
+                    outIdx = AudioDeviceService.IndiceWaveOutPorNome(_config.CallOutputDevice);
+                    RegistrarSinalSip($"AUDIO_DEVICE_DETECTED | call_output={_config.CallOutputDevice} waveOutIdx={outIdx}");
+                }
+                if (!string.IsNullOrEmpty(_config.AudioInputDevice))
+                {
+                    inIdx = AudioDeviceService.IndiceWaveInPorNome(_config.AudioInputDevice);
+                    RegistrarSinalSip($"AUDIO_DEVICE_DETECTED | audio_input={_config.AudioInputDevice} waveInIdx={inIdx}");
+                }
+            }
+
+            var audio = new WindowsAudioEndPoint(new AudioEncoder(), outIdx, inIdx);
             return new VoIPMediaSession(audio.ToMediaEndPoints())
             {
                 AcceptRtpFromAny = true

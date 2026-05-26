@@ -4,15 +4,29 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "1.2.12";
+        public const string Versao  = "1.2.13";
         public const string NomeApp = "WavenVoIP";
 
-        public static readonly DateTime DataBuild = new DateTime(2026, 5, 25);
+        public static readonly DateTime DataBuild = new DateTime(2026, 5, 26);
 
         public static string VersaoCompleta => $"{NomeApp} v{Versao}";
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v1.2.13 — Audio inteligente (26/05/2026)\n" +
+            "• [NEW] Separacao entre audio da conversa e toque de chamada\n" +
+            "• [NEW] Toque pode sair no alto-falante enquanto chamada usa headset\n" +
+            "• [NEW] Volume do toque configuravel (slider 0-100)\n" +
+            "• [NEW] Auto-deteccao de headset Intelbras USB na abertura de Configuracoes\n" +
+            "• [NEW] Campos: Microfone da ligacao, Audio da ligacao, Saida do toque\n" +
+            "• [NEW] Botao 'Testar toque' em Configuracoes com volume real\n" +
+            "• [FIX] Compatibilidade com headset Intelbras USB\n" +
+            "• [FIX] Toque NUNCA sai no headset se houver alto-falante disponivel\n" +
+            "• [LOG] AUDIO_DEVICE_DETECTED / AUDIO_HEADSET_INTELBRAS_DETECTED\n" +
+            "• [LOG] AUDIO_AUTO_INPUT_SELECTED / AUDIO_AUTO_CALL_OUTPUT_SELECTED\n" +
+            "• [LOG] AUDIO_AUTO_RING_OUTPUT_SELECTED / AUDIO_RING_VOLUME_SET\n" +
+            "• [LOG] AUDIO_LEGACY_CONFIG_MIGRATED / AUDIO_RING_TEST_PLAYED\n" +
+            "\n" +
             "v1.2.12 — Hotfix Configuracoes (25/05/2026)\n" +
             "• [FIX] Janela Configuracoes nao abria apos atualizacao v1.2.11\n" +
             "• [FIX] StaticResource SectionCardStyle/SectionTitleStyle inexistentes removidos\n" +

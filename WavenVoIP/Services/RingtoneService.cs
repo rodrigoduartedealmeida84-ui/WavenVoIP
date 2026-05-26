@@ -36,7 +36,7 @@ namespace WavenVoIP.Services
             return result;
         }
 
-        public void Tocar(string arquivoToque, string dispositivoId, string dispositivoNome, string fonte, bool loop = true)
+        public void Tocar(string arquivoToque, string dispositivoId, string dispositivoNome, string fonte, bool loop = true, float volume = 1.0f)
         {
             Parar();
             if (_disposed) return;
@@ -53,6 +53,12 @@ namespace WavenVoIP.Services
                     Log($"RING_ERROR=arquivo não encontrado: {arquivoToque}");
                     return;
                 }
+
+                var volClamp = Math.Clamp(volume, 0f, 1f);
+                Log($"AUDIO_RING_VOLUME_SET | volume={volClamp:F2}");
+
+                if (fonte == "TestButton")
+                    Log("AUDIO_RING_TEST_PLAYED");
 
                 // Enumerator stays alive for the duration of playback
                 _enumerator = new MMDeviceEnumerator();
@@ -85,6 +91,7 @@ namespace WavenVoIP.Services
                 Log("RING_PLAYER=WasapiOut");
 
                 _reader = new AudioFileReader(arquivoToque);
+                _reader.Volume = volClamp;
                 _player = new WasapiOut(device, AudioClientShareMode.Shared, false, 100);
                 _player.Init(_reader);
                 _player.PlaybackStopped += OnPlaybackStopped;

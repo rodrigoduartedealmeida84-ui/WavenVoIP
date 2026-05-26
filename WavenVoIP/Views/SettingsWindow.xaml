@@ -318,27 +318,53 @@
                                 </Border>
                                 <StackPanel VerticalAlignment="Center">
                                     <TextBlock Text="Áudio" FontSize="15" FontWeight="SemiBold"/>
-                                    <TextBlock Text="Microfone, alto-falante e toque de chamada" FontSize="12" Foreground="{StaticResource MutedBrush}"/>
+                                    <TextBlock Text="Microfone e áudio separados do toque. Headset Intelbras detectado automaticamente." FontSize="12" Foreground="{StaticResource MutedBrush}"/>
                                 </StackPanel>
                             </StackPanel>
                         </Border>
                         <StackPanel Margin="22,16,22,20">
-                            <Grid Margin="0,0,0,6">
+                            <!-- Microfone da ligação + Áudio da ligação -->
+                            <Grid Margin="0,0,0,12">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="16"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0">
-                                    <TextBlock Text="Microfone" FontWeight="SemiBold" FontSize="13" Margin="0,0,0,6"/>
+                                    <TextBlock Text="Microfone da ligação" FontWeight="SemiBold" FontSize="13" Margin="0,0,0,6"/>
                                     <ComboBox x:Name="cmbMicrofone"/>
                                 </StackPanel>
                                 <StackPanel Grid.Column="2">
-                                    <TextBlock Text="Alto-falante" FontWeight="SemiBold" FontSize="13" Margin="0,0,0,6"/>
+                                    <TextBlock Text="Áudio da ligação" FontWeight="SemiBold" FontSize="13" Margin="0,0,0,6"/>
                                     <ComboBox x:Name="cmbAltoFalante"/>
                                 </StackPanel>
                             </Grid>
-                            <TextBlock Text="Toque de chamada" FontWeight="SemiBold" FontSize="13" Margin="0,4,0,6"/>
+                            <!-- Saída do toque + Testar toque -->
+                            <TextBlock Text="Saída do toque (chamada recebida)" FontWeight="SemiBold" FontSize="13" Margin="0,0,0,6"/>
+                            <Grid Margin="0,0,0,12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="10"/>
+                                    <ColumnDefinition Width="130"/>
+                                </Grid.ColumnDefinitions>
+                                <ComboBox x:Name="cmbDispToque" Height="46"/>
+                                <Button Grid.Column="2" Content="Testar toque" Height="46" Style="{StaticResource SecondaryButtonStyle}" Click="BtnTestarToque_Click"/>
+                            </Grid>
+                            <!-- Volume do toque -->
+                            <Grid Margin="0,0,0,12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="10"/>
+                                    <ColumnDefinition Width="44"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="Volume do toque" FontWeight="SemiBold" FontSize="13" Margin="0,0,0,8"/>
+                                    <Slider x:Name="sldVolumeToque" Minimum="0" Maximum="100" Value="80" SmallChange="5" LargeChange="10" VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <TextBlock Grid.Column="2" x:Name="txtVolumeToqueVal" Text="80" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,2"/>
+                            </Grid>
+                            <!-- Arquivo de toque -->
+                            <TextBlock Text="Arquivo de toque" FontWeight="SemiBold" FontSize="13" Margin="0,0,0,6"/>
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>

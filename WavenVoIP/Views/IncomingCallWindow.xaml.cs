@@ -43,13 +43,29 @@ namespace WavenVoIP.Views
                 Left = area.Right - Width - 18;
                 Top = area.Bottom - Height - 18;
 
-                var config = ConfiguracaoAudioService.Carregar();
-                var path = string.IsNullOrWhiteSpace(config.Toque) ? "Assets\\toque_padrao.mp3" : config.Toque;
-                var fullPath = Path.IsPathRooted(path)
-                    ? path
-                    : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, path);
+                var sipCfg = SipConfig.CarregarSalva();
+                var audioCfg = ConfiguracaoAudioService.Carregar();
 
-                _ringtoneService.Tocar(fullPath, config.DispositivoToqueId, config.DispositivoToqueNome, "IncomingCallWindow");
+                // Arquivo de toque
+                var toqueArquivo = audioCfg.Toque;
+                if (string.IsNullOrWhiteSpace(toqueArquivo)) toqueArquivo = "Assets\\toque_padrao.mp3";
+                var fullPath = Path.IsPathRooted(toqueArquivo)
+                    ? toqueArquivo
+                    : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, toqueArquivo);
+
+                // Dispositivo de toque — preferir SipConfig.RingOutputDevice
+                var ringNome = sipCfg?.RingOutputDevice ?? string.Empty;
+                var ringId   = string.IsNullOrEmpty(ringNome)
+                    ? (audioCfg.DispositivoToqueId ?? string.Empty)
+                    : (Services.AudioDeviceService.BuscarIdDispositivoPorNome(ringNome, saida: true) ?? string.Empty);
+                if (string.IsNullOrEmpty(ringNome)) ringNome = audioCfg.DispositivoToqueNome ?? string.Empty;
+
+                // Volume
+                var volume = sipCfg != null && sipCfg.RingVolume > 0
+                    ? (float)sipCfg.RingVolume / 100f
+                    : 0.8f;
+
+                _ringtoneService.Tocar(fullPath, ringId, ringNome, "IncomingCallWindow", volume: volume);
             }
             catch { }
             Activate();

@@ -2163,13 +2163,17 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
             {
                 if (cmbCfgMicrofone == null || cmbCfgAltoFalante == null) return;
 
+                // Auto-detecção em segundo plano para campos vazios
+                var sipCfg = SipConfig.CarregarSalva() ?? new SipConfig();
+                AudioDeviceService.AplicarSelecaoAutomatica(sipCfg);
+
                 var audio = ConfiguracaoAudioService.Carregar();
                 cmbCfgMicrofone.Items.Clear();
                 cmbCfgAltoFalante.Items.Clear();
                 cmbCfgDispToque.Items.Clear();
-                cmbCfgMicrofone.Items.Add("Padrão do sistema");
-                cmbCfgAltoFalante.Items.Add("Padrão do sistema");
-                cmbCfgDispToque.Items.Add(new RingDeviceItem("", "Automático (Realtek/Speaker)"));
+                cmbCfgMicrofone.Items.Add("Automático");
+                cmbCfgAltoFalante.Items.Add("Automático");
+                cmbCfgDispToque.Items.Add(new RingDeviceItem("", "Automático"));
 
                 try
                 {
@@ -2184,16 +2188,25 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
                 }
                 catch { }
 
-                cmbCfgMicrofone.SelectedItem = cmbCfgMicrofone.Items.Cast<object>().FirstOrDefault(i => i?.ToString() == audio.Microfone) ?? "Padrão do sistema";
-                cmbCfgAltoFalante.SelectedItem = cmbCfgAltoFalante.Items.Cast<object>().FirstOrDefault(i => i?.ToString() == audio.AltoFalante) ?? "Padrão do sistema";
+                cmbCfgMicrofone.SelectedItem = string.IsNullOrEmpty(sipCfg.AudioInputDevice)
+                    ? cmbCfgMicrofone.Items[0]
+                    : cmbCfgMicrofone.Items.Cast<object>().FirstOrDefault(i => i?.ToString() == sipCfg.AudioInputDevice)
+                      ?? cmbCfgMicrofone.Items[0];
+
+                cmbCfgAltoFalante.SelectedItem = string.IsNullOrEmpty(sipCfg.CallOutputDevice)
+                    ? cmbCfgAltoFalante.Items[0]
+                    : cmbCfgAltoFalante.Items.Cast<object>().FirstOrDefault(i => i?.ToString() == sipCfg.CallOutputDevice)
+                      ?? cmbCfgAltoFalante.Items[0];
+
                 txtCfgToque.Text = audio.Toque;
                 chkCfgInvadirTela.IsChecked = audio.TocarEmTelaCheia;
-                if (chkToqueSpeakerPrincipal != null) chkToqueSpeakerPrincipal.IsChecked = audio.ToqueSempreNoSpeakerPrincipal;
+                if (chkToqueSpeakerPrincipal != null) chkToqueSpeakerPrincipal.IsChecked = true;
+
                 if (cmbCfgDispToque != null)
                 {
-                    cmbCfgDispToque.SelectedItem = string.IsNullOrEmpty(audio.DispositivoToqueId)
+                    cmbCfgDispToque.SelectedItem = string.IsNullOrEmpty(sipCfg.RingOutputDevice)
                         ? cmbCfgDispToque.Items[0]
-                        : cmbCfgDispToque.Items.Cast<object>().FirstOrDefault(i => i is RingDeviceItem r && r.Id == audio.DispositivoToqueId)
+                        : cmbCfgDispToque.Items.Cast<object>().FirstOrDefault(i => i is RingDeviceItem r && r.Nome == sipCfg.RingOutputDevice)
                           ?? cmbCfgDispToque.Items[0];
                 }
 
@@ -2399,13 +2412,23 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
                 try
                 {
                     var audio = ConfiguracaoAudioService.Carregar();
-                    audio.Microfone = cmbCfgMicrofone?.SelectedItem?.ToString() ?? "Padrão do sistema";
-                    audio.AltoFalante = cmbCfgAltoFalante?.SelectedItem?.ToString() ?? "Padrão do sistema";
+                    var selMicCfg     = cmbCfgMicrofone?.SelectedItem?.ToString() ?? string.Empty;
+                    var selSpeakerCfg = cmbCfgAltoFalante?.SelectedItem?.ToString() ?? string.Empty;
+                    var dispSelecionado = cmbCfgDispToque?.SelectedItem as RingDeviceItem;
+
+                    // Salvar novos campos no SipConfig
+                    config.AudioInputDevice = selMicCfg == "Automático" ? string.Empty : selMicCfg;
+                    config.CallOutputDevice = selSpeakerCfg == "Automático" ? string.Empty : selSpeakerCfg;
+                    config.RingOutputDevice = (dispSelecionado == null || string.IsNullOrEmpty(dispSelecionado.Nome) || dispSelecionado.Nome == "Automático")
+                        ? string.Empty : dispSelecionado.Nome;
+
+                    // Manter compatibilidade audio-config.json
+                    audio.Microfone   = string.IsNullOrEmpty(config.AudioInputDevice) ? "Padrão do sistema" : config.AudioInputDevice;
+                    audio.AltoFalante = string.IsNullOrEmpty(config.CallOutputDevice) ? "Padrão do sistema" : config.CallOutputDevice;
                     audio.Toque = txtCfgToque?.Text?.Trim() ?? "Assets\\toque_padrao.mp3";
                     audio.TocarEmTelaCheia = chkCfgInvadirTela?.IsChecked == true;
-                    audio.ToqueSempreNoSpeakerPrincipal = chkToqueSpeakerPrincipal?.IsChecked == true;
-                    var dispSelecionado = cmbCfgDispToque?.SelectedItem as RingDeviceItem;
-                    audio.DispositivoToqueId = dispSelecionado?.Id ?? string.Empty;
+                    audio.ToqueSempreNoSpeakerPrincipal = true;
+                    audio.DispositivoToqueId   = dispSelecionado?.Id   ?? string.Empty;
                     audio.DispositivoToqueNome = dispSelecionado?.Nome ?? string.Empty;
 
                     var intervaloItem = cmbGoogleSyncInterval?.SelectedItem as ComboBoxItem;

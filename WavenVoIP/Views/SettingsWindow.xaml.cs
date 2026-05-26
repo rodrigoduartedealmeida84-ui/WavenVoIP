@@ -23,6 +23,7 @@ namespace WavenVoIP.Views
         private ConfiguracaoAudio _config;
         private WhatsAppConfig _whatsConfig;
         private SipConfig _sipConfig;
+        private RingtoneService? _testRing;
 
         public SettingsWindow()
         {
@@ -32,10 +33,21 @@ namespace WavenVoIP.Views
             _sipConfig  = SipConfig.CarregarSalva() ?? new SipConfig();
             _sipConfig.RepairDefaults();
 
+            // Auto-detect audio devices and fill empty fields
+            AudioDeviceService.AplicarSelecaoAutomatica(_sipConfig);
+
             LogHelper.Sip($"CONFIG_LOADED_PATH: {SipConfig.ConfigFilePath}");
             LogHelper.Sip($"CONFIG_AFTER_REPAIR: ServerIp={_sipConfig.ServerIp} Port={_sipConfig.Port} Domain={_sipConfig.Domain} AmiHost={_sipConfig.AmiHost} AmiPorta={_sipConfig.AmiPorta} AmiUsuario={_sipConfig.AmiUsuario}");
 
             CarregarDispositivos();
+
+            sldVolumeToque.ValueChanged += (_, _) =>
+            {
+                if (txtVolumeToqueVal != null)
+                    txtVolumeToqueVal.Text = ((int)sldVolumeToque.Value).ToString();
+            };
+
+            Closed += (_, _) => _testRing?.Dispose();
 
             // Áudio
             txtToque.Text            = _config.Toque;
@@ -105,9 +117,11 @@ namespace WavenVoIP.Views
         {
             cmbMicrofone.Items.Clear();
             cmbAltoFalante.Items.Clear();
+            cmbDispToque.Items.Clear();
 
-            cmbMicrofone.Items.Add("Padrão do sistema");
-            cmbAltoFalante.Items.Add("Padrão do sistema");
+            cmbMicrofone.Items.Add("Automático");
+            cmbAltoFalante.Items.Add("Automático");
+            cmbDispToque.Items.Add(new RingDeviceItem("", "Automático"));
 
             try
             {
@@ -117,14 +131,32 @@ namespace WavenVoIP.Views
                     cmbMicrofone.Items.Add(mic.FriendlyName);
 
                 foreach (var speaker in enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active))
+                {
                     cmbAltoFalante.Items.Add(speaker.FriendlyName);
+                    cmbDispToque.Items.Add(new RingDeviceItem(speaker.ID, speaker.FriendlyName));
+                }
             }
-            catch
-            {
-            }
+            catch { }
 
-            cmbMicrofone.SelectedItem = cmbMicrofone.Items.Cast<object>().FirstOrDefault(i => i?.ToString() == _config.Microfone) ?? "Padrão do sistema";
-            cmbAltoFalante.SelectedItem = cmbAltoFalante.Items.Cast<object>().FirstOrDefault(i => i?.ToString() == _config.AltoFalante) ?? "Padrão do sistema";
+            // Selecionar a partir do SipConfig (novos campos)
+            cmbMicrofone.SelectedItem = string.IsNullOrEmpty(_sipConfig.AudioInputDevice)
+                ? cmbMicrofone.Items[0]
+                : cmbMicrofone.Items.Cast<object>().FirstOrDefault(i => i?.ToString() == _sipConfig.AudioInputDevice)
+                  ?? cmbMicrofone.Items[0];
+
+            cmbAltoFalante.SelectedItem = string.IsNullOrEmpty(_sipConfig.CallOutputDevice)
+                ? cmbAltoFalante.Items[0]
+                : cmbAltoFalante.Items.Cast<object>().FirstOrDefault(i => i?.ToString() == _sipConfig.CallOutputDevice)
+                  ?? cmbAltoFalante.Items[0];
+
+            cmbDispToque.SelectedItem = string.IsNullOrEmpty(_sipConfig.RingOutputDevice)
+                ? cmbDispToque.Items[0]
+                : cmbDispToque.Items.Cast<object>().FirstOrDefault(i => i is RingDeviceItem r && r.Nome == _sipConfig.RingOutputDevice)
+                  ?? cmbDispToque.Items[0];
+
+            sldVolumeToque.Value = _sipConfig.RingVolume > 0 ? _sipConfig.RingVolume : 80;
+            if (txtVolumeToqueVal != null)
+                txtVolumeToqueVal.Text = ((int)sldVolumeToque.Value).ToString();
         }
 
         private void BtnTrocarToque_Click(object sender, RoutedEventArgs e)
@@ -135,6 +167,41 @@ namespace WavenVoIP.Views
             };
             if (dlg.ShowDialog() == true)
                 txtToque.Text = dlg.FileName;
+        }
+
+        private void BtnTestarToque_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                _testRing?.Parar();
+                _testRing = new RingtoneService();
+
+                var dispSelecionado = cmbDispToque?.SelectedItem as RingDeviceItem;
+                var deviceId   = dispSelecionado?.Id   ?? string.Empty;
+                var deviceNome = dispSelecionado?.Nome ?? string.Empty;
+                var volume = sldVolumeToque != null ? (float)sldVolumeToque.Value / 100f : 0.8f;
+
+                var path = string.IsNullOrWhiteSpace(txtToque?.Text)
+                    ? "Assets\\toque_padrao.mp3"
+                    : txtToque.Text.Trim();
+                var fullPath = System.IO.Path.IsPathRooted(path)
+                    ? path
+                    : System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, path);
+
+                if (!System.IO.File.Exists(fullPath))
+                {
+                    MessageBox.Show("Arquivo de toque não encontrado:\n" + fullPath, "Waven VoIP");
+                    return;
+                }
+
+                var svc = _testRing;
+                svc.Tocar(fullPath, deviceId, deviceNome, "TestButton", loop: false, volume: volume);
+                System.Threading.Tasks.Task.Delay(4000).ContinueWith(_ => Dispatcher.Invoke(() => svc.Parar()));
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Erro ao testar toque: " + ex.Message, "Waven VoIP");
+            }
         }
 
 
@@ -165,9 +232,25 @@ namespace WavenVoIP.Views
 
         private void BtnSalvar_Click(object sender, RoutedEventArgs e)
         {
-            // Áudio
-            _config.Microfone        = cmbMicrofone.SelectedItem?.ToString() ?? "Padrão do sistema";
-            _config.AltoFalante      = cmbAltoFalante.SelectedItem?.ToString() ?? "Padrão do sistema";
+            // Áudio — salva nos campos novos do SipConfig
+            var selMic     = cmbMicrofone.SelectedItem?.ToString() ?? string.Empty;
+            var selSpeaker = cmbAltoFalante.SelectedItem?.ToString() ?? string.Empty;
+            var dispToque  = cmbDispToque?.SelectedItem as RingDeviceItem;
+
+            _sipConfig.AudioInputDevice = selMic == "Automático" ? string.Empty : selMic;
+            _sipConfig.CallOutputDevice = selSpeaker == "Automático" ? string.Empty : selSpeaker;
+            _sipConfig.RingOutputDevice = (dispToque == null || string.IsNullOrEmpty(dispToque.Nome) || dispToque.Nome == "Automático")
+                ? string.Empty : dispToque.Nome;
+            _sipConfig.RingVolume = sldVolumeToque != null ? (int)sldVolumeToque.Value : 80;
+
+            // Preenche campos ainda vazios com auto-detecção
+            AudioDeviceService.AplicarSelecaoAutomatica(_sipConfig);
+
+            // Mantém compatibilidade com audio-config.json legado
+            _config.Microfone        = string.IsNullOrEmpty(_sipConfig.AudioInputDevice) ? "Padrão do sistema" : _sipConfig.AudioInputDevice;
+            _config.AltoFalante      = string.IsNullOrEmpty(_sipConfig.CallOutputDevice) ? "Padrão do sistema" : _sipConfig.CallOutputDevice;
+            _config.DispositivoToqueNome = _sipConfig.RingOutputDevice;
+            _config.DispositivoToqueId   = dispToque?.Id ?? string.Empty;
             _config.Toque            = string.IsNullOrWhiteSpace(txtToque.Text?.Trim()) ? "Assets\\toque_padrao.mp3" : txtToque.Text.Trim();
             _config.TocarEmTelaCheia = chkInvadirTela.IsChecked == true;
             ConfiguracaoAudioService.Salvar(_config);
