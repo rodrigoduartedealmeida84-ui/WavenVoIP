@@ -1,7 +1,7 @@
 {
-    "versao": "1.2.13",
-    "zip": "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v1.2.13/WavenVoIP.zip",
-    "sha256": "A9455243BB008610DCF400B4D74A347AD2BED8EE9101E0902BB423FFFBC9BAA9",
-    "data": "2026-05-26",
-    "notas": "v1.2.13 - Audio inteligente\n[FIX] Separacao entre audio da conversa e toque\n[NEW] Toque pode sair no alto-falante enquanto chamada usa headset\n[NEW] Volume do toque configuravel\n[FIX] Compatibilidade com headset Intelbras USB"
+    "versao": "1.2.14",
+    "zip": "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v1.2.14/WavenVoIP.zip",
+    "sha256": "7AC814AB0A3B431B750BDDFB7A0BD0AAA5977D2FA9006F3CAF00F82AC1EFA8C3",
+    "data": "2026-05-28",
+    "notas": "v1.2.14 - CDR Gravacoes corretas + Historico + Contatos da Empresa\n[FIX] Gravacao associada ao numero real discado\n[FIX] Canal/tronco exibido corretamente (Operadora/WhatsApp TIM/Vivo)\n[FIX] Duplicatas de recebidas removidas\n[NEW] Contatos da empresa sincronizados automaticamente\n[NEW] Favoritos no topo + botao X na pesquisa"
 }
