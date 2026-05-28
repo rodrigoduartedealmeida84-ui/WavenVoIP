@@ -121,15 +121,20 @@ namespace WavenVoIP.Services
             }
 
             // Remove locally-tracked items superseded by a CDR record (same external number, ±2 min).
+            // Normalize both numbers (strip route prefix + country code 55) before comparing so that
+            // local SIP entries like "25566984671226" (prefix 2 + 55 + number) correctly match the
+            // CDR-normalized number "66984671226".
             existentes.RemoveAll(e =>
                 !e.FonteCdr &&
                 !string.IsNullOrWhiteSpace(e.Numero) &&
                 itensCdr.Any(c =>
-                    string.Equals(
-                        DialPlanService.RemoverPrefixoDeRota(c.Numero),
-                        DialPlanService.RemoverPrefixoDeRota(e.Numero),
-                        StringComparison.OrdinalIgnoreCase) &&
-                    Math.Abs((c.DataHora - e.DataHora).TotalMinutes) <= 2));
+                {
+                    var numC = PhoneNumberNormalizer.NormalizeBrazilPhone(DialPlanService.RemoverPrefixoDeRota(c.Numero ?? string.Empty));
+                    var numE = PhoneNumberNormalizer.NormalizeBrazilPhone(DialPlanService.RemoverPrefixoDeRota(e.Numero ?? string.Empty));
+                    return numC.Length >= 8 &&
+                           string.Equals(numC, numE, StringComparison.OrdinalIgnoreCase) &&
+                           Math.Abs((c.DataHora - e.DataHora).TotalMinutes) <= 2;
+                }));
 
             // Deduplicate by UniqueId before saving. Prior buggy syncs accumulated multiple copies
             // of the same CDR record in the JSON. The first occurrence of each UID in existentes

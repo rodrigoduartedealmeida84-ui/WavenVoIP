@@ -1,6 +1,6 @@
 {
   "version": "1.2.14",
   "url": "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v1.2.14/WavenVoIP_Setup.exe",
-  "notes": "v1.2.14 — Contatos da Empresa, Favoritos no Topo, Deduplicacao automatica, Estrela colorida, Company Config auto-sync.",
+  "notes": "v1.2.14 — Historico CDR + Gravacoes + Contatos da Empresa. Fixes: gravacao associada ao numero real discado, canal/tronco exibido corretamente, duplicatas removidas, botao X na pesquisa. Novidades: company-contacts.json distribuido para todos os ramais, company-config.json auto-sync WhatsApp+CDR, favoritos no topo, deduplicacao automatica.",
   "date": "2026-05-28"
 }

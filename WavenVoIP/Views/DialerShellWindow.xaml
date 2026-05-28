@@ -662,7 +662,10 @@
                                     </Button>
                                     <Border HorizontalAlignment="Stretch" Background="White" CornerRadius="16" BorderBrush="#E7EAF3" BorderThickness="1" Height="44">
                                         <DockPanel Margin="12,0">
-                                            <TextBlock Text="🔎" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                            <TextBlock DockPanel.Dock="Left" Text="🔎" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                            <Button x:Name="btnLimparBuscaContatos" DockPanel.Dock="Right" Click="BtnLimparBuscaContatos_Click" Width="22" Height="22" Margin="4,0,2,0" VerticalAlignment="Center" Style="{StaticResource IconActionButton}" Visibility="Collapsed" ToolTip="Limpar busca" Padding="0">
+                                                <TextBlock Text="✕" FontSize="11" Foreground="#94A3B8" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                                            </Button>
                                             <TextBox x:Name="txtBuscaContatosShell" BorderThickness="0" Background="Transparent" Height="38" Margin="0" Padding="0" VerticalContentAlignment="Center" TextChanged="TxtBuscaContatosShell_TextChanged" ToolTip="Buscar contato por nome, número ou observação"/>
                                         </DockPanel>
                                     </Border>
@@ -778,7 +781,13 @@
                                         <ComboBoxItem Content="Entrada não identificada"/>
                                     </ComboBox>
                                     <Border DockPanel.Dock="Right" Background="White" CornerRadius="16" BorderBrush="#E7EAF3" BorderThickness="1" Width="280" Height="44" Margin="8,0,0,0">
-                                        <DockPanel Margin="12,0"><TextBlock Text="🔎" VerticalAlignment="Center" Margin="0,0,8,0"/><TextBox x:Name="txtBuscaHistoricoShell" BorderThickness="0" Background="Transparent" Height="38" Margin="0" Padding="0" VerticalContentAlignment="Center" TextChanged="TxtBuscaHistoricoShell_TextChanged" ToolTip="Buscar por nome, número, canal ou tipo"/></DockPanel>
+                                        <DockPanel Margin="12,0">
+                                            <TextBlock DockPanel.Dock="Left" Text="🔎" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                            <Button x:Name="btnLimparBuscaHistorico" DockPanel.Dock="Right" Click="BtnLimparBuscaHistorico_Click" Width="22" Height="22" Margin="4,0,2,0" VerticalAlignment="Center" Style="{StaticResource IconActionButton}" Visibility="Collapsed" ToolTip="Limpar busca" Padding="0">
+                                                <TextBlock Text="✕" FontSize="11" Foreground="#94A3B8" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                                            </Button>
+                                            <TextBox x:Name="txtBuscaHistoricoShell" BorderThickness="0" Background="Transparent" Height="38" Margin="0" Padding="0" VerticalContentAlignment="Center" TextChanged="TxtBuscaHistoricoShell_TextChanged" ToolTip="Buscar por nome, número, canal ou tipo"/>
+                                        </DockPanel>
                                     </Border>
                                 </DockPanel>
                                 <TextBlock x:Name="txtStatusHistorico" Text="" FontSize="11" Foreground="#94A3B8" HorizontalAlignment="Right" Margin="0,4,0,0"/>

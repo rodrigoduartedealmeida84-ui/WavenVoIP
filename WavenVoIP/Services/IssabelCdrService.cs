@@ -123,6 +123,14 @@ namespace WavenVoIP.Services
                 }
             }
 
+            // Deduplicate legacy entries: CDR+local-SIP pairs and multi-ring-attempt CDR duplicates
+            // that survived previous syncs. Uses a number-only comparison (no tipo check) so that
+            // a local SIP "Realizada" matches a CDR "Recebida" for the same outgoing trunk call.
+            var antesDedup = itens.Count;
+            itens = DeduplicarPorNumeroETempo(itens);
+            if (itens.Count != antesDedup)
+                Log($"REPROCESS_DEDUP_DONE removidos={antesDedup - itens.Count}");
+
             HistoricoStorageService.Salvar(itens.OrderByDescending(i => i.DataHora).Take(5000).ToList());
             Log($"REPROCESS_DONE total={itens.Count} numerosCorrigidos={numerosCorrigidos} urlsRemovidas={urlsRemovidas}");
             return (itens.Count, numerosCorrigidos, urlsRemovidas);
@@ -271,11 +279,38 @@ namespace WavenVoIP.Services
                             if (cdr.BillSec == 0 && cdr.Duration == 0 &&
                                 (comGravacao.BillSec > 0 || comGravacao.Duration > 0))
                                 duracaoFmt = FormatarDuracao(comGravacao.BillSec > 0 ? comGravacao.BillSec : comGravacao.Duration);
+                            Log($"CDR_RECORDING_LINKED_BY_LINKEDID linkedid={cdr.LinkedId} arquivo={recordingFile}");
                         }
+                    }
+                    else
+                    {
+                        Log($"CDR_RECORDING_LINKED_BY_UNIQUEID uniqueid={cdr.UniqueId} arquivo={recordingFile}");
                     }
 
                     Log($"CDR_RECORDING_FIELD_DEBUG linkedids={linkedIds} recordingfile={recordingFile} " +
                         $"grupoComGravacao={grupo.Count(r => !string.IsNullOrWhiteSpace(r.RecordingFile))}");
+
+                    // Outgoing PSTN calls generate a CDR from the trunk/gateway perspective:
+                    // src=trunk_DID (e.g. 556684263277), dst=ramal (100).
+                    // The real called number is embedded in the recording filename with a route prefix
+                    // (e.g. force-266984671226-100-... → 2=route, 66984671226=destination).
+                    // Extract it and override numeroExterno/tipo/origemSaida so the entry is correctly classified.
+                    var origemSaida = DedurzirTronco(cdr);
+                    if (!string.IsNullOrWhiteSpace(recordingFile))
+                    {
+                        var numeroDeGravacao = ExtrairNumeroDestinoDeGravacao(recordingFile);
+                        if (!string.IsNullOrWhiteSpace(numeroDeGravacao))
+                        {
+                            Log($"CDR_RECORDING_CORRECTS_NUMBER | anterior={numeroExterno} correto={numeroDeGravacao} arquivo={recordingFile}");
+                            numeroExterno = numeroDeGravacao;
+                            tipo = TipoHistoricoLigacao.Realizada;
+                            // Extract route name (Operadora / WhatsApp TIM / WhatsApp Vivo) from the
+                            // route prefix digit embedded in the recording filename.
+                            var origemDeGravacao = ExtrairOrigemSaidaDeGravacao(recordingFile);
+                            if (!string.IsNullOrWhiteSpace(origemDeGravacao))
+                                origemSaida = origemDeGravacao;
+                        }
+                    }
 
                     var gravacaoUrl = ResolverUrlGravacao(recordingFile, config, recordingDate);
 
@@ -289,7 +324,7 @@ namespace WavenVoIP.Services
                         Tipo            = tipo,
                         DataHora        = cdr.CallDate,
                         Duracao         = duracaoFmt,
-                        OrigemSaida     = DedurzirTronco(cdr),
+                        OrigemSaida     = origemSaida,
                         RamalOrigem     = string.IsNullOrWhiteSpace(srcRamal)  ? chRamal    : srcRamal,
                         RamalDestino    = string.IsNullOrWhiteSpace(dstRamal)  ? dstChRamal : dstRamal,
                         RamalAtendeu    = ramalAtendeu,
@@ -302,6 +337,11 @@ namespace WavenVoIP.Services
                     Log($"CDR_CALL_CONSOLIDATED linkedids={linkedIds} tipo={tipo} numero={numeroExterno} " +
                         $"ramalAtendeu={ramalAtendeu} caixaPostal={foiParaCaixaPostal} gravacao={!string.IsNullOrWhiteSpace(gravacaoUrl)}");
                 }
+
+                // Deduplicate trunk-leg CDR entries: outgoing calls generate two CDR rows
+                // (one from the ramal, one from the PSTN/trunk). After ObterNumeroExterno fix,
+                // both show the same external number → merge recording into ramal entry.
+                resultado = DeduplicarChamadasMesmaRaiz(resultado);
 
                 // Validate CDR-derived recording URLs in parallel (removes 404 entries)
                 await ValidarUrlsCdrAsync(resultado);
@@ -319,6 +359,114 @@ namespace WavenVoIP.Services
             }
 
             return resultado;
+        }
+
+        // ── Trunk-leg deduplication ────────────────────────────────────────────────
+
+        // Outgoing calls through a PSTN trunk produce two CDR rows:
+        //   Row A (ramal leg): src=ramal(109), dst=66984671226 — no recording
+        //   Row B (trunk leg): src=trunk(6684263277), dst=66984671226 — HAS recording
+        // After ObterNumeroExterno fix both rows show Numero=66984671226 and the same Tipo.
+        // This method merges them: keeps the ramal-leg entry and copies the recording from the trunk leg.
+        private static List<HistoricoLigacaoItem> DeduplicarChamadasMesmaRaiz(List<HistoricoLigacaoItem> itens)
+        {
+            if (itens.Count < 2) return itens;
+
+            var removidos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            for (int i = 0; i < itens.Count; i++)
+            {
+                var a = itens[i];
+                if (removidos.Contains(a.Id)) continue;
+
+                var numA = PhoneNumberNormalizer.NormalizeBrazilPhone(
+                    new string((a.Numero ?? string.Empty).Where(char.IsDigit).ToArray()));
+                if (numA.Length < 7) continue;
+
+                for (int j = i + 1; j < itens.Count; j++)
+                {
+                    var b = itens[j];
+                    if (removidos.Contains(b.Id)) continue;
+                    if (a.Tipo != b.Tipo) continue;
+
+                    // Only look within a 2-minute window (ramal/trunk rows are milliseconds apart)
+                    var diffSec = Math.Abs((a.DataHora - b.DataHora).TotalSeconds);
+                    if (diffSec > 120) continue;
+
+                    var numB = PhoneNumberNormalizer.NormalizeBrazilPhone(
+                        new string((b.Numero ?? string.Empty).Where(char.IsDigit).ToArray()));
+                    if (!string.Equals(numA, numB, StringComparison.OrdinalIgnoreCase)) continue;
+
+                    // Same call: merge recording (from whichever row has it) into entry a
+                    if (string.IsNullOrWhiteSpace(a.GravacaoUrl) && !string.IsNullOrWhiteSpace(b.GravacaoUrl))
+                    {
+                        a.GravacaoUrl     = b.GravacaoUrl;
+                        a.GravacaoArquivo = b.GravacaoArquivo;
+                    }
+                    if (a.Duracao == "00:00" && b.Duracao != "00:00")
+                        a.Duracao = b.Duracao;
+
+                    removidos.Add(b.Id);
+                    Log($"CDR_HISTORY_ROW_CONSOLIDATED | num={numA} tipo={a.Tipo} " +
+                        $"mantido={a.UniqueId} removido={b.UniqueId} diff_sec={diffSec:F0} " +
+                        $"gravacao_copiada={!string.IsNullOrWhiteSpace(a.GravacaoUrl)}");
+                }
+            }
+
+            var total = itens.Count;
+            var result = itens.Where(i => !removidos.Contains(i.Id)).ToList();
+            if (removidos.Count > 0)
+                Log($"CDR_HISTORY_DEDUP_DONE | removidos={removidos.Count} total_antes={total} total_depois={result.Count}");
+            return result;
+        }
+
+        // Deduplicates history entries by normalized number + time window only (no tipo check).
+        // Used during local history reprocessing to clean up legacy duplicates such as CDR entries
+        // that collide with local-SIP entries that were not removed by MesclarCdr due to number
+        // format mismatches (e.g. "5566..." CDR vs "66..." local). When both entries survive,
+        // the CDR entry (FonteCdr=true) wins; otherwise the first occurrence is kept.
+        private static List<HistoricoLigacaoItem> DeduplicarPorNumeroETempo(List<HistoricoLigacaoItem> itens)
+        {
+            if (itens.Count < 2) return itens;
+
+            // Sort CDR entries first so they win the "keep first" election
+            var ordenados = itens.OrderByDescending(i => i.FonteCdr).ThenByDescending(i => i.DataHora).ToList();
+            var removidos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            for (int i = 0; i < ordenados.Count; i++)
+            {
+                var a = ordenados[i];
+                if (removidos.Contains(a.Id)) continue;
+
+                var numA = PhoneNumberNormalizer.NormalizeBrazilPhone(
+                    new string((a.Numero ?? string.Empty).Where(char.IsDigit).ToArray()));
+                if (numA.Length < 8) continue;
+
+                for (int j = i + 1; j < ordenados.Count; j++)
+                {
+                    var b = ordenados[j];
+                    if (removidos.Contains(b.Id)) continue;
+
+                    var diffSec = Math.Abs((a.DataHora - b.DataHora).TotalSeconds);
+                    if (diffSec > 120) continue;
+
+                    var numB = PhoneNumberNormalizer.NormalizeBrazilPhone(
+                        new string((b.Numero ?? string.Empty).Where(char.IsDigit).ToArray()));
+                    if (!string.Equals(numA, numB, StringComparison.OrdinalIgnoreCase)) continue;
+
+                    if (string.IsNullOrWhiteSpace(a.GravacaoUrl) && !string.IsNullOrWhiteSpace(b.GravacaoUrl))
+                    {
+                        a.GravacaoUrl     = b.GravacaoUrl;
+                        a.GravacaoArquivo = b.GravacaoArquivo;
+                    }
+                    if (a.Duracao == "00:00" && b.Duracao != "00:00") a.Duracao = b.Duracao;
+
+                    removidos.Add(b.Id);
+                    Log($"REPROCESS_DUPLICATE_REMOVED | num={numA} mantido={a.UniqueId}({a.Tipo}) removido={b.UniqueId}({b.Tipo}) diff_sec={diffSec:F0}");
+                }
+            }
+
+            return ordenados.Where(i => !removidos.Contains(i.Id)).ToList();
         }
 
         // ── Group merging ──────────────────────────────────────────────────────────
@@ -646,20 +794,47 @@ namespace WavenVoIP.Services
 
         private static string ObterNumeroExterno(CdrChamada cdr, string ramal)
         {
+            Log($"CDR_RECORDING_LINK_START linkedid={cdr.LinkedId} src={cdr.Src} dst={cdr.Dst} ramal={ramal}");
+
             if (!string.IsNullOrWhiteSpace(ramal) && ExtrairRamalSrc(cdr.Src) == ramal)
+            {
+                Log($"CDR_CALL_MAIN_NUMBER_SELECTED numero={cdr.Dst} via=ramal_src_match");
                 return cdr.Dst;
+            }
 
             // Extract ONLY the phone number from CLID — never the name part.
             // CLID format: "Name" <number>  or  <number>  or  plain digits
             if (!string.IsNullOrWhiteSpace(cdr.Clid))
             {
                 var m = System.Text.RegularExpressions.Regex.Match(cdr.Clid, @"<(\d+)>");
-                if (m.Success) return m.Groups[1].Value;
+                if (m.Success)
+                {
+                    Log($"CDR_CALL_MAIN_NUMBER_SELECTED numero={m.Groups[1].Value} via=clid_bracket");
+                    return m.Groups[1].Value;
+                }
                 var soNum = new string(cdr.Clid.Where(char.IsDigit).ToArray());
-                if (soNum.Length >= 6) return soNum;
+                if (soNum.Length >= 6)
+                {
+                    Log($"CDR_CALL_MAIN_NUMBER_SELECTED numero={soNum} via=clid_digits");
+                    return soNum;
+                }
             }
 
-            return cdr.Src;
+            // Trunk-leg detection: both src and dst are long external numbers (neither is a ramal).
+            // This happens on outgoing PSTN calls where Asterisk records a separate CDR for the
+            // trunk/carrier leg with src=trunk_number (e.g. 6684263277) and dst=real_called_number.
+            // In this case dst IS the number the user actually called.
+            var srcDigits = new string((cdr.Src ?? string.Empty).Where(char.IsDigit).ToArray());
+            var dstDigits = new string((cdr.Dst ?? string.Empty).Where(char.IsDigit).ToArray());
+            if (!EhRamal(cdr.Src ?? string.Empty) && srcDigits.Length >= 7 && !EhRamal(cdr.Dst ?? string.Empty) && dstDigits.Length >= 7)
+            {
+                Log($"CDR_RECORDING_IGNORED_TRUNK_NUMBER | numero_tronco={srcDigits} numero_real={dstDigits}");
+                Log($"CDR_CALL_MAIN_NUMBER_SELECTED numero={cdr.Dst ?? string.Empty} via=trunk_leg_dst");
+                return cdr.Dst ?? string.Empty;
+            }
+
+            Log($"CDR_CALL_MAIN_NUMBER_SELECTED numero={cdr.Src ?? string.Empty} via=fallback_src");
+            return cdr.Src ?? string.Empty;
         }
 
         private static string DedurzirTronco(CdrChamada cdr)
@@ -744,6 +919,48 @@ namespace WavenVoIP.Services
             var partes = fname.Split('-', '_');
             for (int i = 1; i < partes.Length; i++)
                 if (EhRamal(partes[i])) return partes[i];
+            return string.Empty;
+        }
+
+        // Extracts the real called number from Asterisk forced-recording filenames.
+        // Format: force-{dst_with_route_prefix}-{src_ramal}-{date}-{time}-{uniqueid}.wav
+        // Example: force-266984671226-100-20260527-164921-... → "66984671226"
+        // Returns non-empty ONLY when the first 10+-digit segment has a route prefix (1/2/3),
+        // proving it is an outgoing call. Incoming calls have no route prefix → returns empty.
+        private static string ExtrairNumeroDestinoDeGravacao(string recordingFile)
+        {
+            if (string.IsNullOrWhiteSpace(recordingFile)) return string.Empty;
+            var fname  = Path.GetFileNameWithoutExtension(recordingFile);
+            var partes = fname.Split('-', '_');
+            for (int i = 1; i < partes.Length; i++)
+            {
+                var raw = new string(partes[i].Where(char.IsDigit).ToArray());
+                if (raw.Length < 10) continue;
+                var stripped = DialPlanService.RemoverPrefixoDeRota(raw);
+                if (!string.Equals(stripped, raw, StringComparison.Ordinal))
+                    return PhoneNumberNormalizer.NormalizeBrazilPhone(stripped);
+                // First 10+ digit segment found but no route prefix → incoming call
+                return string.Empty;
+            }
+            return string.Empty;
+        }
+
+        // Returns the route name ("Operadora", "WhatsApp TIM", "WhatsApp Vivo") from the route
+        // prefix digit embedded in the recording filename destination number.
+        // Example: force-266984671226-... → prefix "2" → "WhatsApp TIM"
+        private static string ExtrairOrigemSaidaDeGravacao(string recordingFile)
+        {
+            if (string.IsNullOrWhiteSpace(recordingFile)) return string.Empty;
+            var fname  = Path.GetFileNameWithoutExtension(recordingFile);
+            var partes = fname.Split('-', '_');
+            for (int i = 1; i < partes.Length; i++)
+            {
+                var raw = new string(partes[i].Where(char.IsDigit).ToArray());
+                if (raw.Length < 10) continue;
+                if (DialPlanService.TemPrefixoDeRota(raw))
+                    return DialPlanService.NomeSaidaPeloPrefixo(raw);
+                return string.Empty;
+            }
             return string.Empty;
         }
 

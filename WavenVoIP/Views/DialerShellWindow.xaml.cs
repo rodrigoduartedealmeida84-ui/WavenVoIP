@@ -835,7 +835,16 @@ namespace WavenVoIP.Views
 
         private void TxtBuscaContatosShell_TextChanged(object sender, TextChangedEventArgs e)
         {
+            if (btnLimparBuscaContatos != null)
+                btnLimparBuscaContatos.Visibility = !string.IsNullOrEmpty(txtBuscaContatosShell?.Text)
+                    ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
             if (gridContatosShell != null) AtualizarContatosShell();
+        }
+
+        private void BtnLimparBuscaContatos_Click(object sender, RoutedEventArgs e)
+        {
+            if (txtBuscaContatosShell != null) txtBuscaContatosShell.Text = string.Empty;
+            txtBuscaContatosShell?.Focus();
         }
 
         // ── Favorites ────────────────────────────────────────────────────────────
@@ -1177,7 +1186,16 @@ namespace WavenVoIP.Views
 
         private void TxtBuscaHistoricoShell_TextChanged(object sender, TextChangedEventArgs e)
         {
+            if (btnLimparBuscaHistorico != null)
+                btnLimparBuscaHistorico.Visibility = !string.IsNullOrEmpty(txtBuscaHistoricoShell?.Text)
+                    ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
             if (gridHistoricoShell != null) AtualizarHistoricoShell();
+        }
+
+        private void BtnLimparBuscaHistorico_Click(object sender, RoutedEventArgs e)
+        {
+            if (txtBuscaHistoricoShell != null) txtBuscaHistoricoShell.Text = string.Empty;
+            txtBuscaHistoricoShell?.Focus();
         }
 
         private void CmbFiltroCanalHistorico_SelectionChanged(object sender, SelectionChangedEventArgs e)
