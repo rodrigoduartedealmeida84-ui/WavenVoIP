@@ -66,11 +66,13 @@ function initShowcase() {
 
   // Map outer tab → screen id and app nav screen key
   const tabMap = {
-    dialer:     { screen: 'scr-dialer',     nav: 'dialer'    },
-    history:    { screen: 'scr-history',    nav: 'history'   },
-    dashboard:  { screen: 'scr-dashboard',  nav: 'dashboard' },
-    contacts:   { screen: 'scr-contacts',   nav: 'contacts'  },
-    conference: { screen: 'scr-conference', nav: null        },
+    dialer:       { screen: 'scr-dialer',       nav: 'dialer'    },
+    history:      { screen: 'scr-history',      nav: 'history'   },
+    dashboard:    { screen: 'scr-dashboard',    nav: 'dashboard' },
+    contacts:     { screen: 'scr-contacts',     nav: 'contacts'  },
+    conference:   { screen: 'scr-conference',   nav: null        },
+    logs:         { screen: 'scr-logs',         nav: null        },
+    integrations: { screen: 'scr-integrations', nav: null        },
   };
 
   function activateTab(tabKey) {

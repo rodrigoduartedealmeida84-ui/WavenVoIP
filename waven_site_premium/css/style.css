@@ -559,3 +559,120 @@ button { cursor: pointer; border: none; background: none; font-family: var(--f);
   .scw-statusbtn { display: none; }
   .float-call,.float-wa { display: none; }
 }
+
+/* ══════════════════════════════════════════════════════════════
+   LOG PANEL (showcase tab)
+   ══════════════════════════════════════════════════════════════ */
+.scw-logs {
+  display: flex; flex-direction: column; height: 100%;
+  background: #0F172A; border-radius: 0 0 var(--r) var(--r);
+}
+.scwlog-toolbar {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 8px 12px; background: #1E293B; border-bottom: 1px solid #334155;
+}
+.scwlog-chip {
+  font-size: 11px; font-weight: 600; color: #94A3B8;
+  background: #0F172A; border: 1px solid #334155;
+  padding: 3px 10px; border-radius: 99px; cursor: pointer;
+  transition: var(--t);
+}
+.scwlog-chip.active, .scwlog-chip:hover { background: var(--primary); color: #fff; border-color: var(--primary); }
+.scwlog-actions { margin-left: auto; display: flex; gap: 4px; }
+.scwlog-act {
+  width: 26px; height: 26px; border-radius: 6px;
+  background: #1E293B; border: 1px solid #334155; color: #64748B;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; cursor: pointer; transition: var(--t);
+}
+.scwlog-act:hover { color: #E2E8F0; background: #334155; }
+.scwlog-terminal {
+  flex: 1; overflow-y: auto; padding: 8px 12px;
+  font-family: 'Courier New', monospace; font-size: 10.5px; line-height: 1.7;
+}
+.scwlog-terminal::-webkit-scrollbar { width: 4px; }
+.scwlog-terminal::-webkit-scrollbar-track { background: #0F172A; }
+.scwlog-terminal::-webkit-scrollbar-thumb { background: #334155; border-radius: 99px; }
+.scwlog-line { display: flex; gap: 6px; padding: 1px 0; }
+.scwlog-ts  { color: #475569; min-width: 82px; }
+.scwlog-lv  { min-width: 42px; font-weight: 700; }
+.scwlog-ch  { min-width: 70px; color: #7C3AED; }
+.log-info   .scwlog-lv { color: #475569; }
+.log-info               { color: #94A3B8; }
+.log-ok     .scwlog-lv { color: #22C55E; }
+.log-ok                 { color: #86EFAC; }
+.log-warn   .scwlog-lv { color: #F59E0B; }
+.log-warn               { color: #FDE68A; }
+.log-error  .scwlog-lv { color: #EF4444; }
+.log-error              { color: #FCA5A5; }
+.scwlog-footer {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 12px; background: #1E293B; border-top: 1px solid #334155;
+  font-size: 11px; color: #64748B;
+}
+.scwlog-scroll-lbl { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+.scwlog-scroll-lbl input { accent-color: var(--primary); }
+
+/* ══════════════════════════════════════════════════════════════
+   INTEGRATION STATUS (showcase tab)
+   ══════════════════════════════════════════════════════════════ */
+.scw-integs {
+  display: flex; flex-direction: column; gap: 0; height: 100%;
+  background: var(--bg); overflow-y: auto;
+}
+.scwi-header {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding: 14px 16px 10px; border-bottom: 1px solid var(--border);
+}
+.scwi-title { font-size: 13px; font-weight: 700; color: var(--text); }
+.scwi-sub   { font-size: 11px; color: var(--muted); }
+.scwi-list  { flex: 1; display: flex; flex-direction: column; }
+.scwi-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 11px 16px; border-bottom: 1px solid var(--border-l);
+  transition: background var(--t);
+}
+.scwi-row:hover { background: var(--bg-2); }
+.scwi-dot {
+  width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+}
+.dot-green { background: #22C55E; box-shadow: 0 0 6px #22C55E88; }
+.dot-amber { background: #F59E0B; box-shadow: 0 0 6px #F59E0B88;
+  animation: pulse-amber 1.6s ease-in-out infinite; }
+.dot-red   { background: #EF4444; box-shadow: 0 0 6px #EF444488; }
+@keyframes pulse-amber {
+  0%,100% { opacity: 1; } 50% { opacity: .45; }
+}
+.scwi-info { flex: 1; min-width: 0; }
+.scwi-info strong { display: block; font-size: 12px; font-weight: 600; color: var(--text); }
+.scwi-info span   { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.scwi-btn {
+  font-size: 11px; font-weight: 600; color: var(--primary);
+  background: var(--primary-soft); border: 1px solid transparent;
+  padding: 4px 10px; border-radius: var(--r-xs); cursor: pointer;
+  transition: var(--t); white-space: nowrap; flex-shrink: 0;
+}
+.scwi-btn:hover { background: var(--primary); color: #fff; }
+.scwi-btn-green {
+  color: var(--green-d); background: var(--green-soft);
+}
+.scwi-btn-green:hover { background: var(--green-d); color: #fff; }
+.scwi-legend {
+  display: flex; gap: 16px; align-items: center; justify-content: center;
+  padding: 8px 16px; border-top: 1px solid var(--border-l);
+  font-size: 11px; color: var(--muted);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   CTA GITHUB BADGE
+   ══════════════════════════════════════════════════════════════ */
+.cta-github-badge {
+  margin-top: 20px;
+  display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center;
+  background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.2);
+  color: rgba(255,255,255,.85); font-size: 13px;
+  padding: 10px 20px; border-radius: var(--r-sm);
+}
+.cta-github-badge i { font-size: 16px; }
+.cta-github-badge a { color: #C4B5FD; font-weight: 600; text-decoration: underline; }
+.cta-github-badge a:hover { color: #fff; }

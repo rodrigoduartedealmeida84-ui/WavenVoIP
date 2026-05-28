@@ -174,5 +174,9 @@ namespace WavenVoIP
         public string CallOutputDevice  { get; set; } = string.Empty;  // áudio da ligação
         public string RingOutputDevice  { get; set; } = string.Empty;  // saída do toque
         public int    RingVolume        { get; set; } = 80;            // 0-100
+
+        // ── Company config auto-sync v1.2.14 ──────────────────────────────────
+        public string    CompanyConfigVersion  { get; set; } = string.Empty;
+        public DateTime? CompanyConfigLastSync { get; set; }
     }
 }

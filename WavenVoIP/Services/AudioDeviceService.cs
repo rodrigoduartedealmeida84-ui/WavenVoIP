@@ -12,7 +12,8 @@ namespace WavenVoIP.Services
     {
         private static readonly string[] _headsetKeywords =
             { "headset", "headphone", "fone", "bluetooth", "hands-free", "hands free",
-              "wh-", "airpods", "jbl", "redmi", "galaxy buds", "intelbras" };
+              "wh-", "airpods", "jbl", "redmi", "galaxy buds",
+              "intelbras", "usb audio", "usb audio device", "usb headset" };
 
         private static readonly string[] _speakerKeywords =
             { "speaker", "speakers", "alto-falante", "alto falante", "realtek", "intel",
@@ -98,11 +99,37 @@ namespace WavenVoIP.Services
             if (temIntelbras)
                 Log($"AUDIO_HEADSET_INTELBRAS_DETECTED | mic={intelbrasMic?.Nome ?? "none"} speaker={intelbrasSpeaker?.Nome ?? "none"}");
 
-            // Alto-falante candidato para toque: não-headset, preferir Realtek/Intel
-            var speakerCandidato = outputs
-                .Where(d => !EhHeadset(d.Nome))
-                .FirstOrDefault(d => EhSpeaker(d.Nome))
-                ?? outputs.FirstOrDefault(d => !EhHeadset(d.Nome));
+            // Alto-falante candidato para toque: não-headset, prioridade: Realtek > Alto-falantes > Intel > qualquer
+            Log("RING_DEVICE_AUTO_SELECT_START | AplicarSelecaoAutomatica");
+            var naoHeadsets = outputs.Where(d => !EhHeadset(d.Nome)).ToList();
+            foreach (var d in outputs)
+            {
+                if (EhHeadset(d.Nome)) Log($"RING_DEVICE_REJECTED_HEADSET | nome={d.Nome}");
+                else                   Log($"RING_DEVICE_CANDIDATE | nome={d.Nome}");
+            }
+
+            AudioOutputInfo? speakerCandidato = null;
+            var prioridades = new[]
+            {
+                new[] { "realtek" },
+                new[] { "alto-falante", "alto falante" },
+                new[] { "speaker", "speakers" },
+                new[] { "intel", "high definition audio" },
+                _speakerKeywords
+            };
+            foreach (var grupo in prioridades)
+            {
+                speakerCandidato = naoHeadsets.FirstOrDefault(d =>
+                {
+                    var n = d.Nome.ToLowerInvariant();
+                    return grupo.Any(k => n.Contains(k));
+                });
+                if (speakerCandidato != null) break;
+            }
+            speakerCandidato ??= naoHeadsets.FirstOrDefault();
+
+            if (speakerCandidato != null) Log($"RING_DEVICE_SELECTED | nome={speakerCandidato.Nome}");
+            else                          Log("RING_DEVICE_FALLBACK_DEFAULT | nenhum candidato nao-headset");
 
             // AudioInputDevice (microfone da ligação)
             if (string.IsNullOrEmpty(config.AudioInputDevice))

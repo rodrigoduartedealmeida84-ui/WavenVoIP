@@ -1,11 +1,10 @@
-
+﻿
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Threading;
-using NAudio.CoreAudioApi;
 
 namespace WavenVoIP.Views
 {
@@ -19,6 +18,7 @@ namespace WavenVoIP.Views
         private bool _desligamentoSolicitado;
         private bool _fechamentoPorSistema;
         private bool _fechandoJanela;
+        private volatile bool _muteOperacaoEmAndamento;
         private readonly MediaPlayer _ringbackPlayer = new MediaPlayer();
 
         private DispatcherTimer? _pulseTimer;
@@ -35,6 +35,7 @@ namespace WavenVoIP.Views
         public event Action? OnRecordingToggleRequested;
         public event Action? OnDtmfKeyboardRequested;
         public event Func<bool>? OnHoldToggleRequested;
+        public event Action<bool>? OnMuteToggleRequested;
         public event Action? OnAudioRouteRequested;
 #pragma warning disable CS0067
         public event Action? OnOpenConferenceParticipantsRequested;
@@ -260,14 +261,14 @@ namespace WavenVoIP.Views
 
         private void DefinirMudo(bool ativo)
         {
+            if (_muteOperacaoEmAndamento) return;
+            _muteOperacaoEmAndamento = true;
+            bool estadoAnterior = _mudo;
             _mudo = ativo;
-            try
-            {
-                using var enumerator = new MMDeviceEnumerator();
-                using var mic = enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications);
-                mic.AudioEndpointVolume.Mute = _mudo;
-            }
-            catch { }
+            try { OnMuteToggleRequested?.Invoke(_mudo); }
+            catch { _mudo = estadoAnterior; }
+            _muteOperacaoEmAndamento = false;
+
             try
             {
                 txtMudoIcon.Text = _mudo ? "" : "";

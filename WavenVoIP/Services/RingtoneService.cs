@@ -15,13 +15,22 @@ namespace WavenVoIP.Services
         private bool _disposed;
         private bool _looping = true;
 
-        private static readonly string[] _speakerKeywords =
-            { "speaker", "speakers", "alto-falante", "alto falante", "realtek", "intel",
-              "high definition audio", "áudio interno", "internal" };
-
+        // Dispositivos que NUNCA devem tocar o ringtone — headsets, USB audio, Intelbras
         private static readonly string[] _headsetKeywords =
             { "headset", "headphone", "fone", "bluetooth", "hands-free", "hands free",
-              "wh-", "airpods", "jbl", "redmi", "galaxy buds" };
+              "wh-", "airpods", "jbl", "redmi", "galaxy buds",
+              "intelbras", "usb audio", "usb audio device", "usb headset" };
+
+        // Prioridade para seleção de alto-falante físico (ordem decrescente)
+        private static readonly string[][] _speakerPriority =
+        {
+            new[] { "realtek" },
+            new[] { "alto-falante", "alto falante" },
+            new[] { "speaker", "speakers" },
+            new[] { "intel", "high definition audio" },
+            new[] { "áudio interno", "internal audio", "internal" },
+            new[] { "output", "saída" }
+        };
 
         public static List<(string Id, string Nome)> ListarDispositivosSaida()
         {
@@ -57,13 +66,11 @@ namespace WavenVoIP.Services
                 var volClamp = Math.Clamp(volume, 0f, 1f);
                 Log($"AUDIO_RING_VOLUME_SET | volume={volClamp:F2}");
 
-                if (fonte == "TestButton")
-                    Log("AUDIO_RING_TEST_PLAYED");
-
                 // Enumerator stays alive for the duration of playback
                 _enumerator = new MMDeviceEnumerator();
                 MMDevice? device = null;
 
+                // 1) Tenta usar o ID explícito salvo pelo usuário
                 if (!string.IsNullOrEmpty(dispositivoId))
                 {
                     device = _enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active)
@@ -72,23 +79,42 @@ namespace WavenVoIP.Services
                     if (device != null)
                         Log($"RING_DEVICE_FOUND=True | RING_DEVICE_USED_NAME={device.FriendlyName}");
                     else
-                        Log($"RING_DEVICE_FOUND=False | RING_FALLBACK_REASON=ID '{dispositivoId}' não encontrado");
+                        Log($"RING_DEVICE_FOUND=False | RING_FALLBACK_REASON=ID '{dispositivoId}' não encontrado — tentando auto-seleção");
                 }
 
+                // 2) Se não encontrou por ID, auto-selecionar por nome (nunca headset)
+                if (device == null && !string.IsNullOrEmpty(dispositivoNome))
+                {
+                    var todos = _enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active).ToList();
+                    device = todos.FirstOrDefault(d =>
+                        d.FriendlyName.Contains(dispositivoNome, StringComparison.OrdinalIgnoreCase) ||
+                        dispositivoNome.Contains(d.FriendlyName, StringComparison.OrdinalIgnoreCase));
+
+                    if (device != null)
+                        Log($"RING_DEVICE_FOUND=True (por nome) | RING_DEVICE_USED_NAME={device.FriendlyName}");
+                    else
+                        Log($"RING_DEVICE_FOUND=False (por nome) | nome='{dispositivoNome}' não encontrado — usando auto-seleção");
+                }
+
+                // 3) Fallback inteligente: speaker físico, rejeita headset/Intelbras/USB
                 if (device == null)
                 {
                     device = SelecionarSpeakerFisico(_enumerator);
-                    if (device != null)
-                        Log($"RING_DEVICE_FOUND=True (auto) | RING_DEVICE_USED_NAME={device.FriendlyName}");
-                    else
+                    if (device == null)
                     {
                         device = _enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
-                        Log($"RING_FALLBACK_REASON=SelecionarSpeakerFisico retornou null | RING_DEVICE_USED_NAME={device?.FriendlyName ?? "?"}");
+                        Log($"RING_DEVICE_FALLBACK_DEFAULT | sem speaker fisico disponivel — usando padrao Windows: {device?.FriendlyName ?? "?"}");
                     }
                 }
 
                 Log($"RING_DEVICE_USED_ID={device?.ID ?? "?"}");
                 Log("RING_PLAYER=WasapiOut");
+
+                if (fonte == "TestButton")
+                    Log($"RING_TEST_DEVICE_USED | dispositivo={device?.FriendlyName ?? "padrão do sistema"}");
+
+                if (fonte == "IncomingCallWindow")
+                    Log($"AUDIO_RING_TEST_PLAYED | dispositivo={device?.FriendlyName ?? "padrão do sistema"}");
 
                 _reader = new AudioFileReader(arquivoToque);
                 _reader.Volume = volClamp;
@@ -133,24 +159,52 @@ namespace WavenVoIP.Services
 
         private static MMDevice? SelecionarSpeakerFisico(MMDeviceEnumerator enumerator)
         {
-            var todos = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active).ToList();
+            Log("RING_DEVICE_AUTO_SELECT_START | enumerando dispositivos de saida");
+
+            List<MMDevice> todos;
+            try { todos = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active).ToList(); }
+            catch { todos = new List<MMDevice>(); }
+
+            // Classificar cada dispositivo
+            var candidatos = new List<MMDevice>();
             foreach (var d in todos)
             {
                 var n = d.FriendlyName?.ToLowerInvariant() ?? string.Empty;
-                Log($"RING_DEVICE_SCAN: {d.FriendlyName} | ignorado={_headsetKeywords.Any(k => n.Contains(k))}");
+                bool isHeadset = _headsetKeywords.Any(k => n.Contains(k));
+                if (isHeadset)
+                    Log($"RING_DEVICE_REJECTED_HEADSET | nome={d.FriendlyName}");
+                else
+                {
+                    Log($"RING_DEVICE_CANDIDATE | nome={d.FriendlyName}");
+                    candidatos.Add(d);
+                }
             }
 
-            var candidatos = todos.Where(d =>
+            if (candidatos.Count == 0)
             {
-                var n = d.FriendlyName?.ToLowerInvariant() ?? string.Empty;
-                return !_headsetKeywords.Any(k => n.Contains(k));
-            }).ToList();
+                Log("RING_DEVICE_FALLBACK_DEFAULT | nenhum candidato nao-headset encontrado");
+                return null;
+            }
 
-            return candidatos.FirstOrDefault(d =>
+            // Seleciona por ordem de prioridade
+            foreach (var grupo in _speakerPriority)
             {
-                var n = d.FriendlyName?.ToLowerInvariant() ?? string.Empty;
-                return _speakerKeywords.Any(k => n.Contains(k));
-            }) ?? candidatos.FirstOrDefault();
+                var found = candidatos.FirstOrDefault(d =>
+                {
+                    var n = d.FriendlyName?.ToLowerInvariant() ?? string.Empty;
+                    return grupo.Any(k => n.Contains(k));
+                });
+                if (found != null)
+                {
+                    Log($"RING_DEVICE_SELECTED | nome={found.FriendlyName} (prioridade: {string.Join("/", grupo)})");
+                    return found;
+                }
+            }
+
+            // Primeiro candidato não-headset
+            var fallback = candidatos[0];
+            Log($"RING_DEVICE_SELECTED | nome={fallback.FriendlyName} (primeiro nao-headset disponivel)");
+            return fallback;
         }
 
         internal static void Log(string mensagem)

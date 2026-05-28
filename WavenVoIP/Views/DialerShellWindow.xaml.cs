@@ -34,11 +34,16 @@ namespace WavenVoIP.Views
         private readonly DispatcherTimer _amiSyncTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(10) };
         private readonly DispatcherTimer _googleSyncTimer = new DispatcherTimer();
         private readonly DispatcherTimer _cdrSyncTimer = new DispatcherTimer();
+        private readonly DispatcherTimer _companyConfigTimer  = new DispatcherTimer { Interval = TimeSpan.FromMinutes(30) };
+        private readonly DispatcherTimer _contactsSyncTimer   = new DispatcherTimer { Interval = TimeSpan.FromMinutes(5) };
         private string _historicoChamadaAtivaId = string.Empty;
         private DateTime _inicioHistoricoChamadaAtiva = DateTime.MinValue;
         private string _ultimaOrigemEntradaPendente = string.Empty;
         private bool _autoJoinFired;
         private RingtoneService? _testRingtoneService;
+
+        // Favorites
+        private readonly ObservableCollection<Models.FavoriteItem> _favoritos = new();
 
         // Dashboard / missed call state
         private int _badgePendentes = 0;
@@ -76,69 +81,89 @@ namespace WavenVoIP.Views
             _sipService.StatusChanged += status =>
             {
                 Dispatcher.Invoke(() => txtStatus.Text = status);
+                if (status != null && status.StartsWith("Registrado com sucesso", StringComparison.OrdinalIgnoreCase))
+                    _ = SincronizarConfigEmpresaAsync(silencioso: true);
             };
 
             _sipService.IncomingCallReceived += caller =>
             {
                 Dispatcher.BeginInvoke(new Action(() =>
                 {
-                    if (_incomingPopup != null)
-                        return;
-                    if (!_sipService.PossuiChamadaRecebidaPendente)
-                        return;
-
-                    _ultimaOrigemEntradaPendente = _sipService.LastIncomingOrigin;
-                    var displayCaller = ResolverDisplayChamada(caller);
-                    var tela = new IncomingCallWindow(displayCaller);
-                    _incomingPopup = tela;
-                    bool acaoExecutada = false;
-
-                    tela.AtenderSolicitado += async () =>
+                    try
                     {
-                        if (acaoExecutada) return;
-                        acaoExecutada = true;
-
-                        if (_sipService.PossuiChamadaRecebidaPendente)
+                        if (_incomingPopup != null)
                         {
-                            bool atendeu = await _sipService.AtenderChamada();
-                            if (atendeu)
+                            RegistrarUiDiagnostico($"INCOMING_CALL_HANDLER_ERROR | popup ja aberto caller={caller} — ignorando INVITE duplicado");
+                            return;
+                        }
+                        if (!_sipService.PossuiChamadaRecebidaPendente)
+                        {
+                            RegistrarUiDiagnostico($"INCOMING_CALL_HANDLER_ERROR | PossuiChamadaRecebidaPendente=false caller={caller} — popup nao aberto");
+                            return;
+                        }
+
+                        _ultimaOrigemEntradaPendente = _sipService.LastIncomingOrigin;
+                        var displayCaller = ResolverDisplayChamada(caller);
+                        var tela = new IncomingCallWindow(displayCaller);
+                        _incomingPopup = tela;
+                        bool acaoExecutada = false;
+
+                        RegistrarUiDiagnostico($"INCOMING_CALL_WINDOW_OPEN | caller={caller} display={displayCaller}");
+                        Services.LogHelper.Sip($"INCOMING_CALL_WINDOW_OPEN | caller={caller} display={displayCaller}");
+
+                        tela.AtenderSolicitado += async () =>
+                        {
+                            if (acaoExecutada) return;
+                            acaoExecutada = true;
+
+                            if (_sipService.PossuiChamadaRecebidaPendente)
                             {
-                                var call = CriarTelaDeChamada(displayCaller, "Em chamada");
-                                _activeCallWindow = call;
-                                call.Closed += (_, __) => { if (ReferenceEquals(_activeCallWindow, call)) _activeCallWindow = null; };
-                                call.IniciarContador();
-                                call.Show();
-                                IniciarControleHistoricoChamada(RegistrarHistorico(caller, TipoHistoricoLigacao.Recebida, "Em andamento", OrigemEntradaAtual()));
+                                bool atendeu = await _sipService.AtenderChamada();
+                                if (atendeu)
+                                {
+                                    var call = CriarTelaDeChamada(displayCaller, "Em chamada");
+                                    _activeCallWindow = call;
+                                    call.Closed += (_, __) => { if (ReferenceEquals(_activeCallWindow, call)) _activeCallWindow = null; };
+                                    call.IniciarContador();
+                                    call.Show();
+                                    IniciarControleHistoricoChamada(RegistrarHistorico(caller, TipoHistoricoLigacao.Recebida, "Em andamento", OrigemEntradaAtual()));
+                                }
                             }
-                        }
-                    };
+                        };
 
-                    tela.RecusarSolicitado += () =>
-                    {
-                        if (acaoExecutada) return;
-                        acaoExecutada = true;
-
-                        if (_sipService.PossuiChamadaRecebidaPendente)
+                        tela.RecusarSolicitado += () =>
                         {
-                            _sipService.RecusarChamada();
-                            RegistrarHistorico(caller, TipoHistoricoLigacao.Perdida, "00:00", OrigemEntradaAtual());
-                            MostrarNotificacaoChamadaPerdida(displayCaller);
-                        }
-                    };
+                            if (acaoExecutada) return;
+                            acaoExecutada = true;
 
-                    tela.Closed += (_, __) =>
-                    {
-                        if (ReferenceEquals(_incomingPopup, tela))
-                            _incomingPopup = null;
+                            if (_sipService.PossuiChamadaRecebidaPendente)
+                            {
+                                _sipService.RecusarChamada();
+                                RegistrarHistorico(caller, TipoHistoricoLigacao.Perdida, "00:00", OrigemEntradaAtual());
+                                MostrarNotificacaoChamadaPerdida(displayCaller);
+                            }
+                        };
 
-                        if (!acaoExecutada && !tela.EncerradaPeloSistema && _sipService.PossuiChamadaRecebidaPendente)
+                        tela.Closed += (_, __) =>
                         {
-                            _sipService.IgnorarChamadaLocal();
-                        }
-                    };
+                            if (ReferenceEquals(_incomingPopup, tela))
+                                _incomingPopup = null;
 
-                    tela.Show();
-                    RegistrarUiDiagnostico($"EXTENSION_RING_POPUP_SHOWN caller={caller}");
+                            if (!acaoExecutada && !tela.EncerradaPeloSistema && _sipService.PossuiChamadaRecebidaPendente)
+                            {
+                                _sipService.IgnorarChamadaLocal();
+                            }
+                        };
+
+                        tela.Show();
+                        RegistrarUiDiagnostico($"EXTENSION_RING_POPUP_SHOWN caller={caller}");
+                    }
+                    catch (Exception exIncoming)
+                    {
+                        RegistrarUiDiagnostico($"INCOMING_CALL_HANDLER_ERROR | excecao no handler: {exIncoming.Message}");
+                        Services.LogHelper.Sip($"INCOMING_CALL_HANDLER_ERROR | {exIncoming.Message}", Services.LogLevel.ERROR);
+                        _incomingPopup = null;
+                    }
                 }));
             };
 
@@ -215,6 +240,14 @@ namespace WavenVoIP.Views
                 CarregarDispositivosAudioNaTela();
                 AplicarRetencaoHistorico();
                 CarregarDadosDasAbas();
+                _ = ImportarContatosEmpresaECarregarFavoritosAsync();
+                _ = SincronizarContatosRemotosAsync();
+                _contactsSyncTimer.Tick += (_, __) => _ = SincronizarContatosRemotosAsync();
+                _contactsSyncTimer.Start();
+                _ = SincronizarConfigEmpresaAsync(silencioso: true);
+                _companyConfigTimer.Tick += (_, __) => _ = SincronizarConfigEmpresaAsync(silencioso: true);
+                _companyConfigTimer.Start();
+                AtualizarUiCompanyConfig();
                 ConfigurarSincronizacaoAmi();
                 ConfigurarSincronizacaoGoogle();
                 ConfigurarSincronizacaoCdr();
@@ -647,7 +680,13 @@ namespace WavenVoIP.Views
             try
             {
                 if (gridContatosShell == null) return;
-                var contatos = ContatoStorageService.Carregar();
+                var raw = ContatoStorageService.Carregar();
+
+                // Deduplicate by normalized number; persist if duplicates found
+                var (contatos, removidos) = ContatoStorageService.Deduplicar(raw, salvarSeAlterou: true);
+                if (removidos > 0)
+                    Services.LogHelper.Info($"CONTACTS_DEDUP_UI | removidos={removidos}");
+
                 var busca = txtBuscaContatosShell?.Text?.Trim() ?? string.Empty;
                 if (!string.IsNullOrWhiteSpace(busca))
                 {
@@ -656,6 +695,26 @@ namespace WavenVoIP.Views
                         (c.Numero ?? string.Empty).Contains(busca, StringComparison.OrdinalIgnoreCase) ||
                         (c.Observacao ?? string.Empty).Contains(busca, StringComparison.OrdinalIgnoreCase)).ToList();
                 }
+
+                // Favorites on top, then alphabetical
+                var favNums = new HashSet<string>(
+                    Services.FavoritesStorageService.Carregar()
+                        .Select(f => Services.PhoneNumberNormalizer.NormalizeBrazilPhone(
+                            new string((f.Numero ?? "").Where(char.IsDigit).ToArray()))),
+                    StringComparer.OrdinalIgnoreCase);
+
+                contatos = contatos
+                    .OrderByDescending(c => favNums.Contains(
+                        Services.PhoneNumberNormalizer.NormalizeBrazilPhone(
+                            new string((c.Numero ?? "").Where(char.IsDigit).ToArray()))))
+                    .ThenBy(c => c.Nome ?? string.Empty)
+                    .ToList();
+
+                // Set transient EhFavorito so XAML DataTriggers can bind to it
+                foreach (var c in contatos)
+                    c.EhFavorito = favNums.Contains(
+                        Services.PhoneNumberNormalizer.NormalizeBrazilPhone(
+                            new string((c.Numero ?? "").Where(char.IsDigit).ToArray())));
 
                 gridContatosShell.ItemsSource = null;
                 gridContatosShell.ItemsSource = contatos;
@@ -714,7 +773,11 @@ namespace WavenVoIP.Views
         {
             var dlg = new Views.SalvarContatoDialog("") { Owner = this };
             if (dlg.ShowDialog() == true)
+            {
                 AtualizarContatosShell();
+                if (dlg.AdicionadoAosFavoritos) _ = CarregarFavoritosAsync();
+                AtualizarExportContatos();
+            }
         }
 
         private void BtnEditarContatoShell_Click(object sender, RoutedEventArgs e)
@@ -723,7 +786,11 @@ namespace WavenVoIP.Views
             {
                 var dlg = new Views.SalvarContatoDialog(contato) { Owner = this };
                 if (dlg.ShowDialog() == true)
+                {
                     AtualizarContatosShell();
+                    if (dlg.AdicionadoAosFavoritos) _ = CarregarFavoritosAsync();
+                    AtualizarExportContatos();
+                }
             }
         }
 
@@ -761,6 +828,7 @@ namespace WavenVoIP.Views
                 var contatos = ContatoStorageService.Carregar();
                 contatos.RemoveAll(c => c.Nome == contato.Nome && c.Numero == contato.Numero && c.Observacao == contato.Observacao);
                 ContatoStorageService.Salvar(contatos);
+                _ = Task.Run(() => Services.CompanyContactsService.MarcarExcluidoNoExport(contato.Numero));
                 AtualizarContatosShell();
             }
         }
@@ -768,6 +836,233 @@ namespace WavenVoIP.Views
         private void TxtBuscaContatosShell_TextChanged(object sender, TextChangedEventArgs e)
         {
             if (gridContatosShell != null) AtualizarContatosShell();
+        }
+
+        // ── Favorites ────────────────────────────────────────────────────────────
+
+        private async Task ImportarContatosEmpresaECarregarFavoritosAsync()
+        {
+            try
+            {
+                var (imp, atu, fav) = await Task.Run(() => Services.CompanyContactsService.ImportarSeExistir());
+                if (imp > 0 || atu > 0)
+                {
+                    await Task.Run(() =>
+                    {
+                        var lista = ContatoStorageService.Carregar();
+                        ContatoStorageService.Deduplicar(lista, salvarSeAlterou: true);
+                    });
+                    Dispatcher.Invoke(AtualizarContatosShell);
+                }
+            }
+            catch { }
+            await CarregarFavoritosAsync();
+        }
+
+        private async Task CarregarFavoritosAsync()
+        {
+            try
+            {
+                var lista = await Task.Run(() => Services.FavoritesStorageService.Carregar());
+                Dispatcher.Invoke(() =>
+                {
+                    _favoritos.Clear();
+                    foreach (var f in lista) _favoritos.Add(f);
+                    if (listFavoritos != null) listFavoritos.ItemsSource = _favoritos;
+                    AtualizarVisibilidadeFavoritosVazio();
+                    Services.LogHelper.Info($"FAVORITES_LOADED | count={_favoritos.Count}");
+                });
+            }
+            catch { }
+        }
+
+        private void AtualizarVisibilidadeFavoritosVazio()
+        {
+            if (txtFavoritosVazio == null) return;
+            txtFavoritosVazio.Visibility = _favoritos.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private async void BtnLigarFavorito_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var numero = (sender as FrameworkElement)?.Tag?.ToString();
+                if (string.IsNullOrWhiteSpace(numero)) return;
+                var item = _favoritos.FirstOrDefault(f => f.Numero == numero);
+                Services.LogHelper.Info($"FAVORITE_CALL_STARTED | nome={item?.Nome ?? "?"} numero={numero}");
+                var numeroNorm = Services.PhoneNumberNormalizer.NormalizeForDial(numero);
+                try
+                {
+                    MainTabs.SelectedIndex = 0;
+                    AtualizarNavSelecionada();
+                    txtNumero.Text = DialPlanService.RemoverDuplicacaoSequencial(numeroNorm);
+                    txtNumero.CaretIndex = txtNumero.Text.Length;
+                }
+                catch { }
+                await Dispatcher.Yield(DispatcherPriority.Background);
+                await IniciarLigacaoAsync(numeroNorm);
+            }
+            catch { }
+        }
+
+        private void BtnRemoverFavorito_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var numero = (sender as FrameworkElement)?.Tag?.ToString();
+                if (string.IsNullOrWhiteSpace(numero)) return;
+                var item = _favoritos.FirstOrDefault(f => f.Numero == numero);
+                if (item != null)
+                {
+                    _favoritos.Remove(item);
+                    Services.FavoritesStorageService.Remover(numero);
+                    AtualizarVisibilidadeFavoritosVazio();
+                }
+            }
+            catch { }
+        }
+
+        private void BtnFavoritarContatoShell_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var contato = (sender as FrameworkElement)?.Tag as Models.Contato;
+                if (contato == null) return;
+
+                if (contato.EhFavorito)
+                {
+                    Services.FavoritesStorageService.Remover(contato.Numero);
+                }
+                else
+                {
+                    Services.FavoritesStorageService.Adicionar(new Models.FavoriteItem
+                    {
+                        Nome    = contato.Nome,
+                        Numero  = contato.Numero,
+                        Favorito = true
+                    });
+                }
+
+                AtualizarContatosShell();
+                _ = CarregarFavoritosAsync();
+            }
+            catch { }
+        }
+
+        private void BtnExportarContatosEmpresa_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var dlg = new Microsoft.Win32.SaveFileDialog
+                {
+                    Title = "Exportar contatos da empresa",
+                    FileName = "company-contacts.json",
+                    DefaultExt = ".json",
+                    Filter = "JSON|*.json"
+                };
+                if (dlg.ShowDialog(this) != true) return;
+
+                var contatos = ContatoStorageService.Carregar();
+                var favoritos = Services.FavoritesStorageService.Carregar();
+                Services.CompanyContactsService.Exportar(dlg.FileName, contatos, favoritos);
+
+                var total = contatos.Count(c => !c.EhRamalIssabel && !c.FonteGoogle);
+                MessageBox.Show(
+                    $"Exportado com sucesso!\n\n{total} contatos exportados.\n\nArquivo salvo em:\n{dlg.FileName}\n\nPublique este arquivo em:\nservidor_hostinger/company-contacts.json\n(GitHub) para que outros ramais recebam automaticamente.",
+                    "Exportar empresa", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Erro ao exportar: {ex.Message}", "Exportar empresa", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+
+        // ── Company Config Sync ──────────────────────────────────────────────────
+
+        private async Task SincronizarConfigEmpresaAsync(bool silencioso)
+        {
+            try
+            {
+                if (!silencioso)
+                    Dispatcher.Invoke(() => { if (txtCompanyConfigStatus != null) txtCompanyConfigStatus.Text = "Sincronizando..."; });
+
+                var (aplicou, status) = await Services.CompanyConfigService.SincronizarAsync();
+
+                Dispatcher.Invoke(() =>
+                {
+                    AtualizarUiCompanyConfig();
+                    if (txtCompanyConfigStatus != null)
+                        txtCompanyConfigStatus.Text = status;
+
+                    if (aplicou)
+                    {
+                        // Refresh WhatsApp fields in settings UI
+                        var wpp = Services.WhatsAppConfigService.Carregar();
+                        try { if (txtWhatsApiUrl != null) txtWhatsApiUrl.Text = wpp.ApiUrl; } catch { }
+                        try { if (txtWhatsBearerToken != null) txtWhatsBearerToken.Password = wpp.BearerToken; } catch { }
+
+                        // Refresh CDR fields in settings UI
+                        var cfg = SipConfig.CarregarSalva() ?? new SipConfig();
+                        try { CarregarPreferenciasNaTela(); } catch { }
+                    }
+                });
+            }
+            catch { }
+        }
+
+        private void BtnSincronizarConfigEmpresa_Click(object sender, RoutedEventArgs e)
+        {
+            _ = SincronizarConfigEmpresaAsync(silencioso: false);
+        }
+
+        private void AtualizarUiCompanyConfig()
+        {
+            try
+            {
+                var cfg = SipConfig.CarregarSalva();
+                if (txtCompanyConfigVersion != null)
+                    txtCompanyConfigVersion.Text = string.IsNullOrWhiteSpace(cfg?.CompanyConfigVersion) ? "—" : $"v{cfg.CompanyConfigVersion}";
+                if (txtCompanyConfigLastSync != null)
+                    txtCompanyConfigLastSync.Text = cfg?.CompanyConfigLastSync.HasValue == true
+                        ? cfg.CompanyConfigLastSync.Value.ToString("dd/MM/yyyy HH:mm")
+                        : "—";
+            }
+            catch { }
+        }
+
+        // ── Contacts remote sync ─────────────────────────────────────────────────
+
+        private async Task SincronizarContatosRemotosAsync()
+        {
+            try
+            {
+                var (sinc, atu, _) = await Services.CompanyContactsService.SincronizarRemotoAsync();
+                if (sinc > 0 || atu > 0)
+                {
+                    // Deduplicate after remote sync then refresh UI
+                    await Task.Run(() =>
+                    {
+                        var lista = ContatoStorageService.Carregar();
+                        ContatoStorageService.Deduplicar(lista, salvarSeAlterou: true);
+                    });
+                    Dispatcher.Invoke(AtualizarContatosShell);
+                }
+            }
+            catch { }
+        }
+
+        private void AtualizarExportContatos()
+        {
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    var contatos  = ContatoStorageService.Carregar();
+                    var favoritos = Services.FavoritesStorageService.Carregar();
+                    Services.CompanyContactsService.AtualizarArquivoLocal(contatos, favoritos);
+                }
+                catch { }
+            });
         }
 
         // ── Google Contacts ──────────────────────────────────────────────────────
@@ -1412,18 +1707,13 @@ namespace WavenVoIP.Views
         private void AbrirDialogSalvarContato(string numero)
         {
             var numLimpo = new string((numero ?? "").Where(char.IsDigit).ToArray());
-            if (ContatoStorageService.ExisteNumero(numLimpo))
-            {
-                var nomeExistente = ContatoStorageService.ResolverNomePorNumero(numLimpo);
-                MessageBox.Show($"O número {numLimpo} já está salvo como '{nomeExistente}'.", "Waven VoIP", MessageBoxButton.OK, MessageBoxImage.Information);
-                return;
-            }
-
             var dlg = new Views.SalvarContatoDialog(numLimpo) { Owner = this };
             if (dlg.ShowDialog() == true)
             {
                 AtualizarContatosShell();
                 AtualizarHistoricoShell();
+                if (dlg.AdicionadoAosFavoritos) _ = CarregarFavoritosAsync();
+                AtualizarExportContatos();
             }
         }
 
@@ -1586,6 +1876,7 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
             try { ConfigurarSincronizacaoAmi(); }    catch { }
             try { ConfigurarSincronizacaoCdr(); }    catch { }
             try { ConfigurarSincronizacaoGoogle(); }  catch { }
+            _ = SincronizarConfigEmpresaAsync(silencioso: false);
 
             AtualizarNavSelecionada();
             try { AtualizarBotaoStatus(); } catch { }
@@ -1747,6 +2038,7 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
             call.OnRecordingToggleRequested += RecordingToggleRequested;
             call.OnDtmfKeyboardRequested += DtmfKeyboardRequested;
             call.OnHoldToggleRequested += HoldToggleRequested;
+            call.OnMuteToggleRequested += mudo => _sipService.MutarMicrofone(mudo);
             call.OnAudioRouteRequested += AudioRouteRequested;
             call.OnOpenConferenceParticipantsRequested += OpenConferenceParticipantsRequested;
             call.OnWhatsAppRequested += numero => AbrirTelaWhatsApp(numero, "chamada");

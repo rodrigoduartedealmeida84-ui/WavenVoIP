@@ -299,6 +299,71 @@ namespace WavenVoIP.Services
             }
         }
 
+        // ── Deduplicação reutilizável ─────────────────────────────────────────────
+
+        /// <summary>
+        /// Remove duplicatas da lista por número normalizado.
+        /// Prioridade: local (não Google) > Google; mais recente por AtualizadoEm.
+        /// Salva automaticamente se encontrou duplicatas e salvarSeAlterou=true.
+        /// </summary>
+        public static (List<Contato> resultado, int removidos) Deduplicar(
+            List<Contato> contatos, bool salvarSeAlterou = false)
+        {
+            try
+            {
+                var ramais   = contatos.Where(c => c.EhRamalIssabel).ToList();
+                var semNum   = contatos.Where(c => !c.EhRamalIssabel &&
+                                  string.IsNullOrEmpty(SomenteDigitos(c.Numero))).ToList();
+                var comNum   = contatos.Where(c => !c.EhRamalIssabel &&
+                                  !string.IsNullOrEmpty(SomenteDigitos(c.Numero)));
+
+                var resultado = new List<Contato>(ramais);
+                resultado.AddRange(semNum);
+                var removidos = 0;
+
+                foreach (var grupo in comNum.GroupBy(c =>
+                    PhoneNumberNormalizer.NormalizeBrazilPhone(SomenteDigitos(c.Numero))))
+                {
+                    var lista = grupo.ToList();
+                    if (lista.Count == 1) { resultado.Add(lista[0]); continue; }
+
+                    // Priority: non-Google first, then most recently updated
+                    var vencedor = lista
+                        .OrderBy(c => c.FonteGoogle ? 1 : 0)
+                        .ThenByDescending(c => c.AtualizadoEm ?? DateTime.MinValue)
+                        .First();
+
+                    resultado.Add(vencedor);
+                    foreach (var d in lista.Where(c => c != vencedor))
+                    {
+                        Log($"CONTACT_DUPLICATE_FOUND | nome={d.Nome} numero={d.Numero} numNorm={grupo.Key}");
+                        Log($"CONTACT_DUPLICATE_REMOVED | descartado={d.Nome} mantido={vencedor.Nome}");
+                        removidos++;
+                    }
+                    Log($"CONTACT_DUPLICATE_MERGED | numNorm={grupo.Key} removidos={lista.Count - 1} mantido={vencedor.Nome}");
+                }
+
+                if (removidos > 0 && salvarSeAlterou)
+                {
+                    var ordenado = resultado
+                        .OrderByDescending(c => c.EhRamalIssabel)
+                        .ThenByDescending(c => !c.FonteGoogle)
+                        .ThenBy(c => c.Nome)
+                        .ToList();
+                    Salvar(ordenado);
+                    lock (_cacheLock) { _cache = null; }
+                    return (ordenado, removidos);
+                }
+
+                return (resultado, removidos);
+            }
+            catch (Exception ex)
+            {
+                Log($"CONTACT_DEDUP_ERROR | {ex.Message}");
+                return (contatos, 0);
+            }
+        }
+
         private static string SomenteDigitos(string? valor)
         {
             if (string.IsNullOrWhiteSpace(valor)) return string.Empty;

@@ -11,6 +11,8 @@ namespace WavenVoIP.Views
         private readonly Contato? _contatoOriginal;
         private readonly bool _modoEdicao;
 
+        public bool AdicionadoAosFavoritos { get; private set; }
+
         public SalvarContatoDialog(string numeroPreencher = "")
         {
             InitializeComponent();
@@ -49,9 +51,9 @@ namespace WavenVoIP.Views
 
         private void BtnSalvar_Click(object sender, RoutedEventArgs e)
         {
-            var nome = txtNome.Text?.Trim() ?? string.Empty;
+            var nome   = txtNome.Text?.Trim() ?? string.Empty;
             var numero = new string((txtNumero.Text ?? "").Where(char.IsDigit).ToArray());
-            var obs = txtObservacao.Text?.Trim() ?? string.Empty;
+            var obs    = txtObservacao.Text?.Trim() ?? string.Empty;
 
             if (string.IsNullOrWhiteSpace(nome))
             {
@@ -66,34 +68,46 @@ namespace WavenVoIP.Views
                 return;
             }
 
+            // Normalize before saving — removes +55, adds 9th digit for old mobiles
+            var numeroNorm = PhoneNumberNormalizer.NormalizeBrazilPhone(numero);
+            if (string.IsNullOrWhiteSpace(numeroNorm)) numeroNorm = numero;
+
             var contatos = ContatoStorageService.Carregar();
 
             if (_modoEdicao && _contatoOriginal != null)
             {
                 var numOriginal = new string((_contatoOriginal.Numero ?? "").Where(char.IsDigit).ToArray());
+                var numOrigNorm = PhoneNumberNormalizer.NormalizeBrazilPhone(numOriginal);
+                if (string.IsNullOrWhiteSpace(numOrigNorm)) numOrigNorm = numOriginal;
                 var ehGoogle = _contatoOriginal.FonteGoogle;
 
                 if (ehGoogle)
                 {
-                    // Google → salvar como local; se já existe local com mesmo número, atualizar
+                    // Google → salvar como local; se já existe local com mesmo número normalizado, atualizar
                     var existenteLocal = contatos.FirstOrDefault(c =>
-                        !c.FonteGoogle && new string((c.Numero ?? "").Where(char.IsDigit).ToArray()) == numero);
+                    {
+                        if (c.FonteGoogle) return false;
+                        var cn    = SomenteDigitos(c.Numero);
+                        var cnNorm = PhoneNumberNormalizer.NormalizeBrazilPhone(cn);
+                        return cn == numero || cnNorm == numeroNorm;
+                    });
 
                     if (existenteLocal != null)
                     {
-                        existenteLocal.Nome = nome;
-                        existenteLocal.Observacao = string.IsNullOrWhiteSpace(obs) ? existenteLocal.Observacao : obs;
+                        existenteLocal.Nome        = nome;
+                        existenteLocal.Numero      = numeroNorm;
+                        existenteLocal.Observacao  = string.IsNullOrWhiteSpace(obs) ? existenteLocal.Observacao : obs;
                         existenteLocal.AtualizadoEm = DateTime.Now;
                     }
                     else
                     {
                         contatos.Add(new Contato
                         {
-                            Nome = nome,
-                            Numero = numero,
-                            Observacao = string.IsNullOrWhiteSpace(obs) ? "Cópia local" : obs,
+                            Nome         = nome,
+                            Numero       = numeroNorm,
+                            Observacao   = string.IsNullOrWhiteSpace(obs) ? "Cópia local" : obs,
                             EhRamalIssabel = false,
-                            FonteGoogle = false,
+                            FonteGoogle  = false,
                             AtualizadoEm = DateTime.Now
                         });
                     }
@@ -102,54 +116,99 @@ namespace WavenVoIP.Views
                 {
                     // Editar contato local in-place
                     var original = contatos.FirstOrDefault(c =>
-                        !c.FonteGoogle && new string((c.Numero ?? "").Where(char.IsDigit).ToArray()) == numOriginal);
+                    {
+                        if (c.FonteGoogle) return false;
+                        var cn    = SomenteDigitos(c.Numero);
+                        var cnNorm = PhoneNumberNormalizer.NormalizeBrazilPhone(cn);
+                        return cn == numOriginal || cnNorm == numOrigNorm;
+                    });
 
                     if (original != null)
                     {
-                        // Se o número mudou e já existe outro local com o novo número, avisar
-                        if (numero != numOriginal)
+                        // If number changed, check for normalized conflict
+                        if (numeroNorm != numOrigNorm)
                         {
                             var conflito = contatos.FirstOrDefault(c =>
-                                c != original && !c.FonteGoogle &&
-                                new string((c.Numero ?? "").Where(char.IsDigit).ToArray()) == numero);
+                            {
+                                if (c == original || c.FonteGoogle) return false;
+                                var cn    = SomenteDigitos(c.Numero);
+                                var cnNorm = PhoneNumberNormalizer.NormalizeBrazilPhone(cn);
+                                return cn == numero || cnNorm == numeroNorm;
+                            });
                             if (conflito != null)
                             {
-                                MessageBox.Show($"O número {numero} já está salvo como '{conflito.Nome}'.", "Editar contato", MessageBoxButton.OK, MessageBoxImage.Information);
+                                MessageBox.Show($"O número {numeroNorm} já está salvo como '{conflito.Nome}'.", "Editar contato", MessageBoxButton.OK, MessageBoxImage.Information);
                                 return;
                             }
                         }
-                        original.Nome = nome;
-                        original.Numero = numero;
-                        original.Observacao = obs;
+                        original.Nome        = nome;
+                        original.Numero      = numeroNorm;
+                        original.Observacao  = obs;
                         original.AtualizadoEm = DateTime.Now;
                     }
                     else
                     {
-                        // Contato não encontrado (edge case) — adicionar como novo
-                        contatos.Add(new Contato { Nome = nome, Numero = numero, Observacao = obs, AtualizadoEm = DateTime.Now });
+                        // Edge case: not found — add as new
+                        contatos.Add(new Contato { Nome = nome, Numero = numeroNorm, Observacao = obs, AtualizadoEm = DateTime.Now });
                     }
                 }
             }
             else
             {
-                // Novo contato — verificar duplicado
-                if (ContatoStorageService.ExisteNumero(numero))
+                // Novo contato — check by normalized number; update existing instead of blocking
+                var existenteNorm = contatos.FirstOrDefault(c =>
                 {
-                    var nomeExistente = ContatoStorageService.ResolverNomePorNumero(numero);
-                    MessageBox.Show($"O número {numero} já está salvo como '{nomeExistente}'.", "Salvar contato", MessageBoxButton.OK, MessageBoxImage.Information);
+                    if (c.EhRamalIssabel) return false;
+                    var cn    = SomenteDigitos(c.Numero);
+                    var cnNorm = PhoneNumberNormalizer.NormalizeBrazilPhone(cn);
+                    return cn == numero || cnNorm == numeroNorm;
+                });
+
+                if (existenteNorm != null)
+                {
+                    existenteNorm.Nome        = nome;
+                    existenteNorm.Numero      = numeroNorm;
+                    if (!string.IsNullOrWhiteSpace(obs)) existenteNorm.Observacao = obs;
+                    existenteNorm.AtualizadoEm = DateTime.Now;
+                    ContatoStorageService.Salvar(contatos);
+
+                    if (chkFavoritos?.IsChecked == true)
+                    {
+                        var adicionado = FavoritesStorageService.Adicionar(new Models.FavoriteItem
+                            { Nome = nome, Numero = numeroNorm, Favorito = true });
+                        AdicionadoAosFavoritos = adicionado;
+                    }
+
+                    MessageBox.Show("Contato atualizado com sucesso!", "Salvar contato",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    DialogResult = true;
+                    Close();
                     return;
                 }
+
                 contatos.Add(new Contato
                 {
-                    Nome = nome,
-                    Numero = numero,
-                    Observacao = obs,
+                    Nome         = nome,
+                    Numero       = numeroNorm,
+                    Observacao   = obs,
                     EhRamalIssabel = false,
                     AtualizadoEm = DateTime.Now
                 });
             }
 
             ContatoStorageService.Salvar(contatos);
+
+            if (chkFavoritos?.IsChecked == true)
+            {
+                var adicionado = FavoritesStorageService.Adicionar(new Models.FavoriteItem
+                {
+                    Nome     = nome,
+                    Numero   = numeroNorm,
+                    Favorito = true
+                });
+                AdicionadoAosFavoritos = adicionado;
+            }
+
             DialogResult = true;
             Close();
         }
@@ -159,5 +218,8 @@ namespace WavenVoIP.Views
             DialogResult = false;
             Close();
         }
+
+        private static string SomenteDigitos(string? valor) =>
+            string.IsNullOrWhiteSpace(valor) ? "" : new string(valor.Where(char.IsDigit).ToArray());
     }
 }

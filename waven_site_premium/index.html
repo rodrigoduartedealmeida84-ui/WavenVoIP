@@ -6,14 +6,16 @@
   <title>WavenVoIP | Softphone Corporativo Premium</title>
   <meta name="description" content="Softphone corporativo com SIP nativo, WhatsApp Business, CDR inteligente e dashboard em tempo real para equipes Issabel/Asterisk.">
   <meta name="theme-color" content="#7C3AED">
-  <link rel="icon" type="image/png" sizes="192x192" href="./assets/waven_logo.png">
-  <link rel="apple-touch-icon" sizes="180x180" href="./assets/waven_logo.png">
+  <link rel="icon" type="image/x-icon" href="./assets/icons/favicon.ico">
+  <link rel="icon" type="image/png" sizes="32x32" href="./assets/icons/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="./assets/icons/favicon-16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="./assets/icons/apple-touch-icon.png">
   <link rel="manifest" href="./site.webmanifest">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
-  <link rel="stylesheet" href="./css/style.css?v=7.9">
+  <link rel="stylesheet" href="./css/style.css?v=1.2.10">
 </head>
 <body>
 
@@ -54,7 +56,7 @@
     <div class="hero-copy">
       <div class="hero-badge">
         <span class="badge-pulse"></span>
-        v7.9 &nbsp;·&nbsp; Nova versão disponível agora
+        v1.2.10 &nbsp;·&nbsp; Agora no GitHub Releases
       </div>
       <h1>
         O softphone que<br>
@@ -280,6 +282,8 @@
     <button class="sc-tab" data-tab="dashboard"><i class="fa-solid fa-gauge-high"></i> Dashboard</button>
     <button class="sc-tab" data-tab="contacts"><i class="fa-solid fa-address-book"></i> Contatos</button>
     <button class="sc-tab" data-tab="conference"><i class="fa-solid fa-users"></i> Conferência</button>
+    <button class="sc-tab" data-tab="logs"><i class="fa-solid fa-terminal"></i> Logs</button>
+    <button class="sc-tab" data-tab="integrations"><i class="fa-solid fa-plug"></i> Integrações</button>
   </div>
 
   <div class="sc-window-wrap reveal">
@@ -287,7 +291,7 @@
       <!-- Title bar -->
       <div class="scw-titlebar">
         <div class="scw-dots"><span></span><span></span><span></span></div>
-        <span class="scw-title">WavenVoIP — v7.9</span>
+        <span class="scw-title">WavenVoIP — v1.2.10</span>
         <div class="scw-wbtns"><span>─</span><span>□</span><span>✕</span></div>
       </div>
       <!-- App header (real UI) -->
@@ -515,6 +519,88 @@
           </div>
         </div>
 
+        <!-- LOGS -->
+        <div class="scw-screen" id="scr-logs">
+          <div class="scw-logs">
+            <div class="scwlog-toolbar">
+              <button class="scwlog-chip active">Todos</button>
+              <button class="scwlog-chip">Erros</button>
+              <button class="scwlog-chip">AMI</button>
+              <button class="scwlog-chip">Google</button>
+              <button class="scwlog-chip">Updater</button>
+              <div class="scwlog-actions">
+                <button class="scwlog-act"><i class="fa-solid fa-copy"></i></button>
+                <button class="scwlog-act"><i class="fa-solid fa-folder-open"></i></button>
+                <button class="scwlog-act"><i class="fa-solid fa-trash"></i></button>
+              </div>
+            </div>
+            <div class="scwlog-terminal">
+              <div class="scwlog-line log-info"><span class="scwlog-ts">14:32:01.234</span><span class="scwlog-lv">INFO </span><span class="scwlog-ch">[AMI]</span> INTEGRATION_STATUS Ami=Conectado</div>
+              <div class="scwlog-line log-ok"><span class="scwlog-ts">14:32:01.891</span><span class="scwlog-lv">INFO </span><span class="scwlog-ch">[UPDATE]</span> CHECK_OK Versão 1.2.10 — mais recente</div>
+              <div class="scwlog-line log-warn"><span class="scwlog-ts">14:32:05.012</span><span class="scwlog-lv">WARN </span><span class="scwlog-ch">[CDR]</span> INTEGRATION_TEMPORARY_FAILURE — tentativa 1</div>
+              <div class="scwlog-line log-info"><span class="scwlog-ts">14:32:10.345</span><span class="scwlog-lv">INFO </span><span class="scwlog-ch">[CDR]</span> INTEGRATION_AUTO_RECONNECT_SCHEDULED delay=15s</div>
+              <div class="scwlog-line log-ok"><span class="scwlog-ts">14:32:25.678</span><span class="scwlog-lv">INFO </span><span class="scwlog-ch">[CDR]</span> INTEGRATION_AUTO_RECONNECT_SUCCESS</div>
+              <div class="scwlog-line log-info"><span class="scwlog-ts">14:32:26.001</span><span class="scwlog-lv">INFO </span><span class="scwlog-ch">[GOOGLE]</span> Sincronizados 1.247 contatos</div>
+              <div class="scwlog-line log-error"><span class="scwlog-ts">14:33:00.444</span><span class="scwlog-lv">ERROR</span><span class="scwlog-ch">[SIP]</span> SIP_REGISTER_FAILED — reconectando</div>
+              <div class="scwlog-line log-ok"><span class="scwlog-ts">14:33:05.112</span><span class="scwlog-lv">INFO </span><span class="scwlog-ch">[SIP]</span> SIP_REGISTER_OK ramal=101</div>
+              <div class="scwlog-line log-info"><span class="scwlog-ts">14:33:10.020</span><span class="scwlog-lv">INFO </span><span class="scwlog-ch">[WA]</span> WHATSAPP_INCOMING_DETECTED origem=TIM numero=11987654321</div>
+            </div>
+            <div class="scwlog-footer">
+              <label class="scwlog-scroll-lbl"><input type="checkbox" checked> Rolagem automática</label>
+              <span class="scwlog-count">9 / 2000 entradas</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- INTEGRATIONS STATUS -->
+        <div class="scw-screen" id="scr-integrations">
+          <div class="scw-integs">
+            <div class="scwi-header">
+              <span class="scwi-title">Status das Integrações</span>
+              <span class="scwi-sub">Atualizado em tempo real</span>
+            </div>
+            <div class="scwi-list">
+              <div class="scwi-row">
+                <span class="scwi-dot dot-green"></span>
+                <div class="scwi-info">
+                  <strong>AMI / Asterisk</strong>
+                  <span>Conectado · 12 ramais sincronizados · Ramal 101</span>
+                </div>
+                <button class="scwi-btn">Reconectar</button>
+              </div>
+              <div class="scwi-row">
+                <span class="scwi-dot dot-green"></span>
+                <div class="scwi-info">
+                  <strong>CDR MySQL</strong>
+                  <span>Conectado · Última sync há 3s</span>
+                </div>
+                <button class="scwi-btn">Reconectar</button>
+              </div>
+              <div class="scwi-row">
+                <span class="scwi-dot dot-amber"></span>
+                <div class="scwi-info">
+                  <strong>Google Contacts</strong>
+                  <span>Reconectando automaticamente… (sem internet)</span>
+                </div>
+                <button class="scwi-btn scwi-btn-green">Conectar Google</button>
+              </div>
+              <div class="scwi-row">
+                <span class="scwi-dot dot-green"></span>
+                <div class="scwi-info">
+                  <strong>WhatsApp Business</strong>
+                  <span>Conectado · TIM + Vivo ativos</span>
+                </div>
+                <button class="scwi-btn">Testar API</button>
+              </div>
+            </div>
+            <div class="scwi-legend">
+              <span><i class="fa-solid fa-circle" style="color:#22C55E;font-size:8px"></i> Conectado</span>
+              <span><i class="fa-solid fa-circle" style="color:#F59E0B;font-size:8px"></i> Reconectando</span>
+              <span><i class="fa-solid fa-circle" style="color:#EF4444;font-size:8px"></i> Ação necessária</span>
+            </div>
+          </div>
+        </div>
+
       </div><!-- /scw-body -->
     </div><!-- /sc-win -->
   </div>
@@ -580,6 +666,62 @@
 </section>
 
 <!-- ╔══════════════════════════════════════════════════════════╗ -->
+<!--  NOVIDADES v1.2.10                                          -->
+<!-- ╚══════════════════════════════════════════════════════════╝ -->
+<section class="features" id="novidades" style="background:var(--bg-2)">
+  <div class="sec-hdr reveal">
+    <span class="sec-badge">Novidades v1.2.10</span>
+    <h2>Mais estável. Mais <span class="grad">transparente.</span></h2>
+    <p>Atualizações focadas em confiabilidade, zero interrupção e diagnóstico completo do sistema.</p>
+  </div>
+  <div class="feat-grid">
+
+    <div class="feat-card reveal">
+      <div class="feat-ico" style="background:#f0fdf4"><i class="fa-brands fa-github" style="color:#16a34a;font-size:22px"></i></div>
+      <h3>GitHub Releases</h3>
+      <p>Distribuição migrada para GitHub Releases. Download íntegro com SHA256 validado — sem recompressão ou alteração por WAF/CDN externo.</p>
+      <div class="feat-tags"><span>SHA256</span><span>GitHub CDN</span><span>Sem WAF</span></div>
+    </div>
+
+    <div class="feat-card reveal">
+      <div class="feat-ico ico-teal"><i class="fa-solid fa-terminal"></i></div>
+      <h3>Painel de Logs</h3>
+      <p>Diagnóstico em tempo real com filtros por canal (AMI, CDR, Google, WhatsApp, SIP, Updater), cores por severidade e exportação por clipboard.</p>
+      <div class="feat-tags"><span>Real-time</span><span>Filtros</span><span>Cores</span></div>
+    </div>
+
+    <div class="feat-card reveal">
+      <div class="feat-ico ico-green"><i class="fa-solid fa-rotate"></i></div>
+      <h3>Reconexão Automática</h3>
+      <p>Quedas de internet, timeout e MySQL offline reconectam sozinhos com backoff 5s→15s→30s→1m→3m→5m. Zero modal para falhas temporárias.</p>
+      <div class="feat-tags"><span>Backoff</span><span>Silencioso</span><span>Auto</span></div>
+    </div>
+
+    <div class="feat-card reveal">
+      <div class="feat-ico ico-blue"><i class="fa-solid fa-plug-circle-check"></i></div>
+      <h3>Status das Integrações</h3>
+      <p>Dot colorido para cada integração em tempo real. Modal de alerta apenas quando há falha real de autenticação — nunca por instabilidade de rede.</p>
+      <div class="feat-tags"><span>🟢 Conectado</span><span>🟡 Reconectando</span><span>🔴 Ação</span></div>
+    </div>
+
+    <div class="feat-card reveal">
+      <div class="feat-ico ico-orange"><i class="fa-solid fa-shield-check"></i></div>
+      <h3>Updater Seguro</h3>
+      <p>Anti-loop com flag de falha persistente, verificação SHA256 pós-download e proteção contra fechamento do app se o updater falhar ao iniciar.</p>
+      <div class="feat-tags"><span>Anti-loop</span><span>Flag</span><span>SHA256</span></div>
+    </div>
+
+    <div class="feat-card reveal">
+      <div class="feat-ico ico-indigo"><i class="fa-brands fa-google"></i></div>
+      <h3>Google OAuth Estável</h3>
+      <p>Nunca abre navegador automaticamente. Queda de internet reconecta em segundo plano. Token revogado exibe modal com botão Conectar Google.</p>
+      <div class="feat-tags"><span>OAuth2</span><span>Sem loop</span><span>Estável</span></div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ╔══════════════════════════════════════════════════════════╗ -->
 <!--  DASHBOARD PREVIEW                                          -->
 <!-- ╚══════════════════════════════════════════════════════════╝ -->
 <section class="dash-section" id="dashboard-preview">
@@ -635,10 +777,10 @@
     <h2>Comece hoje.<br><span class="grad-light">É grátis.</span></h2>
     <p>Instale em menos de 2 minutos. Sem cartão de crédito. Sem burocracia.</p>
     <div class="cta-acts">
-      <a href="https://almeidagas.com/waven/WavenVoIP_Setup.exe" class="btn-primary btn-xl">
+      <a href="https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v1.2.10/WavenVoIP_Setup.exe" class="btn-primary btn-xl">
         <i class="fa-solid fa-download"></i>
         Baixar WavenVoIP
-        <span class="btn-pill">v7.9 · Windows</span>
+        <span class="btn-pill">v1.2.10 · Windows</span>
       </a>
       <a href="mailto:suporte@almeidagas.com" class="btn-outline-white btn-xl">
         <i class="fa-solid fa-calendar-check"></i>
@@ -649,6 +791,12 @@
       <i class="fa-brands fa-windows"></i>
       Windows 10 / 11 &nbsp;·&nbsp; 64-bit &nbsp;·&nbsp; ~50 MB
     </p>
+    <div class="cta-github-badge">
+      <i class="fa-brands fa-github"></i>
+      Download oficial via <strong>GitHub Releases</strong> &nbsp;·&nbsp;
+      SHA256 validado &nbsp;·&nbsp;
+      <a href="https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/tag/v1.2.10" target="_blank" rel="noopener">Ver release no GitHub</a>
+    </div>
   </div>
 </section>
 
@@ -693,6 +841,6 @@
   </div>
 </footer>
 
-<script src="./js/main.js?v=7.9"></script>
+<script src="./js/main.js?v=1.2.10"></script>
 </body>
 </html>

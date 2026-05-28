@@ -466,93 +466,170 @@
                                 <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
 
-                            <!-- Dialer block — centered vertically in the available space.
-                                 Bottom margin adds a safe gap above the status bar. -->
-                            <StackPanel Grid.Row="0"
-                                        HorizontalAlignment="Center"
-                                        VerticalAlignment="Center"
-                                        Margin="0,0,0,40">
+                            <!-- Row 0: dialer (left) + favorites sidebar (right) -->
+                            <Grid Grid.Row="0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="290"/>
+                                </Grid.ColumnDefinitions>
 
-                                <!-- Number input -->
-                                <Grid Width="560" Height="46" Margin="0,0,0,8">
-                                    <Border Background="White" BorderBrush="#DDD6FE" BorderThickness="1.5" CornerRadius="16"/>
-                                    <TextBox x:Name="txtNumero"
-                                             FontSize="20"
-                                             FontWeight="SemiBold"
-                                             TextAlignment="Center"
-                                             VerticalContentAlignment="Center"
-                                             Background="Transparent"
-                                             BorderThickness="0"
-                                             Padding="48,0,96,0"
-                                             TextWrapping="NoWrap"
-                                             HorizontalScrollBarVisibility="Auto"
-                                             ToolTip="Digite o número ou use o teclado"/>
-                                    <TextBlock x:Name="txtNumeroPH" Text="Digite ou disque um número"
-                                               FontSize="15" FontWeight="Normal" Foreground="#94A3B8"
-                                               HorizontalAlignment="Center" VerticalAlignment="Center"
-                                               IsHitTestVisible="False"/>
-                                    <Button Content="⌫"
-                                            HorizontalAlignment="Right"
+                                <!-- Dialer block — centered vertically in the available space. -->
+                                <StackPanel Grid.Column="0"
+                                            HorizontalAlignment="Center"
                                             VerticalAlignment="Center"
-                                            Margin="0,0,6,0"
-                                            Style="{StaticResource InputEraseButton}"
-                                            ToolTip="Apagar último dígito"
-                                            Click="BtnApagar_Click"/>
-                                </Grid>
+                                            Margin="0,0,0,40">
 
-                                <!-- Numeric keypad -->
-                                <UniformGrid Rows="4" Columns="3" HorizontalAlignment="Center" Width="278">
-                                    <Button Tag="1" Click="Tecla_Click" Style="{StaticResource DialKeyButton}"><StackPanel><TextBlock Text="1" HorizontalAlignment="Center"/><TextBlock Text="" FontSize="9" HorizontalAlignment="Center"/></StackPanel></Button>
-                                    <Button Tag="2" Click="Tecla_Click" Style="{StaticResource DialKeyButton}"><StackPanel><TextBlock Text="2" HorizontalAlignment="Center"/><TextBlock Text="ABC" FontSize="9" Foreground="#64748B" HorizontalAlignment="Center"/></StackPanel></Button>
-                                    <Button Tag="3" Click="Tecla_Click" Style="{StaticResource DialKeyButton}"><StackPanel><TextBlock Text="3" HorizontalAlignment="Center"/><TextBlock Text="DEF" FontSize="9" Foreground="#64748B" HorizontalAlignment="Center"/></StackPanel></Button>
-                                    <Button Tag="4" Click="Tecla_Click" Style="{StaticResource DialKeyButton}"><StackPanel><TextBlock Text="4" HorizontalAlignment="Center"/><TextBlock Text="GHI" FontSize="9" Foreground="#64748B" HorizontalAlignment="Center"/></StackPanel></Button>
-                                    <Button Tag="5" Click="Tecla_Click" Style="{StaticResource DialKeyButton}"><StackPanel><TextBlock Text="5" HorizontalAlignment="Center"/><TextBlock Text="JKL" FontSize="9" Foreground="#64748B" HorizontalAlignment="Center"/></StackPanel></Button>
-                                    <Button Tag="6" Click="Tecla_Click" Style="{StaticResource DialKeyButton}"><StackPanel><TextBlock Text="6" HorizontalAlignment="Center"/><TextBlock Text="MNO" FontSize="9" Foreground="#64748B" HorizontalAlignment="Center"/></StackPanel></Button>
-                                    <Button Tag="7" Click="Tecla_Click" Style="{StaticResource DialKeyButton}"><StackPanel><TextBlock Text="7" HorizontalAlignment="Center"/><TextBlock Text="PQRS" FontSize="9" Foreground="#64748B" HorizontalAlignment="Center"/></StackPanel></Button>
-                                    <Button Tag="8" Click="Tecla_Click" Style="{StaticResource DialKeyButton}"><StackPanel><TextBlock Text="8" HorizontalAlignment="Center"/><TextBlock Text="TUV" FontSize="9" Foreground="#64748B" HorizontalAlignment="Center"/></StackPanel></Button>
-                                    <Button Tag="9" Click="Tecla_Click" Style="{StaticResource DialKeyButton}"><StackPanel><TextBlock Text="9" HorizontalAlignment="Center"/><TextBlock Text="WXYZ" FontSize="9" Foreground="#64748B" HorizontalAlignment="Center"/></StackPanel></Button>
-                                    <Button Tag="*" Click="Tecla_Click" Style="{StaticResource DialKeyButton}"><StackPanel><TextBlock Text="*" HorizontalAlignment="Center"/></StackPanel></Button>
-                                    <Button Tag="0" Click="Tecla_Click" Style="{StaticResource DialKeyButton}"><StackPanel><TextBlock Text="0" HorizontalAlignment="Center"/><TextBlock Text="+" FontSize="9" Foreground="#64748B" HorizontalAlignment="Center"/></StackPanel></Button>
-                                    <Button Tag="#" Click="Tecla_Click" Style="{StaticResource DialKeyButton}"><StackPanel><TextBlock Text="#" HorizontalAlignment="Center"/></StackPanel></Button>
-                                </UniformGrid>
+                                    <!-- Number input -->
+                                    <Grid Width="560" Height="46" Margin="0,0,0,8">
+                                        <Border Background="White" BorderBrush="#DDD6FE" BorderThickness="1.5" CornerRadius="16"/>
+                                        <TextBox x:Name="txtNumero"
+                                                 FontSize="20"
+                                                 FontWeight="SemiBold"
+                                                 TextAlignment="Center"
+                                                 VerticalContentAlignment="Center"
+                                                 Background="Transparent"
+                                                 BorderThickness="0"
+                                                 Padding="48,0,96,0"
+                                                 TextWrapping="NoWrap"
+                                                 HorizontalScrollBarVisibility="Auto"
+                                                 ToolTip="Digite o número ou use o teclado"/>
+                                        <TextBlock x:Name="txtNumeroPH" Text="Digite ou disque um número"
+                                                   FontSize="15" FontWeight="Normal" Foreground="#94A3B8"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                   IsHitTestVisible="False"/>
+                                        <Button Content="⌫"
+                                                HorizontalAlignment="Right"
+                                                VerticalAlignment="Center"
+                                                Margin="0,0,6,0"
+                                                Style="{StaticResource InputEraseButton}"
+                                                ToolTip="Apagar último dígito"
+                                                Click="BtnApagar_Click"/>
+                                    </Grid>
 
-                                <!-- Call button row -->
-                                <Grid Width="320" Height="62" Margin="0,8,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="*"/>
-                                    </Grid.ColumnDefinitions>
+                                    <!-- Numeric keypad -->
+                                    <UniformGrid Rows="4" Columns="3" HorizontalAlignment="Center" Width="278">
+                                        <Button Tag="1" Click="Tecla_Click" Style="{StaticResource DialKeyButton}"><StackPanel><TextBlock Text="1" HorizontalAlignment="Center"/><TextBlock Text="" FontSize="9" HorizontalAlignment="Center"/></StackPanel></Button>
+                                        <Button Tag="2" Click="Tecla_Click" Style="{StaticResource DialKeyButton}"><StackPanel><TextBlock Text="2" HorizontalAlignment="Center"/><TextBlock Text="ABC" FontSize="9" Foreground="#64748B" HorizontalAlignment="Center"/></StackPanel></Button>
+                                        <Button Tag="3" Click="Tecla_Click" Style="{StaticResource DialKeyButton}"><StackPanel><TextBlock Text="3" HorizontalAlignment="Center"/><TextBlock Text="DEF" FontSize="9" Foreground="#64748B" HorizontalAlignment="Center"/></StackPanel></Button>
+                                        <Button Tag="4" Click="Tecla_Click" Style="{StaticResource DialKeyButton}"><StackPanel><TextBlock Text="4" HorizontalAlignment="Center"/><TextBlock Text="GHI" FontSize="9" Foreground="#64748B" HorizontalAlignment="Center"/></StackPanel></Button>
+                                        <Button Tag="5" Click="Tecla_Click" Style="{StaticResource DialKeyButton}"><StackPanel><TextBlock Text="5" HorizontalAlignment="Center"/><TextBlock Text="JKL" FontSize="9" Foreground="#64748B" HorizontalAlignment="Center"/></StackPanel></Button>
+                                        <Button Tag="6" Click="Tecla_Click" Style="{StaticResource DialKeyButton}"><StackPanel><TextBlock Text="6" HorizontalAlignment="Center"/><TextBlock Text="MNO" FontSize="9" Foreground="#64748B" HorizontalAlignment="Center"/></StackPanel></Button>
+                                        <Button Tag="7" Click="Tecla_Click" Style="{StaticResource DialKeyButton}"><StackPanel><TextBlock Text="7" HorizontalAlignment="Center"/><TextBlock Text="PQRS" FontSize="9" Foreground="#64748B" HorizontalAlignment="Center"/></StackPanel></Button>
+                                        <Button Tag="8" Click="Tecla_Click" Style="{StaticResource DialKeyButton}"><StackPanel><TextBlock Text="8" HorizontalAlignment="Center"/><TextBlock Text="TUV" FontSize="9" Foreground="#64748B" HorizontalAlignment="Center"/></StackPanel></Button>
+                                        <Button Tag="9" Click="Tecla_Click" Style="{StaticResource DialKeyButton}"><StackPanel><TextBlock Text="9" HorizontalAlignment="Center"/><TextBlock Text="WXYZ" FontSize="9" Foreground="#64748B" HorizontalAlignment="Center"/></StackPanel></Button>
+                                        <Button Tag="*" Click="Tecla_Click" Style="{StaticResource DialKeyButton}"><StackPanel><TextBlock Text="*" HorizontalAlignment="Center"/></StackPanel></Button>
+                                        <Button Tag="0" Click="Tecla_Click" Style="{StaticResource DialKeyButton}"><StackPanel><TextBlock Text="0" HorizontalAlignment="Center"/><TextBlock Text="+" FontSize="9" Foreground="#64748B" HorizontalAlignment="Center"/></StackPanel></Button>
+                                        <Button Tag="#" Click="Tecla_Click" Style="{StaticResource DialKeyButton}"><StackPanel><TextBlock Text="#" HorizontalAlignment="Center"/></StackPanel></Button>
+                                    </UniformGrid>
 
-                                    <Button Grid.Column="1"
-                                            Width="60"
-                                            Height="60"
-                                            Background="#22C55E"
-                                            Style="{StaticResource IconActionButton}"
-                                            ToolTip="Ligar"
-                                            Click="BtnLigar_Click">
-                                        <Button.Effect>
-                                            <DropShadowEffect BlurRadius="8" ShadowDepth="2" Opacity="0.14" Color="#16A34A"/>
-                                        </Button.Effect>
-                                        <Viewbox Width="26" Height="26"><Path Fill="White" Data="M6.62,10.79C8.06,13.62 10.38,15.93 13.21,17.38L15.41,15.18C15.68,14.91 16.08,14.82 16.43,14.94C17.54,15.31 18.73,15.5 20,15.5C20.55,15.5 21,15.95 21,16.5V20C21,20.55 20.55,21 20,21C10.61,21 3,13.39 3,4C3,3.45 3.45,3 4,3H7.5C8.05,3 8.5,3.45 8.5,4C8.5,5.25 8.7,6.45 9.06,7.57C9.17,7.92 9.08,8.31 8.81,8.59L6.62,10.79Z"/></Viewbox>
-                                    </Button>
+                                    <!-- Call button row -->
+                                    <Grid Width="320" Height="62" Margin="0,8,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
 
-                                    <Button Grid.Column="2"
-                                            Content="Limpar"
-                                            Width="100"
-                                            Height="36"
-                                            HorizontalAlignment="Left"
-                                            Margin="14,8,0,0"
-                                            FontSize="12"
-                                            FontWeight="SemiBold"
-                                            Background="#FFF1F2"
-                                            Foreground="#E11D48"
-                                            BorderBrush="#FFE4E6"
-                                            BorderThickness="1"
-                                            Style="{StaticResource SecondaryButtonStyle}"
-                                            Click="BtnLimparNumero_Click"/>
-                                </Grid>
-                            </StackPanel>
+                                        <Button Grid.Column="1"
+                                                Width="60"
+                                                Height="60"
+                                                Background="#22C55E"
+                                                Style="{StaticResource IconActionButton}"
+                                                ToolTip="Ligar"
+                                                Click="BtnLigar_Click">
+                                            <Button.Effect>
+                                                <DropShadowEffect BlurRadius="8" ShadowDepth="2" Opacity="0.14" Color="#16A34A"/>
+                                            </Button.Effect>
+                                            <Viewbox Width="26" Height="26"><Path Fill="White" Data="M6.62,10.79C8.06,13.62 10.38,15.93 13.21,17.38L15.41,15.18C15.68,14.91 16.08,14.82 16.43,14.94C17.54,15.31 18.73,15.5 20,15.5C20.55,15.5 21,15.95 21,16.5V20C21,20.55 20.55,21 20,21C10.61,21 3,13.39 3,4C3,3.45 3.45,3 4,3H7.5C8.05,3 8.5,3.45 8.5,4C8.5,5.25 8.7,6.45 9.06,7.57C9.17,7.92 9.08,8.31 8.81,8.59L6.62,10.79Z"/></Viewbox>
+                                        </Button>
+
+                                        <Button Grid.Column="2"
+                                                Content="Limpar"
+                                                Width="100"
+                                                Height="36"
+                                                HorizontalAlignment="Left"
+                                                Margin="14,8,0,0"
+                                                FontSize="12"
+                                                FontWeight="SemiBold"
+                                                Background="#FFF1F2"
+                                                Foreground="#E11D48"
+                                                BorderBrush="#FFE4E6"
+                                                BorderThickness="1"
+                                                Style="{StaticResource SecondaryButtonStyle}"
+                                                Click="BtnLimparNumero_Click"/>
+                                    </Grid>
+                                </StackPanel>
+
+                                <!-- ⭐ Favorites sidebar -->
+                                <Border Grid.Column="1"
+                                        Background="#FAFBFF" BorderBrush="#EDE9FE"
+                                        BorderThickness="1" CornerRadius="14"
+                                        Padding="12" Margin="12,0,0,0">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="*"/>
+                                        </Grid.RowDefinitions>
+
+                                        <TextBlock Grid.Row="0" Text="⭐ Favoritos"
+                                                   FontSize="14" FontWeight="Bold"
+                                                   Foreground="#4C1D95" Margin="0,0,0,10"/>
+
+                                        <Grid Grid.Row="1">
+                                            <TextBlock x:Name="txtFavoritosVazio"
+                                                       Text="Adicione favoritos na aba Contatos"
+                                                       Foreground="#94A3B8" FontSize="11"
+                                                       TextAlignment="Center" TextWrapping="Wrap"
+                                                       VerticalAlignment="Center" HorizontalAlignment="Center"
+                                                       Visibility="Visible"/>
+
+                                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                                <ItemsControl x:Name="listFavoritos">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <Border Padding="2,7" BorderBrush="#EDE9FE" BorderThickness="0,0,0,1">
+                                                                <Grid>
+                                                                    <Grid.ColumnDefinitions>
+                                                                        <ColumnDefinition Width="32"/>
+                                                                        <ColumnDefinition Width="*"/>
+                                                                        <ColumnDefinition Width="Auto"/>
+                                                                    </Grid.ColumnDefinitions>
+                                                                    <Border Width="28" Height="28" CornerRadius="14"
+                                                                            Background="{StaticResource PrimarySoftBrush}"
+                                                                            VerticalAlignment="Center">
+                                                                        <TextBlock Text="{Binding Nome, Converter={StaticResource InitialConverter}}"
+                                                                                   Foreground="{StaticResource PrimaryBrush}"
+                                                                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                                                   FontSize="10" FontWeight="Bold"/>
+                                                                    </Border>
+                                                                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="6,0,4,0">
+                                                                        <TextBlock Text="{Binding Nome}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding Nome}"/>
+                                                                        <TextBlock Text="{Binding Numero}" FontSize="10" Foreground="#64748B" TextTrimming="CharacterEllipsis"/>
+                                                                    </StackPanel>
+                                                                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                                                        <Button Tag="{Binding Numero}" Style="{StaticResource IconActionButton}"
+                                                                                Width="26" Height="26" Background="#7C3AED"
+                                                                                ToolTip="Ligar" Margin="0,0,3,0"
+                                                                                Click="BtnLigarFavorito_Click">
+                                                                            <Viewbox Width="13" Height="13"><Path Fill="White" Data="M6.62,10.79C8.06,13.62 10.38,15.93 13.21,17.38L15.41,15.18C15.68,14.91 16.08,14.82 16.43,14.94C17.54,15.31 18.73,15.5 20,15.5C20.55,15.5 21,15.95 21,16.5V20C21,20.55 20.55,21 20,21C10.61,21 3,13.39 3,4C3,3.45 3.45,3 4,3H7.5C8.05,3 8.5,3.45 8.5,4C8.5,5.25 8.7,6.45 9.06,7.57C9.17,7.92 9.08,8.31 8.81,8.59L6.62,10.79Z"/></Viewbox>
+                                                                        </Button>
+                                                                        <Button Tag="{Binding Numero}" Style="{StaticResource IconActionButton}"
+                                                                                Width="26" Height="26" Background="#FEE2E2"
+                                                                                ToolTip="Remover dos favoritos"
+                                                                                Click="BtnRemoverFavorito_Click">
+                                                                            <TextBlock Text="✕" FontSize="11" Foreground="#EF4444" FontWeight="Bold"/>
+                                                                        </Button>
+                                                                    </StackPanel>
+                                                                </Grid>
+                                                            </Border>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </ScrollViewer>
+                                        </Grid>
+                                    </Grid>
+                                </Border>
+                            </Grid>
 
                             <!-- Status bar — always in its own Auto row, never overlapped -->
                             <Border Grid.Row="1" Background="#FAFBFF" BorderBrush="#EDE9FE" BorderThickness="1" CornerRadius="14" Padding="14,10" Margin="0,8,0,0">
@@ -574,6 +651,7 @@
                             <StackPanel Margin="0,0,0,8">
                                 <DockPanel>
                                     <Button DockPanel.Dock="Right" Content="+ Adicionar contato" Height="34" Padding="12,0" Style="{StaticResource PrimaryButtonStyle}" Click="BtnAdicionarContato_Click" FontSize="12" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                                    <Button DockPanel.Dock="Right" Content="↓ Exportar empresa" Height="34" Padding="10,0" Style="{StaticResource SecondaryButtonStyle}" Click="BtnExportarContatosEmpresa_Click" FontSize="12" VerticalAlignment="Center" Margin="8,0,0,0" ToolTip="Gerar company-contacts.json com contatos e favoritos atuais"/>
                                     <Button x:Name="btnAtualizarContatos" DockPanel.Dock="Right" Height="34" Padding="10,0" Style="{StaticResource SecondaryButtonStyle}" Click="BtnAtualizarContatos_Click" FontSize="12" VerticalAlignment="Center">
                                         <StackPanel Orientation="Horizontal">
                                             <Viewbox Width="13" Height="13" Margin="0,0,5,0" VerticalAlignment="Center">
@@ -619,6 +697,34 @@
                                                         </Button>
                                                         <Button Tag="{Binding}" Style="{StaticResource IconActionButton}" Width="34" Height="34" Background="#F1F5F9" ToolTip="Editar contato" Click="BtnEditarContatoShell_Click" Margin="0,0,6,0">
                                                             <Viewbox Width="17" Height="17"><Canvas Width="24" Height="24"><Path Fill="#475569" Data="M3,17.25V21h3.75L17.81,9.94l-3.75-3.75L3,17.25z M20.71,7.04c0.39-0.39,0.39-1.02,0-1.41l-2.34-2.34c-0.39-0.39-1.02-0.39-1.41,0l-1.83,1.83l3.75,3.75L20.71,7.04z"/></Canvas></Viewbox>
+                                                        </Button>
+                                                        <Button Tag="{Binding}" Width="34" Height="34" Click="BtnFavoritarContatoShell_Click" Margin="0,0,6,0">
+                                                            <Button.Style>
+                                                                <Style TargetType="Button" BasedOn="{StaticResource IconActionButton}">
+                                                                    <Setter Property="Background" Value="#F1F5F9"/>
+                                                                    <Setter Property="ToolTip"    Value="Adicionar aos favoritos"/>
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding EhFavorito}" Value="True">
+                                                                            <Setter Property="Background" Value="#FEF3C7"/>
+                                                                            <Setter Property="ToolTip"    Value="Remover dos favoritos"/>
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </Button.Style>
+                                                            <TextBlock FontSize="15">
+                                                                <TextBlock.Style>
+                                                                    <Style TargetType="TextBlock">
+                                                                        <Setter Property="Text"       Value="☆"/>
+                                                                        <Setter Property="Foreground" Value="#94A3B8"/>
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding EhFavorito}" Value="True">
+                                                                                <Setter Property="Text"       Value="★"/>
+                                                                                <Setter Property="Foreground" Value="#F59E0B"/>
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </TextBlock.Style>
+                                                            </TextBlock>
                                                         </Button>
                                                         <Button Content="Excluir" Tag="{Binding}" Style="{StaticResource SoftDangerButtonStyle}" Height="30" Padding="8,2" FontSize="11" Click="BtnExcluirContatoShell_Click"/>
                                                     </StackPanel>
@@ -855,6 +961,36 @@
                                                         <StackPanel Grid.Row="2" Grid.Column="1" Margin="10,0,0,0">
                                                             <Button x:Name="btnSincAmiAgora" Content="Sincronizar AMI agora" Height="40" Margin="0,20,0,0" Style="{StaticResource SecondaryButtonStyle}" Click="BtnSincronizarRamaisAmi_Click"/>
                                                             <TextBlock x:Name="txtAmiSyncStatus" Text="" FontSize="11" Foreground="#94A3B8" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                                                        </StackPanel>
+                                                    </Grid>
+                                                </StackPanel>
+                                            </Border>
+
+                                            <!-- Configuração Centralizada da Empresa -->
+                                            <Border Padding="14" CornerRadius="16" Background="#F0FDF4" BorderBrush="#BBF7D0" BorderThickness="1" Margin="0,0,0,14">
+                                                <StackPanel>
+                                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                                        <TextBlock Text="Configuração da Empresa" FontSize="18" FontWeight="Bold" VerticalAlignment="Center"/>
+                                                        <Border Background="#D1FAE5" CornerRadius="6" Padding="6,2" Margin="8,0,0,0" VerticalAlignment="Center">
+                                                            <TextBlock Text="Auto-sync" FontSize="11" FontWeight="SemiBold" Foreground="#065F46"/>
+                                                        </Border>
+                                                    </StackPanel>
+                                                    <TextBlock Text="Configurações de WhatsApp e CDR são aplicadas automaticamente via arquivo remoto da empresa. Nunca sobrescreve seus dados SIP, contatos pessoais ou favoritos." Foreground="#166534" TextWrapping="Wrap" Margin="0,0,0,12" FontSize="12"/>
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                        <StackPanel Grid.Column="0">
+                                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                                                <TextBlock Text="Versão aplicada: " FontSize="12" Foreground="#374151"/>
+                                                                <TextBlock x:Name="txtCompanyConfigVersion" Text="—" FontSize="12" FontWeight="SemiBold" Foreground="#065F46"/>
+                                                            </StackPanel>
+                                                            <StackPanel Orientation="Horizontal">
+                                                                <TextBlock Text="Última sync: " FontSize="12" Foreground="#374151"/>
+                                                                <TextBlock x:Name="txtCompanyConfigLastSync" Text="—" FontSize="12" Foreground="#6B7280"/>
+                                                            </StackPanel>
+                                                        </StackPanel>
+                                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                            <Button x:Name="btnSincronizarConfigEmpresa" Content="↻ Sincronizar agora" Height="36" Width="160" Style="{StaticResource SecondaryButtonStyle}" Click="BtnSincronizarConfigEmpresa_Click"/>
+                                                            <TextBlock x:Name="txtCompanyConfigStatus" Text="" FontSize="11" Foreground="#94A3B8" Margin="0,4,0,0" HorizontalAlignment="Center" TextWrapping="Wrap"/>
                                                         </StackPanel>
                                                     </Grid>
                                                 </StackPanel>

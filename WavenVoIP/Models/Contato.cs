@@ -1,4 +1,5 @@
 using System;
+using System.Text.Json.Serialization;
 
 namespace WavenVoIP.Models
 {
@@ -10,5 +11,9 @@ namespace WavenVoIP.Models
         public bool EhRamalIssabel { get; set; } = false;
         public bool FonteGoogle { get; set; } = false;
         public DateTime? AtualizadoEm { get; set; }
+
+        // Transient — set at display time, never persisted
+        [JsonIgnore]
+        public bool EhFavorito { get; set; }
     }
 }

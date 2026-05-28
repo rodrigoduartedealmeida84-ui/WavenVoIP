@@ -1,0 +1,17 @@
+{
+  "versaoConfig": "1.0.1",
+  "whatsapp": {
+    "apiUrl": "https://api.wavenchat.com.br/v2/api/external/f8c41589-5a78-4870-a7cd-4ec24e9fd1f2",
+    "bearerToken": "636f130e8928acba0627f40d4a28f00301c31bb14505145e7a88be21ff0e9a90",
+    "ativo": true
+  },
+  "cdr": {
+    "host": "191.252.202.208",
+    "porta": 3306,
+    "banco": "asteriskcdrdb",
+    "tabela": "cdr",
+    "usuario": "waven",
+    "senha": "Waven@2026!CDR#Secure",
+    "ativo": true
+  }
+}

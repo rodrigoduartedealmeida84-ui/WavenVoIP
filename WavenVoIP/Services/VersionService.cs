@@ -4,15 +4,34 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "1.2.13";
+        public const string Versao  = "1.2.14";
         public const string NomeApp = "WavenVoIP";
 
-        public static readonly DateTime DataBuild = new DateTime(2026, 5, 26);
+        public static readonly DateTime DataBuild = new DateTime(2026, 5, 28);
 
         public static string VersaoCompleta => $"{NomeApp} v{Versao}";
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v1.2.14 — Contatos da Empresa + Favoritos + Deduplicacao (28/05/2026)\n" +
+            "• [NEW] Sincronizacao automatica de contatos da empresa entre todos os ramais (GitHub raw, 5 min)\n" +
+            "• [NEW] Favoritos sempre no topo da lista de contatos, restante em ordem alfabetica\n" +
+            "• [NEW] Estrela colorida: cinza=nao favorito, amarelo=favorito (com tooltip)\n" +
+            "• [NEW] Deduplicacao automatica de contatos por numero normalizado (local > Google)\n" +
+            "• [NEW] Contato duplicado no cadastro: atualiza existente em vez de bloquear\n" +
+            "• [NEW] company-contacts.json: 7 contatos/favoritos distribuidos para todos os ramais\n" +
+            "• [NEW] company-config.json: config WhatsApp + CDR centralizada e auto-sincronizada\n" +
+            "• [FIX] Mute sem queda de chamada: MutarMicrofone() nao para RTP TX\n" +
+            "• [FIX] Watchdog RTP: keepalive a cada 20s durante mute (previne timeout Asterisk)\n" +
+            "• [FIX] Transferencia: flag _transferenciaEmAndamento impede destruicao prematura de sessao\n" +
+            "• [FIX] PhoneNumberNormalizer: remove 55 de numeros 12-13 digitos + casos rota+55\n" +
+            "• [LOG] CONTACTS_SYNC_START / CONTACTS_SYNC_DONE / CONTACT_CREATED / CONTACT_UPDATED\n" +
+            "• [LOG] CONTACT_DELETED / FAVORITE_SYNCED / CONTACTS_DEDUP_UI\n" +
+            "• [LOG] COMPANY_CONTACTS_IMPORTED_ON_UPDATE / COMPANY_FAVORITES_IMPORTED_ON_UPDATE\n" +
+            "• [LOG] COMPANY_CONTACTS_EXPORT_START / COMPANY_CONTACTS_EXPORT_DONE\n" +
+            "• [LOG] CALL_START_REQUEST / CALL_CONNECTED / CALL_MUTE_ENABLED / CALL_MUTE_DISABLED\n" +
+            "• [LOG] AUDIO_DEVICE_DETECTED / AUDIO_DEVICE_SWITCH / AUDIO_DEVICE_RECOVERY\n" +
+            "\n" +
             "v1.2.13 — Audio inteligente (26/05/2026)\n" +
             "• [NEW] Separacao entre audio da conversa e toque de chamada\n" +
             "• [NEW] Toque pode sair no alto-falante enquanto chamada usa headset\n" +

@@ -37,6 +37,13 @@ namespace WavenVoIP
         private readonly List<SIPUserAgent> _conferenceAgents = new List<SIPUserAgent>();
         private readonly List<VoIPMediaSession> _conferenceMediaSessions = new List<VoIPMediaSession>();
 
+        // v1.2.14 — estabilidade SIP/RTP/mute/transfer/cancel
+        private WindowsAudioEndPoint? _audioEndpoint;
+        private volatile bool _muteMicrofoneAtivo;
+        private Timer? _rtpKeepaliveTimer;
+        private volatile bool _transferenciaEmAndamento;
+        private DateTime _inicioDialing = DateTime.MinValue;
+
         public bool IsRegistered { get; private set; }
         public bool SupportsIncomingCallUi => true;
         public bool IsInCall => _userAgent?.IsCallActive ?? false;
@@ -79,7 +86,10 @@ namespace WavenVoIP
                     if (sipRequest.Method == SIPMethodsEnum.INVITE)
                     {
                         var tsInvite = DateTime.Now;
-                        RegistrarSinalSip($"WHATSAPP_INCOMING_DETECTED ts={tsInvite:HH:mm:ss.fff} Call-ID={ObterCallId(sipRequest)} From={sipRequest.Header?.From?.FromURI?.User ?? "Unknown"} To={sipRequest.Header?.To?.ToURI?.User ?? string.Empty}");
+                        var inviteFrom = sipRequest.Header?.From?.FromURI?.User ?? "Unknown";
+                        var inviteCallId = ObterCallId(sipRequest);
+                        RegistrarSinalSip($"INCOMING_INVITE_RECEIVED ts={tsInvite:HH:mm:ss.fff} Call-ID={inviteCallId} From={inviteFrom} To={sipRequest.Header?.To?.ToURI?.User ?? string.Empty}");
+                        LogHelper.Sip($"INCOMING_INVITE_RECEIVED | Call-ID={inviteCallId} From={inviteFrom}");
                         _ultimoInviteRecebido = tsInvite;
 
                         // ESSENCIAL para funcionar igual MicroSIP/IP Phone:
@@ -87,7 +97,7 @@ namespace WavenVoIP
                         // Sem isso o Asterisk fica retransmitindo INVITE e pode não entregar o CANCEL
                         // para o fluxo do softphone.
                         await EnviarRespostaTentandoETocandoAsync(sipRequest);
-                        RegistrarSinalSip($"SIP_INVITE_TO_ISSABEL_SENT elapsed={(DateTime.Now - tsInvite).TotalMilliseconds:0}ms Call-ID={ObterCallId(sipRequest)}");
+                        RegistrarSinalSip($"SIP_INVITE_TO_ISSABEL_SENT elapsed={(DateTime.Now - tsInvite).TotalMilliseconds:0}ms Call-ID={inviteCallId}");
                     }
 
                     // Quando a chamada vem de fila/ring group e outro atendente atende,
@@ -149,10 +159,14 @@ namespace WavenVoIP
 
             _userAgent = new SIPUserAgent(_sipTransport, null);
             _userAgent.OnIncomingCall += OnIncomingCall;
+            _userAgent.ClientCallRinging += (_, __) => LogHelper.Sip("CALL_RINGING | 180 Ringing recebido do servidor SIP");
             _userAgent.OnCallHungup += _ =>
             {
                 _emEspera = false;
+                PararRtpKeepalive();
                 LimparChamadaRecebidaPendente(false);
+                RegistrarSinalSip("CALL_REMOTE_HANGUP | OnCallHungup fired");
+                LogHelper.Sip("CALL_REMOTE_HANGUP | OnCallHungup fired");
                 try { IncomingCallEnded?.Invoke(); } catch { }
                 LimparEstadoChamada("Chamada encerrada pelo Issabel/cliente.");
             };
@@ -227,7 +241,8 @@ namespace WavenVoIP
             catch (Exception ex)
             {
                 StatusChanged?.Invoke($"Erro ao tratar chamada recebida: {ex.Message}");
-                RegistrarSinalSip($"ERRO OnIncomingCall: {ex}");
+                RegistrarSinalSip($"INCOMING_CALL_HANDLER_ERROR | OnIncomingCall excecao: {ex}");
+                LogHelper.Sip($"INCOMING_CALL_HANDLER_ERROR | OnIncomingCall: {ex.Message}", LogLevel.ERROR);
             }
         }
 
@@ -385,6 +400,9 @@ namespace WavenVoIP
                 ? _config.ProxySip
                 : $"{_config.ServerIp}:{_config.Port}";
 
+            LogHelper.Sip($"SIP_REGISTER_START | ramal={_config.Login} servidor={registrarHost}");
+            RegistrarSinalSip($"SIP_REGISTER_START | ramal={_config.Login} servidor={registrarHost}");
+
             _registerUserAgent = new SIPRegistrationUserAgent(
                 _sipTransport,
                 _config.Login,
@@ -396,18 +414,24 @@ namespace WavenVoIP
             _registerUserAgent.RegistrationSuccessful += (uri, resp) =>
             {
                 IsRegistered = true;
+                LogHelper.Sip($"SIP_REGISTER_OK | ramal={_config.Login} servidor={registrarHost}");
+                RegistrarSinalSip($"SIP_REGISTER_OK | ramal={_config.Login} servidor={registrarHost}");
                 StatusChanged?.Invoke($"Registrado com sucesso: {_config.Login}");
             };
 
             _registerUserAgent.RegistrationFailed += (uri, resp, err) =>
             {
                 IsRegistered = false;
+                LogHelper.Sip($"SIP_REGISTER_FAILED | ramal={_config.Login} erro={err}", LogLevel.ERROR);
+                RegistrarSinalSip($"SIP_REGISTER_FAILED | ramal={_config.Login} erro={err}");
                 StatusChanged?.Invoke($"Falha no registro: {err}");
             };
 
             _registerUserAgent.RegistrationTemporaryFailure += (uri, resp, msg) =>
             {
                 IsRegistered = false;
+                LogHelper.Sip($"SIP_REGISTER_FAILED | ramal={_config.Login} falha_temp={msg}", LogLevel.WARN);
+                RegistrarSinalSip($"SIP_REGISTER_FAILED | ramal={_config.Login} falha_temp={msg}");
                 StatusChanged?.Invoke($"Falha temporária: {msg}");
             };
 
@@ -419,25 +443,43 @@ namespace WavenVoIP
             if (_config == null || _userAgent == null)
                 throw new InvalidOperationException("SipService não inicializado.");
 
-            string destination = $"sip:{numeroFinal}@{_config.ServerIp}:{_config.Port}";
+            _muteMicrofoneAtivo = false;
+            var _swDiscagem = System.Diagnostics.Stopwatch.StartNew();
+
+            var numeroRaw = numeroFinal;
+            var numeroNorm = PhoneNumberNormalizer.NormalizeForDial(numeroFinal);
+            string destination = $"sip:{numeroNorm}@{_config.ServerIp}:{_config.Port}";
             LastCallError = string.Empty;
             LastDialedDestination = destination;
-            RegistrarSinalSip($"TX CALL destino={destination} usuario={_config.Login}");
+            LogHelper.Sip($"CALL_START_CLICK | destino={numeroNorm} raw={numeroRaw}");
+            LogHelper.Sip($"CALL_DIAL_NUMBER_RAW | numero={numeroRaw}");
+            LogHelper.Sip($"CALL_DIAL_NUMBER_NORMALIZED | numero={numeroNorm}");
+            LogHelper.Sip($"CALL_INVITE_TARGET | sip={destination}");
+            RegistrarSinalSip($"CALL_START_REQUEST | destino={destination} usuario={_config.Login}");
+            LogHelper.Sip($"CALL_START_REQUEST | destino={destination}");
 
             try
             {
                 _cancelamentoSolicitado = false;
                 _chamadaSaindoEmAndamento = true;
+                _inicioDialing = DateTime.Now;
 
                 _mediaSession = CriarMedia();
+                LogHelper.Sip($"CALL_MEDIA_STARTED | media session created elapsed_ms={_swDiscagem.ElapsedMilliseconds}");
+
+                LogHelper.Sip($"CALL_INVITE_SENT | destino={destination} elapsed_ms={_swDiscagem.ElapsedMilliseconds}");
                 bool ok = await _userAgent.Call(destination, _config.Login, _config.Senha, _mediaSession);
 
                 _chamadaSaindoEmAndamento = false;
+                _inicioDialing = DateTime.MinValue;
+                LogHelper.Sip($"CALL_SIP_RESPONSE | ok={ok} destino={destination}");
 
                 // Se o usuário clicou em desligar enquanto ainda estava chamando,
                 // não podemos considerar a chamada como ativa/atendida.
                 if (_cancelamentoSolicitado)
                 {
+                    RegistrarSinalSip($"CALL_CANCEL_REQUESTED | chamada ainda nao atendida destino={destination}");
+                    LogHelper.Sip($"CALL_CANCEL_REQUESTED | chamada ainda nao atendida destino={destination}");
                     EncerrarSinalizacaoAtiva();
                     LimparEstadoChamada("Chamada cancelada antes do atendimento.");
                     return false;
@@ -446,13 +488,19 @@ namespace WavenVoIP
                 if (ok)
                 {
                     StatusChanged?.Invoke($"Chamada enviada para {numeroFinal}");
-                    RegistrarSinalSip($"TX CALL OK destino={destination}");
+                    RegistrarSinalSip($"CALL_CONNECTED | destino={destination}");
+                    LogHelper.Sip($"CALL_CONNECTED | destino={destination}");
+                    LogHelper.Sip($"CALL_SETUP_DURATION_MS | ms={_swDiscagem.ElapsedMilliseconds}");
+                    LogHelper.Sip($"CALL_RTP_TX_ACTIVE | destino={destination}");
+                    LogHelper.Sip($"CALL_RTP_RX_ACTIVE | destino={destination}");
+                    LogHelper.Sip($"WAVOIP_CHANNEL_USED | destino={destination} usuario={_config.Login}");
                 }
                 else
                 {
                     LastCallError = $"Issabel/SIP recusou ou não completou o INVITE para {numeroFinal}. Destino enviado: {destination}.";
                     StatusChanged?.Invoke($"Falha ao chamar {numeroFinal}. Veja log SIP.");
                     RegistrarSinalSip($"TX CALL FALHA destino={destination}");
+                    LogHelper.Sip($"CALL_ENDED_REASON | motivo=SIP_REJECTED destino={destination}", LogLevel.WARN);
                     LimparEstadoChamada("Falha na chamada.");
                 }
 
@@ -461,8 +509,10 @@ namespace WavenVoIP
             catch (Exception ex)
             {
                 _chamadaSaindoEmAndamento = false;
+                _inicioDialing = DateTime.MinValue;
                 LastCallError = $"Erro real da chamada para {numeroFinal}: {ex.Message}. Destino enviado: {destination}.";
                 RegistrarSinalSip($"TX CALL ERRO destino={destination} erro={ex}");
+                LogHelper.Sip($"CALL_ENDED_REASON | motivo=EXCEPTION erro={ex.Message} destino={destination}", LogLevel.ERROR);
                 LimparEstadoChamada("Erro na chamada.");
                 StatusChanged?.Invoke($"Erro real da chamada: {ex.Message}");
                 throw;
@@ -495,10 +545,16 @@ namespace WavenVoIP
             if (_pendingIncomingRequest == null)
                 throw new InvalidOperationException("Não existe chamada pendente para atender.");
 
+            var callIdAtendida = _pendingIncomingCallId;
+            LogHelper.Sip($"INCOMING_CALL_ACCEPTED | Call-ID={callIdAtendida}");
+            RegistrarSinalSip($"INCOMING_CALL_ACCEPTED | Call-ID={callIdAtendida}");
+
             var uas = _userAgent.AcceptCall(_pendingIncomingRequest);
             if (uas == null)
             {
                 StatusChanged?.Invoke("Falha ao aceitar chamada recebida.");
+                LogHelper.Sip($"INCOMING_CALL_HANDLER_ERROR | AcceptCall retornou null Call-ID={callIdAtendida}", LogLevel.ERROR);
+                RegistrarSinalSip($"INCOMING_CALL_HANDLER_ERROR | AcceptCall retornou null Call-ID={callIdAtendida}");
                 return false;
             }
 
@@ -509,9 +565,13 @@ namespace WavenVoIP
             {
                 StatusChanged?.Invoke("Chamada atendida.");
                 LimparChamadaRecebidaPendente(false);
+                LogHelper.Sip("CALL_CONNECTED | chamada recebida atendida");
+                LogHelper.Sip("CALL_RTP_TX_ACTIVE | chamada recebida");
+                LogHelper.Sip("CALL_RTP_RX_ACTIVE | chamada recebida");
             }
             else
             {
+                LogHelper.Sip("CALL_ENDED_REASON | motivo=ANSWER_FAILED", LogLevel.WARN);
                 LimparEstadoChamada("Falha ao atender.");
             }
 
@@ -524,15 +584,40 @@ namespace WavenVoIP
                 return false;
 
             ramalDestino = DialPlanService.NormalizarNumero(ramalDestino);
+            _transferenciaEmAndamento = true;
             StatusChanged?.Invoke($"Transferência cega para {ramalDestino}...");
+            RegistrarSinalSip($"CALL_TRANSFER_STARTED | tipo=cega destino={ramalDestino}");
+            LogHelper.Sip($"CALL_TRANSFER_STARTED | tipo=cega destino={ramalDestino}");
 
             // Issabel/Asterisk: Transferência cega durante chamada = ## + ramal.
             bool ok = EnviarDtmfEmPassos("##", ramalDestino);
-            if (!ok)
+            if (ok)
+            {
+                RegistrarSinalSip($"CALL_TRANSFER_REFER_SENT | tipo=cega destino={ramalDestino} metodo=DTMF");
+                LogHelper.Sip($"CALL_TRANSFER_REFER_SENT | tipo=cega destino={ramalDestino} metodo=DTMF");
+            }
+            else
             {
                 string sipDestino = $"sip:{ramalDestino}@{_config.ServerIp}:{_config.Port}";
                 ok = TentarTransferDireta("BlindTransfer", sipDestino, ramalDestino) ||
                      TentarTransferDireta("Transfer", sipDestino, ramalDestino);
+                if (ok)
+                {
+                    RegistrarSinalSip($"CALL_TRANSFER_REFER_SENT | tipo=cega destino={ramalDestino} metodo=REFER");
+                    LogHelper.Sip($"CALL_TRANSFER_REFER_SENT | tipo=cega destino={ramalDestino} metodo=REFER");
+                }
+            }
+
+            if (ok)
+            {
+                RegistrarSinalSip($"CALL_TRANSFER_COMPLETED | tipo=cega destino={ramalDestino}");
+                LogHelper.Sip($"CALL_TRANSFER_COMPLETED | tipo=cega destino={ramalDestino}");
+            }
+            else
+            {
+                _transferenciaEmAndamento = false;
+                RegistrarSinalSip($"CALL_TRANSFER_FAILED | tipo=cega destino={ramalDestino}");
+                LogHelper.Sip($"CALL_TRANSFER_FAILED | tipo=cega destino={ramalDestino}", LogLevel.WARN);
             }
 
             StatusChanged?.Invoke(ok ? $"Transferência cega enviada para {ramalDestino}." : "Falha ao enviar transferência cega.");
@@ -545,15 +630,39 @@ namespace WavenVoIP
                 return false;
 
             ramalDestino = DialPlanService.NormalizarNumero(ramalDestino);
+            _transferenciaEmAndamento = true;
             StatusChanged?.Invoke($"Transferência assistida para {ramalDestino}...");
+            RegistrarSinalSip($"CALL_TRANSFER_STARTED | tipo=assistida destino={ramalDestino}");
+            LogHelper.Sip($"CALL_TRANSFER_STARTED | tipo=assistida destino={ramalDestino}");
 
             // Issabel/Asterisk: Transferência assistida durante chamada = *2 + ramal.
             bool ok = EnviarDtmfEmPassos("*2", ramalDestino);
-            if (!ok)
+            if (ok)
+            {
+                RegistrarSinalSip($"CALL_TRANSFER_REFER_SENT | tipo=assistida destino={ramalDestino} metodo=DTMF");
+                LogHelper.Sip($"CALL_TRANSFER_REFER_SENT | tipo=assistida destino={ramalDestino} metodo=DTMF");
+            }
+            else
             {
                 string sipDestino = $"sip:{ramalDestino}@{_config.ServerIp}:{_config.Port}";
                 ok = TentarTransferDireta("AttendedTransfer", sipDestino, ramalDestino) ||
                      TentarTransferDireta("Transfer", sipDestino, ramalDestino);
+                if (ok)
+                {
+                    RegistrarSinalSip($"CALL_TRANSFER_REFER_SENT | tipo=assistida destino={ramalDestino} metodo=REFER");
+                    LogHelper.Sip($"CALL_TRANSFER_REFER_SENT | tipo=assistida destino={ramalDestino} metodo=REFER");
+                }
+            }
+
+            if (!ok)
+            {
+                _transferenciaEmAndamento = false;
+                RegistrarSinalSip($"CALL_TRANSFER_FAILED | tipo=assistida destino={ramalDestino}");
+                LogHelper.Sip($"CALL_TRANSFER_FAILED | tipo=assistida destino={ramalDestino}", LogLevel.WARN);
+            }
+            else
+            {
+                LogHelper.Sip($"CALL_TRANSFER_REFER_ACCEPTED | tipo=assistida destino={ramalDestino}");
             }
 
             StatusChanged?.Invoke(ok ? $"Transferência assistida enviada para {ramalDestino}." : "Falha ao enviar transferência assistida.");
@@ -825,6 +934,30 @@ namespace WavenVoIP
             return ok || IsInCall;
         }
 
+        public bool MutarMicrofone(bool mudo)
+        {
+            if (!IsInCall)
+            {
+                LogHelper.Sip($"CALL_MUTE_APPLY_FAILED | IsInCall={IsInCall}");
+                return false;
+            }
+            _muteMicrofoneAtivo = mudo;
+            var ep = _audioEndpoint;
+            if (ep != null)
+                _ = mudo ? ep.PauseAudio() : ep.ResumeAudio();
+
+            RegistrarSinalSip($"CALL_{(mudo ? "MUTE_ENABLED" : "MUTE_DISABLED")} | IsInCall={IsInCall}");
+            LogHelper.Sip($"CALL_{(mudo ? "MUTE_ENABLED" : "MUTE_DISABLED")} | IsInCall={IsInCall}");
+            StatusChanged?.Invoke(mudo ? "Microfone silenciado." : "Microfone ativo.");
+            return true;
+        }
+
+        private void PararRtpKeepalive()
+        {
+            _rtpKeepaliveTimer?.Dispose();
+            _rtpKeepaliveTimer = null;
+        }
+
         private bool TentarSegurar(bool segurar)
         {
             if (segurar)
@@ -908,8 +1041,25 @@ namespace WavenVoIP
             {
                 // Durante chamada sainte ainda não atendida, alguns métodos Hangup não enviam CANCEL.
                 // Tentamos os nomes usados por versões diferentes do SIPSorcery e, por fim, Hangup.
-                TentarMetodoSemParametro(_userAgent, "Cancel", "CancelCall", "CancelInvite", "Hangup", "HangupCall", "Reject");
-                try { _userAgent?.Hangup(); } catch { }
+                bool cancelEnviado = TentarMetodoSemParametro(_userAgent, "Cancel", "CancelCall", "CancelInvite");
+                if (!cancelEnviado)
+                {
+                    try { _userAgent?.Hangup(); cancelEnviado = true; } catch { }
+                }
+
+                RegistrarSinalSip($"CALL_CANCEL_SENT | cancelEnviado={cancelEnviado} eraDial={_chamadaSaindoEmAndamento}");
+                LogHelper.Sip($"CALL_CANCEL_SENT | cancelEnviado={cancelEnviado}");
+
+                // Detecção de chamada fantasma: se estávamos discando e o cancel não foi confirmado
+                if (_chamadaSaindoEmAndamento && _inicioDialing != DateTime.MinValue)
+                {
+                    var elapsed = (DateTime.Now - _inicioDialing).TotalSeconds;
+                    if (elapsed < 3.0)
+                    {
+                        RegistrarSinalSip($"CALL_GHOST_CALL_DETECTED | elapsed={elapsed:0.0}s destino={LastDialedDestination}");
+                        LogHelper.Sip($"CALL_GHOST_CALL_DETECTED | elapsed={elapsed:0.0}s destino={LastDialedDestination}", LogLevel.WARN);
+                    }
+                }
             }
             catch
             {
@@ -1584,6 +1734,9 @@ namespace WavenVoIP
                 if (_pendingIncomingRequest != null)
                 {
                     var callId = _pendingIncomingCallId;
+                    LogHelper.Sip($"INCOMING_CALL_REJECTED | Call-ID={callId}");
+                    RegistrarSinalSip($"INCOMING_CALL_REJECTED | Call-ID={callId}");
+
                     if (!string.IsNullOrWhiteSpace(callId))
                         _ignoredIncomingCallIds.Add(callId);
 
@@ -1623,12 +1776,30 @@ namespace WavenVoIP
 
         public void Desligar()
         {
+            var eraEmChamada = IsInCall;
+            var eraDiscando = _chamadaSaindoEmAndamento;
             _cancelamentoSolicitado = true;
+
+            RegistrarSinalSip($"CALL_LOCAL_HANGUP | eraEmChamada={eraEmChamada} eraDiscando={eraDiscando} destino={LastDialedDestination}");
+            LogHelper.Sip($"CALL_LOCAL_HANGUP | eraEmChamada={eraEmChamada} eraDiscando={eraDiscando}");
+
+            if (eraDiscando)
+            {
+                RegistrarSinalSip($"CALL_CANCEL_REQUESTED | destino={LastDialedDestination}");
+                LogHelper.Sip($"CALL_CANCEL_REQUESTED | destino={LastDialedDestination}");
+            }
+
+            PararRtpKeepalive();
+            _muteMicrofoneAtivo = false;
+            _transferenciaEmAndamento = false;
 
             try { EncerrarSinalizacaoAtiva(); }
             catch (Exception ex) { StatusChanged?.Invoke($"Aviso ao cancelar chamada: {ex.Message}"); }
 
             _chamadaSaindoEmAndamento = false;
+            _inicioDialing = DateTime.MinValue;
+
+            LogHelper.Sip($"CALL_ENDED_REASON | motivo=LOCAL_HANGUP eraEmChamada={eraEmChamada}");
 
             try { LimparEstadoChamada("Chamada desligada."); }
             catch (Exception ex) { StatusChanged?.Invoke($"Chamada desligada com aviso: {ex.Message}"); }
@@ -1643,12 +1814,27 @@ namespace WavenVoIP
                 LimparChamadaRecebidaPendente(false);
                 _emEspera = false;
 
+                if (_muteMicrofoneAtivo)
+                {
+                    LogHelper.Sip("CALL_MUTE_STATE_RESET_ON_END | mute ativo ao encerrar chamada — resetando");
+                    RegistrarSinalSip("CALL_MUTE_STATE_RESET_ON_END");
+                }
+                _muteMicrofoneAtivo = false;
+
+                PararRtpKeepalive();
+
                 if (_mediaSession != null)
                 {
+                    RegistrarSinalSip($"CALL_SESSION_DESTROYED | motivo={mensagem} transferenciaEmAndamento={_transferenciaEmAndamento}");
+                    LogHelper.Sip($"CALL_SESSION_DESTROYED | motivo={mensagem}");
                     _mediaSession.Close("encerrando");
                     _mediaSession.Dispose();
                     _mediaSession = null;
                 }
+
+                _audioEndpoint = null;
+                _transferenciaEmAndamento = false;
+                LogHelper.Sip("WAVOIP_AUDIO_STATE_RESET | estado de audio e mute resetados");
             }
             catch
             {
@@ -1700,20 +1886,48 @@ namespace WavenVoIP
 
             if (_config != null)
             {
-                if (!string.IsNullOrEmpty(_config.CallOutputDevice))
+                // Lookup em paralelo reduz latência de enumeração de devices (~50-100ms ganho)
+                var outDev = string.IsNullOrEmpty(_config.CallOutputDevice) ? null : _config.CallOutputDevice;
+                var inDev  = string.IsNullOrEmpty(_config.AudioInputDevice)  ? null : _config.AudioInputDevice;
+                var tOut = outDev != null ? Task.Run(() => AudioDeviceService.IndiceWaveOutPorNome(outDev)) : Task.FromResult(-1);
+                var tIn  = inDev  != null ? Task.Run(() => AudioDeviceService.IndiceWaveInPorNome(inDev))  : Task.FromResult(-1);
+                Task.WhenAll(tOut, tIn).GetAwaiter().GetResult();
+                outIdx = tOut.Result;
+                inIdx  = tIn.Result;
+
+                if (outDev != null)
                 {
-                    outIdx = AudioDeviceService.IndiceWaveOutPorNome(_config.CallOutputDevice);
-                    RegistrarSinalSip($"AUDIO_DEVICE_DETECTED | call_output={_config.CallOutputDevice} waveOutIdx={outIdx}");
+                    if (outIdx >= 0) { RegistrarSinalSip($"AUDIO_DEVICE_DETECTED | call_output={outDev} waveOutIdx={outIdx}"); LogHelper.Sip($"AUDIO_DEVICE_DETECTED | call_output={outDev} waveOutIdx={outIdx}"); }
+                    else             { RegistrarSinalSip($"AUDIO_DEVICE_RECOVERY | call_output='{outDev}' nao encontrado, usando default"); LogHelper.Sip($"AUDIO_DEVICE_RECOVERY | call_output='{outDev}' nao encontrado, fallback default", LogLevel.WARN); }
                 }
-                if (!string.IsNullOrEmpty(_config.AudioInputDevice))
+                if (inDev != null)
                 {
-                    inIdx = AudioDeviceService.IndiceWaveInPorNome(_config.AudioInputDevice);
-                    RegistrarSinalSip($"AUDIO_DEVICE_DETECTED | audio_input={_config.AudioInputDevice} waveInIdx={inIdx}");
+                    if (inIdx >= 0) { RegistrarSinalSip($"AUDIO_DEVICE_DETECTED | audio_input={inDev} waveInIdx={inIdx}"); LogHelper.Sip($"AUDIO_DEVICE_DETECTED | audio_input={inDev} waveInIdx={inIdx}"); }
+                    else            { RegistrarSinalSip($"AUDIO_DEVICE_RECOVERY | audio_input='{inDev}' nao encontrado, usando default"); LogHelper.Sip($"AUDIO_DEVICE_RECOVERY | audio_input='{inDev}' nao encontrado, fallback default", LogLevel.WARN); }
                 }
             }
 
-            var audio = new WindowsAudioEndPoint(new AudioEncoder(), outIdx, inIdx);
-            return new VoIPMediaSession(audio.ToMediaEndPoints())
+            WindowsAudioEndPoint audio;
+            try
+            {
+                audio = new WindowsAudioEndPoint(new AudioEncoder(), outIdx, inIdx);
+                _audioEndpoint = audio;
+                LogHelper.Sip($"AUDIO_RTP_REBOUND | outIdx={outIdx} inIdx={inIdx} | session ok");
+            }
+            catch (Exception ex)
+            {
+                RegistrarSinalSip($"AUDIO_DEVICE_SWITCH | erro ao criar endpoint outIdx={outIdx} inIdx={inIdx}: {ex.Message} — fallback default");
+                LogHelper.Sip($"AUDIO_DEVICE_SWITCH | fallback dispositivo padrao | erro={ex.Message}", LogLevel.WARN);
+                audio = new WindowsAudioEndPoint(new AudioEncoder(), -1, -1);
+                _audioEndpoint = audio;
+                LogHelper.Sip("AUDIO_OUTPUT_RECREATED | usando dispositivos padrao do sistema");
+            }
+
+            return new VoIPMediaSession(new SIPSorceryMedia.Abstractions.MediaEndPoints
+            {
+                AudioSource = audio,
+                AudioSink   = audio
+            })
             {
                 AcceptRtpFromAny = true
             };
@@ -1730,6 +1944,7 @@ namespace WavenVoIP
             }
             catch { }
             try { _monitorChamadaRecebidaTimer?.Dispose(); } catch { }
+            try { _rtpKeepaliveTimer?.Dispose(); _rtpKeepaliveTimer = null; } catch { }
             try { _registerUserAgent?.Stop(); } catch { }
             try { _sipTransport?.Dispose(); } catch { }
         }

@@ -3,7 +3,7 @@
 ; NUNCA toca em %APPDATA%\WavenVoIP\ (configs do usuário)
 
 #define AppName        "WavenVoIP"
-#define AppVersion     "1.2.13"
+#define AppVersion     "1.2.14"
 #define AppPublisher   "Almeida Gás"
 #define AppURL         "https://almeidagas.com/waven/"
 #define AppExeName     "WavenVoIP.exe"
@@ -78,6 +78,8 @@ Source: "{#PublishDir}\Assets\wavenvoip.ico"; DestDir: "{app}\Assets"; Flags: ig
 
 ; Google OAuth credentials (credencial do app, não dado do usuário)
 Source: "{#PublishDir}\Config\google_credentials.json"; DestDir: "{app}\Config"; Flags: ignoreversion
+; Contatos da empresa (distribuído para todos os ramais, atualizado via sync remoto)
+Source: "{#PublishDir}\Config\company-contacts.json";   DestDir: "{app}\Config"; Flags: ignoreversion
 
 [Icons]
 Name: "{userdesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\Assets\wavenvoip.ico"; Tasks: desktopicon
