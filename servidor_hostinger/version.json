@@ -1,7 +1,7 @@
-﻿{
-    "versao":  "1.3.0",
-    "zip":  "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v1.3.0/WavenVoIP.zip",
-    "sha256":  "7aa209e038cc8c21bd0efd43faeeb86358c460eb770712764a80f130862227e7",
+{
+    "versao":  "1.3.1",
+    "zip":  "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v1.3.1/WavenVoIP.zip",
+    "sha256":  "6d2ed084ac2d4d911c70ac9c291c22bf939af6d75a4ccfcf4962a85a20ef5292",
     "data":  "2026-05-29",
-    "notas":  "v1.3.0 - Mute TX-Only correto via silence injection\n[FIX] Mute aplica SOMENTE no microfone — audio do cliente continua\n[FIX] RTP TX continua ativo com silence — chamada nao cai ao mutar\n[FIX] Mute >3 min nao derruba chamada (Asterisk nao perde sessao)\n[FIX] Desligar mutado reseta estado — proxima chamada comeca desmutada"
+    "notas":  "v1.3.1 - Mute: silence G.711 correto\n[FIX] Silence injection envia byte correto por codec (0xFF PCMU, 0xD5 PCMA)\n[FIX] 0x00 em G.711 gerava ruido — Asterisk nao mais ativa MOH durante mute\n[FIX] Cliente ouve silencio real durante mute, sem musica ou ruido"
 }

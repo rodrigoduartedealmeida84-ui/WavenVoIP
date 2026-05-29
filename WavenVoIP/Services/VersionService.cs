@@ -4,7 +4,7 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "1.3.0";
+        public const string Versao  = "1.3.1";
         public const string NomeApp = "WavenVoIP";
 
         public static readonly DateTime DataBuild = new DateTime(2026, 5, 29);
@@ -13,6 +13,13 @@ namespace WavenVoIP.Services
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v1.3.1 — Mute: silence G.711 correto (29/05/2026)\n" +
+            "• [FIX] Silence injection usa byte correto por codec (0xFF PCMU, 0xD5 PCMA)\n" +
+            "• [FIX] 0x00 (all-zeros) em G.711 decodifica como ruido alto — removido\n" +
+            "• [FIX] Asterisk nao mais interpreta pacotes de mute como sinal invalido\n" +
+            "• [FIX] SetAudioSourceFormat interceptado para detectar codec negociado\n" +
+            "• [FIX] Cliente ouve silencio real durante mute, sem musica ou ruido\n" +
+            "\n" +
             "v1.3.0 — Mute TX-Only correto via silence injection (29/05/2026)\n" +
             "• [FIX] Mute aplica SOMENTE no pipeline TX (microfone/envio) — cliente nao me escuta\n" +
             "• [FIX] Audio recebido do cliente (RX/WaveOut) continua 100% ativo durante mute\n" +

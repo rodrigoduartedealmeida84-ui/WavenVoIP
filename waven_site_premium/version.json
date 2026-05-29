@@ -1,6 +1,6 @@
 {
-  "version": "1.3.0",
-  "url": "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v1.3.0/WavenVoIP_Setup.exe",
-  "notes": "v1.3.0 — Mute TX-Only correto via silence injection. Fixes: mute aplica somente no microfone, audio do cliente continua durante mute, RTP TX permanece ativo com silence (chamada nao cai em mute >3 min), estado de mute resetado ao encerrar chamada.",
+  "version": "1.3.1",
+  "url": "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v1.3.1/WavenVoIP_Setup.exe",
+  "notes": "v1.3.1 — Mute: silence G.711 correto. Fix: silence injection envia 0xFF (PCMU) ou 0xD5 (PCMA) — 0x00 decodificava como ruido alto e causava MOH no Asterisk. Cliente ouve silencio real durante mute.",
   "date": "2026-05-29"
 }
