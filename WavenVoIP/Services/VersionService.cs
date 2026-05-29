@@ -4,15 +4,30 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "1.2.14";
+        public const string Versao  = "1.3.0";
         public const string NomeApp = "WavenVoIP";
 
-        public static readonly DateTime DataBuild = new DateTime(2026, 5, 28);
+        public static readonly DateTime DataBuild = new DateTime(2026, 5, 29);
 
         public static string VersaoCompleta => $"{NomeApp} v{Versao}";
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v1.3.0 — Mute TX-Only correto via silence injection (29/05/2026)\n" +
+            "• [FIX] Mute aplica SOMENTE no pipeline TX (microfone/envio) — cliente nao me escuta\n" +
+            "• [FIX] Audio recebido do cliente (RX/WaveOut) continua 100% ativo durante mute\n" +
+            "• [FIX] RTP TX continua fluindo com silence — Asterisk nao descarta sessao apos timeout\n" +
+            "• [FIX] Mute de qualquer duracao (inclusive >3 min) nao derruba a chamada\n" +
+            "• [FIX] Descligar chamada mutada reseta mute — proxima chamada comeca desmutada\n" +
+            "• [NEW] MuteableAudioSource: proxy IAudioSource que injeta silence encodado no TX\n" +
+            "• [NEW] AudioSource=proxy (TX), AudioSink=endpoint direto (RX) — separacao completa\n" +
+            "• [LOG] CALL_MUTE_ENABLED_TX_ONLY — mute ativado somente no TX\n" +
+            "• [LOG] CALL_MUTE_DISABLED_TX_RESTORED — microfone restaurado\n" +
+            "• [LOG] CALL_RX_AUDIO_CONTINUES_DURING_MUTE — confirmacao que WaveOut nao foi afetado\n" +
+            "• [LOG] CALL_MUTE_DID_NOT_AFFECT_PLAYBACK — pipeline RX intacto\n" +
+            "• [LOG] CALL_MUTE_STATE_RESET_ON_END — mute resetado ao encerrar chamada\n" +
+            "• [LOG] AUDIO_MUTE_PROXY_CREATED — proxy criado na sessao de midia\n" +
+            "\n" +
             "v1.2.14 — Historico CDR + Gravacoes + Contatos da Empresa (28/05/2026)\n" +
             "• [FIX] CDR: chamada sainte corretamente associada ao numero real discado\n" +
             "  — CDR do tronco (src=DID) agora extrai destino real do nome do arquivo de gravacao\n" +

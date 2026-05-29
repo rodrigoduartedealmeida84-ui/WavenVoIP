@@ -1,6 +1,6 @@
 {
-  "version": "1.2.14",
-  "url": "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v1.2.14/WavenVoIP_Setup.exe",
-  "notes": "v1.2.14 — Historico CDR + Gravacoes + Contatos da Empresa. Fixes: gravacao associada ao numero real discado, canal/tronco exibido corretamente, duplicatas removidas, botao X na pesquisa. Novidades: company-contacts.json distribuido para todos os ramais, company-config.json auto-sync WhatsApp+CDR, favoritos no topo, deduplicacao automatica.",
-  "date": "2026-05-28"
+  "version": "1.3.0",
+  "url": "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v1.3.0/WavenVoIP_Setup.exe",
+  "notes": "v1.3.0 — Mute TX-Only correto via silence injection. Fixes: mute aplica somente no microfone, audio do cliente continua durante mute, RTP TX permanece ativo com silence (chamada nao cai em mute >3 min), estado de mute resetado ao encerrar chamada.",
+  "date": "2026-05-29"
 }

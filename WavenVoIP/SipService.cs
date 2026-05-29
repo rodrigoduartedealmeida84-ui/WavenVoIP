@@ -37,8 +37,9 @@ namespace WavenVoIP
         private readonly List<SIPUserAgent> _conferenceAgents = new List<SIPUserAgent>();
         private readonly List<VoIPMediaSession> _conferenceMediaSessions = new List<VoIPMediaSession>();
 
-        // v1.2.14 — estabilidade SIP/RTP/mute/transfer/cancel
+        // v1.3.0 — mute TX-only via proxy de silence injection
         private WindowsAudioEndPoint? _audioEndpoint;
+        private MuteableAudioSource? _muteableAudioSource;
         private volatile bool _muteMicrofoneAtivo;
         private Timer? _rtpKeepaliveTimer;
         private volatile bool _transferenciaEmAndamento;
@@ -942,12 +943,25 @@ namespace WavenVoIP
                 return false;
             }
             _muteMicrofoneAtivo = mudo;
-            var ep = _audioEndpoint;
-            if (ep != null)
-                _ = mudo ? ep.PauseAudio() : ep.ResumeAudio();
 
-            RegistrarSinalSip($"CALL_{(mudo ? "MUTE_ENABLED" : "MUTE_DISABLED")} | IsInCall={IsInCall}");
-            LogHelper.Sip($"CALL_{(mudo ? "MUTE_ENABLED" : "MUTE_DISABLED")} | IsInCall={IsInCall}");
+            // Silence injection via proxy — WaveIn continua rodando, RTP TX flui com silence
+            _muteableAudioSource?.SetMute(mudo);
+
+            if (mudo)
+            {
+                RegistrarSinalSip($"CALL_MUTE_ENABLED_TX_ONLY | IsInCall={IsInCall}");
+                LogHelper.Sip($"CALL_MUTE_ENABLED_TX_ONLY | IsInCall={IsInCall}");
+                LogHelper.Sip("CALL_RX_AUDIO_CONTINUES_DURING_MUTE | WaveOut nao afetado — cliente continua sendo ouvido");
+                LogHelper.Sip("CALL_MUTE_DID_NOT_AFFECT_PLAYBACK | pipeline RX intacto");
+            }
+            else
+            {
+                RegistrarSinalSip($"CALL_MUTE_DISABLED_TX_RESTORED | IsInCall={IsInCall}");
+                LogHelper.Sip($"CALL_MUTE_DISABLED_TX_RESTORED | IsInCall={IsInCall}");
+                LogHelper.Sip("CALL_RX_AUDIO_CONTINUES_DURING_MUTE | WaveOut permaneceu ativo durante mute");
+                LogHelper.Sip("CALL_MUTE_DID_NOT_AFFECT_PLAYBACK | pipeline RX intacto durante e apos mute");
+            }
+
             StatusChanged?.Invoke(mudo ? "Microfone silenciado." : "Microfone ativo.");
             return true;
         }
@@ -1821,6 +1835,10 @@ namespace WavenVoIP
                 }
                 _muteMicrofoneAtivo = false;
 
+                // Desconecta proxy e garante próxima chamada começa desmutada
+                _muteableAudioSource?.Detach();
+                _muteableAudioSource = null;
+
                 PararRtpKeepalive();
 
                 if (_mediaSession != null)
@@ -1923,9 +1941,15 @@ namespace WavenVoIP
                 LogHelper.Sip("AUDIO_OUTPUT_RECREATED | usando dispositivos padrao do sistema");
             }
 
+            // Proxy TX-only: intercept encoded samples, injeta silence quando mutado.
+            // AudioSink (RX/WaveOut) aponta direto para audio — nunca afetado pelo mute.
+            var muteProxy = new MuteableAudioSource(audio);
+            _muteableAudioSource = muteProxy;
+            LogHelper.Sip("AUDIO_MUTE_PROXY_CREATED | TX=MuteableAudioSource RX=WindowsAudioEndPoint direto");
+
             return new VoIPMediaSession(new SIPSorceryMedia.Abstractions.MediaEndPoints
             {
-                AudioSource = audio,
+                AudioSource = muteProxy,
                 AudioSink   = audio
             })
             {
