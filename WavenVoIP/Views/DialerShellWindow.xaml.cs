@@ -36,6 +36,9 @@ namespace WavenVoIP.Views
         private readonly DispatcherTimer _cdrSyncTimer = new DispatcherTimer();
         private readonly DispatcherTimer _companyConfigTimer  = new DispatcherTimer { Interval = TimeSpan.FromMinutes(30) };
         private readonly DispatcherTimer _contactsSyncTimer   = new DispatcherTimer { Interval = TimeSpan.FromMinutes(5) };
+        // Debounce: evita refiltragem a cada tecla — executa só 300ms após parar de digitar
+        private readonly DispatcherTimer _debounceContatos  = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
+        private readonly DispatcherTimer _debounceHistorico = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
         private string _historicoChamadaAtivaId = string.Empty;
         private DateTime _inicioHistoricoChamadaAtiva = DateTime.MinValue;
         private string _ultimaOrigemEntradaPendente = string.Empty;
@@ -244,6 +247,8 @@ namespace WavenVoIP.Views
                 _ = SincronizarContatosRemotosAsync();
                 _contactsSyncTimer.Tick += (_, __) => _ = SincronizarContatosRemotosAsync();
                 _contactsSyncTimer.Start();
+                _debounceContatos.Tick  += (_, __) => { _debounceContatos.Stop();  AtualizarContatosShell(); };
+                _debounceHistorico.Tick += (_, __) => { _debounceHistorico.Stop(); AtualizarHistoricoShell(); };
                 _ = SincronizarConfigEmpresaAsync(silencioso: true);
                 _companyConfigTimer.Tick += (_, __) => _ = SincronizarConfigEmpresaAsync(silencioso: true);
                 _companyConfigTimer.Start();
@@ -675,90 +680,100 @@ namespace WavenVoIP.Views
             AtualizarHistoricoShell();
         }
 
-        private void AtualizarContatosShell()
+        private async void AtualizarContatosShell()
         {
             try
             {
                 if (gridContatosShell == null) return;
-                var raw = ContatoStorageService.Carregar();
-
-                // Deduplicate by normalized number; persist if duplicates found
-                var (contatos, removidos) = ContatoStorageService.Deduplicar(raw, salvarSeAlterou: true);
-                if (removidos > 0)
-                    Services.LogHelper.Info($"CONTACTS_DEDUP_UI | removidos={removidos}");
-
                 var busca = txtBuscaContatosShell?.Text?.Trim() ?? string.Empty;
-                if (!string.IsNullOrWhiteSpace(busca))
+
+                // LINQ e I/O pesados em background — UI thread fica livre
+                var contatos = await System.Threading.Tasks.Task.Run(() =>
                 {
-                    contatos = contatos.Where(c =>
-                        (c.Nome ?? string.Empty).Contains(busca, StringComparison.OrdinalIgnoreCase) ||
-                        (c.Numero ?? string.Empty).Contains(busca, StringComparison.OrdinalIgnoreCase) ||
-                        (c.Observacao ?? string.Empty).Contains(busca, StringComparison.OrdinalIgnoreCase)).ToList();
-                }
+                    var raw = ContatoStorageService.Carregar();
+                    var (list, removidos) = ContatoStorageService.Deduplicar(raw, salvarSeAlterou: true);
+                    if (removidos > 0)
+                        Services.LogHelper.Info($"CONTACTS_DEDUP_UI | removidos={removidos}");
 
-                // Favorites on top, then alphabetical
-                var favNums = new HashSet<string>(
-                    Services.FavoritesStorageService.Carregar()
-                        .Select(f => Services.PhoneNumberNormalizer.NormalizeBrazilPhone(
-                            new string((f.Numero ?? "").Where(char.IsDigit).ToArray()))),
-                    StringComparer.OrdinalIgnoreCase);
+                    if (!string.IsNullOrWhiteSpace(busca))
+                        list = list.Where(c =>
+                            (c.Nome ?? string.Empty).Contains(busca, StringComparison.OrdinalIgnoreCase) ||
+                            (c.Numero ?? string.Empty).Contains(busca, StringComparison.OrdinalIgnoreCase) ||
+                            (c.Observacao ?? string.Empty).Contains(busca, StringComparison.OrdinalIgnoreCase)).ToList();
 
-                contatos = contatos
-                    .OrderByDescending(c => favNums.Contains(
-                        Services.PhoneNumberNormalizer.NormalizeBrazilPhone(
-                            new string((c.Numero ?? "").Where(char.IsDigit).ToArray()))))
-                    .ThenBy(c => c.Nome ?? string.Empty)
-                    .ToList();
+                    var favNums = new HashSet<string>(
+                        Services.FavoritesStorageService.Carregar()
+                            .Select(f => Services.PhoneNumberNormalizer.NormalizeBrazilPhone(
+                                new string((f.Numero ?? "").Where(char.IsDigit).ToArray()))),
+                        StringComparer.OrdinalIgnoreCase);
 
-                // Set transient EhFavorito so XAML DataTriggers can bind to it
-                foreach (var c in contatos)
-                    c.EhFavorito = favNums.Contains(
-                        Services.PhoneNumberNormalizer.NormalizeBrazilPhone(
+                    // Normaliza o número de cada contato uma única vez para evitar triple-pass
+                    var normPorContato = list.ToDictionary(
+                        c => c,
+                        c => Services.PhoneNumberNormalizer.NormalizeBrazilPhone(
                             new string((c.Numero ?? "").Where(char.IsDigit).ToArray())));
 
-                gridContatosShell.ItemsSource = null;
+                    list = list
+                        .OrderByDescending(c => favNums.Contains(normPorContato[c]))
+                        .ThenBy(c => c.Nome ?? string.Empty)
+                        .ToList();
+
+                    foreach (var c in list)
+                        c.EhFavorito = favNums.Contains(normPorContato[c]);
+
+                    return list;
+                });
+
+                // Atualiza grid diretamente — sem null intermediário (evita double-refresh)
                 gridContatosShell.ItemsSource = contatos;
             }
             catch { }
         }
 
-        private void AtualizarHistoricoShell()
+        private async void AtualizarHistoricoShell()
         {
             try
             {
                 if (gridHistoricoShell == null) return;
-                var itens = HistoricoStorageService.CarregarComRetencao(ObterDiasRetencaoHistorico());
-                var busca = txtBuscaHistoricoShell?.Text?.Trim() ?? string.Empty;
+                // Lê valores da UI antes de entrar no background
+                var busca      = txtBuscaHistoricoShell?.Text?.Trim() ?? string.Empty;
                 var canalFiltro = (cmbFiltroCanalHistorico?.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "Todos os canais";
-                var tipoFiltro = (cmbFiltroTipoHistorico?.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "Todos os tipos";
+                var tipoFiltro  = (cmbFiltroTipoHistorico?.SelectedItem  as ComboBoxItem)?.Content?.ToString() ?? "Todos os tipos";
+                var diasRetencao = ObterDiasRetencaoHistorico();
 
-                if (!string.Equals(canalFiltro, "Todos os canais", StringComparison.OrdinalIgnoreCase))
-                    itens = itens.Where(i => string.Equals(i.OrigemSaidaVisual, canalFiltro, StringComparison.OrdinalIgnoreCase)).ToList();
-
-                if (!string.Equals(tipoFiltro, "Todos os tipos", StringComparison.OrdinalIgnoreCase))
+                // I/O e LINQ em background — UI thread fica livre
+                var itens = await System.Threading.Tasks.Task.Run(() =>
                 {
-                    itens = tipoFiltro switch
+                    var lista = HistoricoStorageService.CarregarComRetencao(diasRetencao);
+
+                    if (!string.Equals(canalFiltro, "Todos os canais", StringComparison.OrdinalIgnoreCase))
+                        lista = lista.Where(i => string.Equals(i.OrigemSaidaVisual, canalFiltro, StringComparison.OrdinalIgnoreCase)).ToList();
+
+                    if (!string.Equals(tipoFiltro, "Todos os tipos", StringComparison.OrdinalIgnoreCase))
                     {
-                        "Recebidas" => itens.Where(i => i.Tipo == Models.TipoHistoricoLigacao.Recebida).ToList(),
-                        "Realizadas" => itens.Where(i => i.Tipo == Models.TipoHistoricoLigacao.Realizada).ToList(),
-                        "Perdidas" => itens.Where(i => i.Tipo == Models.TipoHistoricoLigacao.Perdida).ToList(),
-                        "Não atendidas" => itens.Where(i => i.Tipo == Models.TipoHistoricoLigacao.NaoAtendidaNesseRamal).ToList(),
-                        _ => itens
-                    };
-                }
+                        lista = tipoFiltro switch
+                        {
+                            "Recebidas"     => lista.Where(i => i.Tipo == Models.TipoHistoricoLigacao.Recebida).ToList(),
+                            "Realizadas"    => lista.Where(i => i.Tipo == Models.TipoHistoricoLigacao.Realizada).ToList(),
+                            "Perdidas"      => lista.Where(i => i.Tipo == Models.TipoHistoricoLigacao.Perdida).ToList(),
+                            "Não atendidas" => lista.Where(i => i.Tipo == Models.TipoHistoricoLigacao.NaoAtendidaNesseRamal).ToList(),
+                            _ => lista
+                        };
+                    }
 
-                if (!string.IsNullOrWhiteSpace(busca))
-                {
-                    itens = itens.Where(i =>
-                        (i.NomeExibido ?? string.Empty).Contains(busca, StringComparison.OrdinalIgnoreCase) ||
-                        (i.Nome ?? string.Empty).Contains(busca, StringComparison.OrdinalIgnoreCase) ||
-                        (i.Numero ?? string.Empty).Contains(busca, StringComparison.OrdinalIgnoreCase) ||
-                        (i.NumeroLimpoVisual ?? string.Empty).Contains(busca, StringComparison.OrdinalIgnoreCase) ||
-                        (i.OrigemSaidaVisual ?? string.Empty).Contains(busca, StringComparison.OrdinalIgnoreCase) ||
-                        (i.RamalExibido ?? string.Empty).Contains(busca, StringComparison.OrdinalIgnoreCase) ||
-                        i.TipoTexto.Contains(busca, StringComparison.OrdinalIgnoreCase)).ToList();
-                }
-                gridHistoricoShell.ItemsSource = null;
+                    if (!string.IsNullOrWhiteSpace(busca))
+                        lista = lista.Where(i =>
+                            (i.NomeExibido      ?? string.Empty).Contains(busca, StringComparison.OrdinalIgnoreCase) ||
+                            (i.Nome             ?? string.Empty).Contains(busca, StringComparison.OrdinalIgnoreCase) ||
+                            (i.Numero           ?? string.Empty).Contains(busca, StringComparison.OrdinalIgnoreCase) ||
+                            (i.NumeroLimpoVisual ?? string.Empty).Contains(busca, StringComparison.OrdinalIgnoreCase) ||
+                            (i.OrigemSaidaVisual ?? string.Empty).Contains(busca, StringComparison.OrdinalIgnoreCase) ||
+                            (i.RamalExibido     ?? string.Empty).Contains(busca, StringComparison.OrdinalIgnoreCase) ||
+                            i.TipoTexto.Contains(busca, StringComparison.OrdinalIgnoreCase)).ToList();
+
+                    return lista;
+                });
+
                 gridHistoricoShell.ItemsSource = itens;
             }
             catch { }
@@ -838,7 +853,10 @@ namespace WavenVoIP.Views
             if (btnLimparBuscaContatos != null)
                 btnLimparBuscaContatos.Visibility = !string.IsNullOrEmpty(txtBuscaContatosShell?.Text)
                     ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
-            if (gridContatosShell != null) AtualizarContatosShell();
+            if (gridContatosShell == null) return;
+            // Debounce: reinicia o timer a cada tecla — executa apenas após 300ms sem nova digitação
+            _debounceContatos.Stop();
+            _debounceContatos.Start();
         }
 
         private void BtnLimparBuscaContatos_Click(object sender, RoutedEventArgs e)
@@ -1189,7 +1207,9 @@ namespace WavenVoIP.Views
             if (btnLimparBuscaHistorico != null)
                 btnLimparBuscaHistorico.Visibility = !string.IsNullOrEmpty(txtBuscaHistoricoShell?.Text)
                     ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
-            if (gridHistoricoShell != null) AtualizarHistoricoShell();
+            if (gridHistoricoShell == null) return;
+            _debounceHistorico.Stop();
+            _debounceHistorico.Start();
         }
 
         private void BtnLimparBuscaHistorico_Click(object sender, RoutedEventArgs e)

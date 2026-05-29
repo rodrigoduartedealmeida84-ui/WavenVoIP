@@ -55,7 +55,7 @@ namespace WavenVoIP.Services
                     if (_cache == null || DateTime.Now > _cacheExpiry)
                     {
                         _cache = Carregar();
-                        _cacheExpiry = DateTime.Now.AddSeconds(60);
+                        _cacheExpiry = DateTime.Now.AddSeconds(300);
                     }
                     contatos = _cache;
                 }

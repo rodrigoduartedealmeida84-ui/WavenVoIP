@@ -4,7 +4,7 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "1.3.1";
+        public const string Versao  = "1.3.2";
         public const string NomeApp = "WavenVoIP";
 
         public static readonly DateTime DataBuild = new DateTime(2026, 5, 29);
@@ -13,6 +13,22 @@ namespace WavenVoIP.Services
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v1.3.2 — Hold + CDR canal correto (29/05/2026)\n" +
+            "• [FIX] CDR: chamadas WhatsApp TIM/Vivo/Operadora nao mais classificadas como Operadora\n" +
+            "• [FIX] DedurzirTronco() identifica canal via DID no campo channel do Asterisk (SIP/PJSIP)\n" +
+            "• [FIX] Ex: PJSIP/WAVOIP-556684263277-... agora detectado como WhatsApp TIM\n" +
+            "• [LOG] CDR_CHANNEL_IDENTIFIED | channel => canal identificado\n" +
+            "\n" +
+            "v1.3.2 — Hold completo: silencia mic + limpa buffer ao pausar/retomar (ANTERIOR)\n" +
+            "• [FIX] Ao pausar (Segurar): mic silenciado via proxy — audio nao acumula no WaveIn\n" +
+            "• [FIX] Ao pausar (Segurar): WaveOut pausado — operador nao ouve cliente\n" +
+            "• [FIX] Ao pausar e retomar: BufferedWaveProvider.ClearBuffer() chamado via reflexao\n" +
+            "• [FIX] Audio residual/eco acumulado no buffer NAudio descartado ao retomar Hold\n" +
+            "• [FIX] Ao retomar: estado do mute restaurado ao que era antes da pausa\n" +
+            "• [LOG] CALL_HOLD_MIC_MUTED / CALL_HOLD_MIC_RESTORED\n" +
+            "• [LOG] CALL_HOLD_WAVEOUT_PAUSED / CALL_HOLD_WAVEOUT_RESUMED\n" +
+            "• [LOG] CALL_HOLD_BUFFER_CLEARED\n" +
+            "\n" +
             "v1.3.1 — Mute: silence G.711 correto (29/05/2026)\n" +
             "• [FIX] Silence injection usa byte correto por codec (0xFF PCMU, 0xD5 PCMA)\n" +
             "• [FIX] 0x00 (all-zeros) em G.711 decodifica como ruido alto — removido\n" +

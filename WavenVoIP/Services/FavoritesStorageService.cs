@@ -13,23 +13,36 @@ namespace WavenVoIP.Services
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "WavenVoIP", "favorites.json");
 
+        // Cache em memória: evita releitura do arquivo a cada chamada a Carregar()
+        private static List<FavoriteItem>? _cache;
+        private static readonly object _cacheLock = new object();
+
+        private static void InvalidarCache() { lock (_cacheLock) { _cache = null; } }
+
         public static List<FavoriteItem> Carregar()
         {
-            try
+            lock (_cacheLock)
             {
-                if (!File.Exists(_path)) return new List<FavoriteItem>();
-                var json = File.ReadAllText(_path);
-                var list = JsonSerializer.Deserialize<List<FavoriteItem>>(json) ?? new List<FavoriteItem>();
-                return list.OrderBy(f => f.Ordem).ThenBy(f => f.Nome).ToList();
-            }
-            catch
-            {
-                return new List<FavoriteItem>();
+                if (_cache != null) return _cache;
+                try
+                {
+                    if (!File.Exists(_path)) { _cache = new List<FavoriteItem>(); return _cache; }
+                    var json = File.ReadAllText(_path);
+                    _cache = (JsonSerializer.Deserialize<List<FavoriteItem>>(json) ?? new List<FavoriteItem>())
+                             .OrderBy(f => f.Ordem).ThenBy(f => f.Nome).ToList();
+                    return _cache;
+                }
+                catch
+                {
+                    _cache = new List<FavoriteItem>();
+                    return _cache;
+                }
             }
         }
 
         public static void Salvar(List<FavoriteItem> favoritos)
         {
+            InvalidarCache();
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(_path)!);

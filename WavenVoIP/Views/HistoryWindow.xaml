@@ -46,7 +46,10 @@
                 </StackPanel>
                 <Border HorizontalAlignment="Right" Background="White" CornerRadius="18" Padding="12,0" BorderBrush="#E7EAF3" BorderThickness="1" Width="370" Height="48">
                     <DockPanel>
-                        <TextBlock Text="🔎" VerticalAlignment="Center" FontSize="16" Margin="0,0,8,0"/>
+                        <TextBlock DockPanel.Dock="Left" Text="🔎" VerticalAlignment="Center" FontSize="16" Margin="0,0,8,0"/>
+                        <Button x:Name="btnLimparBuscaHistorico" DockPanel.Dock="Right" Click="BtnLimparBuscaHistorico_Click" Width="22" Height="22" Margin="4,0,2,0" VerticalAlignment="Center" Style="{StaticResource IconActionButton}" Visibility="Collapsed" ToolTip="Limpar busca" Padding="0">
+                            <TextBlock Text="✕" FontSize="11" Foreground="#94A3B8" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                        </Button>
                         <TextBox x:Name="txtBusca" BorderThickness="0" Background="Transparent" Height="42" Margin="0" TextChanged="TxtBusca_TextChanged" ToolTip="Pesquisar no histórico"/>
                     </DockPanel>
                 </Border>

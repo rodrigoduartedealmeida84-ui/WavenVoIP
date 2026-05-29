@@ -41,8 +41,24 @@ namespace WavenVoIP.Services
 
         public static List<HistoricoLigacaoItem> CarregarComRetencao(int diasRetencao)
         {
-            LimparAntigas(diasRetencao);
-            return Carregar();
+            // Lê o arquivo uma única vez — evita double-read (LimparAntigas + Carregar)
+            try
+            {
+                if (diasRetencao <= 0) diasRetencao = 7;
+                var itens = Carregar();
+                var limite = System.DateTime.Now.AddDays(-diasRetencao);
+                var filtrados = itens.Where(i => i.DataHora >= limite).ToList();
+                if (filtrados.Count != itens.Count)
+                {
+                    Salvar(filtrados);
+                    return filtrados;
+                }
+                return itens;
+            }
+            catch
+            {
+                return new List<HistoricoLigacaoItem>();
+            }
         }
 
         public static void LimparAntigas(int diasRetencao)
@@ -121,20 +137,27 @@ namespace WavenVoIP.Services
             }
 
             // Remove locally-tracked items superseded by a CDR record (same external number, ±2 min).
-            // Normalize both numbers (strip route prefix + country code 55) before comparing so that
-            // local SIP entries like "25566984671226" (prefix 2 + 55 + number) correctly match the
-            // CDR-normalized number "66984671226".
+            // Pré-normaliza os números do CDR em Dictionary<numero, List<DateTime>> para lookup O(1),
+            // evitando O(n*m) do RemoveAll().Any() original.
+            var cdrPorNumero = new Dictionary<string, List<DateTime>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var c in itensCdr)
+            {
+                if (string.IsNullOrWhiteSpace(c.Numero)) continue;
+                var numC = PhoneNumberNormalizer.NormalizeBrazilPhone(DialPlanService.RemoverPrefixoDeRota(c.Numero));
+                if (numC.Length < 8) continue;
+                if (!cdrPorNumero.TryGetValue(numC, out var datas))
+                    cdrPorNumero[numC] = datas = new List<DateTime>();
+                datas.Add(c.DataHora);
+            }
+
             existentes.RemoveAll(e =>
-                !e.FonteCdr &&
-                !string.IsNullOrWhiteSpace(e.Numero) &&
-                itensCdr.Any(c =>
-                {
-                    var numC = PhoneNumberNormalizer.NormalizeBrazilPhone(DialPlanService.RemoverPrefixoDeRota(c.Numero ?? string.Empty));
-                    var numE = PhoneNumberNormalizer.NormalizeBrazilPhone(DialPlanService.RemoverPrefixoDeRota(e.Numero ?? string.Empty));
-                    return numC.Length >= 8 &&
-                           string.Equals(numC, numE, StringComparison.OrdinalIgnoreCase) &&
-                           Math.Abs((c.DataHora - e.DataHora).TotalMinutes) <= 2;
-                }));
+            {
+                if (e.FonteCdr || string.IsNullOrWhiteSpace(e.Numero)) return false;
+                var numE = PhoneNumberNormalizer.NormalizeBrazilPhone(DialPlanService.RemoverPrefixoDeRota(e.Numero));
+                if (numE.Length < 8) return false;
+                if (!cdrPorNumero.TryGetValue(numE, out var datas)) return false;
+                return datas.Any(d => Math.Abs((d - e.DataHora).TotalMinutes) <= 2);
+            });
 
             // Deduplicate by UniqueId before saving. Prior buggy syncs accumulated multiple copies
             // of the same CDR record in the JSON. The first occurrence of each UID in existentes

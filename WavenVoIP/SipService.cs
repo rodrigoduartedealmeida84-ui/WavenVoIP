@@ -41,6 +41,7 @@ namespace WavenVoIP
         private WindowsAudioEndPoint? _audioEndpoint;
         private MuteableAudioSource? _muteableAudioSource;
         private volatile bool _muteMicrofoneAtivo;
+        private bool _muteAntesDeEspera;   // salva estado do mute ao entrar em Hold
         private Timer? _rtpKeepaliveTimer;
         private volatile bool _transferenciaEmAndamento;
         private DateTime _inicioDialing = DateTime.MinValue;
@@ -972,10 +973,47 @@ namespace WavenVoIP
             _rtpKeepaliveTimer = null;
         }
 
+        // Limpa o BufferedWaveProvider do WindowsAudioEndPoint para evitar que
+        // áudio acumulado durante Hold seja reproduzido ao retomar a chamada.
+        private void LimparBufferPlayback()
+        {
+            try
+            {
+                var ep = _audioEndpoint;
+                if (ep == null) return;
+                var field = ep.GetType().GetField("_waveProvider",
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+                var provider = field?.GetValue(ep);
+                provider?.GetType().GetMethod("ClearBuffer")?.Invoke(provider, null);
+                LogHelper.Sip("CALL_HOLD_BUFFER_CLEARED | buffer WaveOut limpo — sem audio residual ao retomar");
+                RegistrarSinalSip("CALL_HOLD_BUFFER_CLEARED");
+            }
+            catch { }
+        }
+
         private bool TentarSegurar(bool segurar)
         {
             if (segurar)
             {
+                // Salva estado atual do mute e silencia o microfone durante a espera.
+                // Sem isso, o WaveIn continua capturando e o áudio acumula — ao retomar,
+                // o Asterisk vazaria o que foi dito durante a pausa para o cliente.
+                _muteAntesDeEspera = _muteMicrofoneAtivo;
+                _muteableAudioSource?.SetMute(true);
+                LogHelper.Sip($"CALL_HOLD_MIC_MUTED | mic silenciado durante espera (mute anterior={_muteAntesDeEspera})");
+                RegistrarSinalSip("CALL_HOLD_MIC_MUTED");
+
+                // Pausa WaveOut e limpa buffer: evita que áudio pré-hold
+                // fique enfileirado e seja reproduzido ao operador ao retomar.
+                var ep = _audioEndpoint;
+                if (ep != null)
+                {
+                    LimparBufferPlayback();
+                    _ = ep.PauseAudioSink();
+                    LogHelper.Sip("CALL_HOLD_WAVEOUT_PAUSED | operador nao ouve cliente durante espera");
+                    RegistrarSinalSip("CALL_HOLD_WAVEOUT_PAUSED");
+                }
+
                 return TentarMetodo(_userAgent, "PutOnHold", true)
                     || TentarMetodo(_userAgent, "Hold", true)
                     || TentarMetodo(_mediaSession, "PutOnHold", true)
@@ -984,6 +1022,24 @@ namespace WavenVoIP
             }
             else
             {
+                // Limpa buffer acumulado durante Hold ANTES de retomar WaveOut.
+                // Sem isso, o BufferedWaveProvider descarrega áudio enfileirado
+                // (eco/voz própria) assim que Play() é chamado.
+                var ep = _audioEndpoint;
+                if (ep != null)
+                {
+                    LimparBufferPlayback();
+                    _ = ep.ResumeAudioSink();
+                    LogHelper.Sip("CALL_HOLD_WAVEOUT_RESUMED | operador voltou a ouvir cliente");
+                    RegistrarSinalSip("CALL_HOLD_WAVEOUT_RESUMED");
+                }
+
+                // Restaura estado do mute que existia antes da espera
+                _muteMicrofoneAtivo = _muteAntesDeEspera;
+                _muteableAudioSource?.SetMute(_muteAntesDeEspera);
+                LogHelper.Sip($"CALL_HOLD_MIC_RESTORED | mute restaurado para estado anterior={_muteAntesDeEspera}");
+                RegistrarSinalSip($"CALL_HOLD_MIC_RESTORED | mute={_muteAntesDeEspera}");
+
                 return TentarMetodo(_userAgent, "TakeOffHold", false)
                     || TentarMetodo(_userAgent, "Unhold", false)
                     || TentarMetodo(_userAgent, "Resume", false)
@@ -1838,6 +1894,7 @@ namespace WavenVoIP
                 // Desconecta proxy e garante próxima chamada começa desmutada
                 _muteableAudioSource?.Detach();
                 _muteableAudioSource = null;
+                _muteAntesDeEspera = false;
 
                 PararRtpKeepalive();
 

@@ -1,7 +1,7 @@
 {
-    "versao":  "1.3.1",
-    "zip":  "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v1.3.1/WavenVoIP.zip",
-    "sha256":  "6d2ed084ac2d4d911c70ac9c291c22bf939af6d75a4ccfcf4962a85a20ef5292",
+    "versao":  "1.3.2",
+    "zip":  "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v1.3.2/WavenVoIP.zip",
+    "sha256":  "f74e0aec3e552cae920dee94f42d9bd502a584a45b5081c389c6050b4afca8e0",
     "data":  "2026-05-29",
-    "notas":  "v1.3.1 - Mute: silence G.711 correto\n[FIX] Silence injection envia byte correto por codec (0xFF PCMU, 0xD5 PCMA)\n[FIX] 0x00 em G.711 gerava ruido — Asterisk nao mais ativa MOH durante mute\n[FIX] Cliente ouve silencio real durante mute, sem musica ou ruido"
+    "notas":  "v1.3.2 - Hold + CDR + Performance\n[FIX] Hold: mic silenciado ao pausar, WaveOut pausado, buffer limpo ao retomar\n[FIX] CDR: chamadas WhatsApp TIM/Vivo identificadas corretamente (nao mais Operadora)\n[FIX] Mute: silence G.711 correto (0xFF PCMU, 0xD5 PCMA)\n[PERF] Busca com debounce 300ms, LINQ em background, cache favoritos"
 }

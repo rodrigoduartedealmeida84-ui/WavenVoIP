@@ -304,11 +304,23 @@ namespace WavenVoIP.Services
                             Log($"CDR_RECORDING_CORRECTS_NUMBER | anterior={numeroExterno} correto={numeroDeGravacao} arquivo={recordingFile}");
                             numeroExterno = numeroDeGravacao;
                             tipo = TipoHistoricoLigacao.Realizada;
-                            // Extract route name (Operadora / WhatsApp TIM / WhatsApp Vivo) from the
-                            // route prefix digit embedded in the recording filename.
+                            // Chamadas saintes: extrai rota (Operadora/WhatsApp TIM/Vivo) pelo prefixo do filename
                             var origemDeGravacao = ExtrairOrigemSaidaDeGravacao(recordingFile);
                             if (!string.IsNullOrWhiteSpace(origemDeGravacao))
                                 origemSaida = origemDeGravacao;
+                        }
+                        else if (string.IsNullOrWhiteSpace(origemSaida))
+                        {
+                            // Chamadas recebidas: o filename começa pelo DID do tronco que recebeu
+                            // (ex: force-556684263277-caller-... → WhatsApp TIM).
+                            // ExtrairNumeroDestinoDeGravacao retorna vazio para entradas pois não há
+                            // prefixo de rota — mas ExtrairOrigemSaidaDeGravacao reconhece o DID.
+                            var origemDeGravacao = ExtrairOrigemSaidaDeGravacao(recordingFile);
+                            if (!string.IsNullOrWhiteSpace(origemDeGravacao))
+                            {
+                                origemSaida = origemDeGravacao;
+                                Log($"CDR_INCOMING_CHANNEL_FROM_RECORDING | canal={origemDeGravacao} arquivo={recordingFile}");
+                            }
                         }
                     }
 
@@ -853,6 +865,18 @@ namespace WavenVoIP.Services
                 dst.StartsWith("app-")          || dst.StartsWith("s-"))
                 return "Queue";
 
+            // Para chamadas SIP/PJSIP: o channel do Asterisk contém o DID/tronco
+            // (ex: "PJSIP/WAVOIP-556684263277-00000001"). Usa IdentificarEntrada para
+            // extrair o canal configurado (WhatsApp TIM / Vivo / Operadora) via substring
+            // matching dos DIDs conhecidos. Sem isso, entradas via WhatsApp ficam como "Operadora".
+            var textoCanal = (cdr.Channel ?? string.Empty) + " " + (cdr.DstChannel ?? string.Empty);
+            var canalIdentificado = CanalIdentificacaoService.IdentificarEntrada(textoCanal);
+            if (!string.IsNullOrEmpty(canalIdentificado) && canalIdentificado != "Entrada não identificada")
+            {
+                Log($"CDR_CHANNEL_IDENTIFIED | channel={cdr.Channel} dstchannel={cdr.DstChannel} => {canalIdentificado}");
+                return canalIdentificado;
+            }
+
             return string.Empty;
         }
 
@@ -945,9 +969,10 @@ namespace WavenVoIP.Services
             return string.Empty;
         }
 
-        // Returns the route name ("Operadora", "WhatsApp TIM", "WhatsApp Vivo") from the route
-        // prefix digit embedded in the recording filename destination number.
-        // Example: force-266984671226-... → prefix "2" → "WhatsApp TIM"
+        // Returns the route name ("Operadora", "WhatsApp TIM", "WhatsApp Vivo") from the
+        // recording filename. Suporta dois formatos:
+        //   Sainte:  force-{prefixo+destino}-{ramal}-... → prefixo 1/2/3 identifica rota
+        //   Recebida: force-{DID}-{caller}-...           → DID identifica canal (ex: 556684263277 = WhatsApp TIM)
         private static string ExtrairOrigemSaidaDeGravacao(string recordingFile)
         {
             if (string.IsNullOrWhiteSpace(recordingFile)) return string.Empty;
@@ -957,8 +982,17 @@ namespace WavenVoIP.Services
             {
                 var raw = new string(partes[i].Where(char.IsDigit).ToArray());
                 if (raw.Length < 10) continue;
+
+                // Chamadas saintes: prefixo de rota no número de destino (1=Operadora, 2=TIM, 3=Vivo)
                 if (DialPlanService.TemPrefixoDeRota(raw))
                     return DialPlanService.NomeSaidaPeloPrefixo(raw);
+
+                // Chamadas recebidas: o primeiro segmento numérico é o DID do tronco
+                // Ex: force-556684263277-caller-... → DID "556684263277" = WhatsApp TIM
+                var canalPorDid = CanalIdentificacaoService.IdentificarPorValor(raw);
+                if (!string.IsNullOrEmpty(canalPorDid))
+                    return canalPorDid;
+
                 return string.Empty;
             }
             return string.Empty;

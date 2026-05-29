@@ -26,6 +26,11 @@ namespace WavenVoIP.Views
 
         private void TxtBusca_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
         {
+            if (btnLimparBuscaHistorico != null)
+                btnLimparBuscaHistorico.Visibility = !string.IsNullOrEmpty(txtBusca?.Text)
+                    ? System.Windows.Visibility.Visible
+                    : System.Windows.Visibility.Collapsed;
+
             var busca = txtBusca.Text?.Trim() ?? string.Empty;
             if (string.IsNullOrWhiteSpace(busca))
             {
@@ -39,6 +44,12 @@ namespace WavenVoIP.Views
                 (i.Numero ?? string.Empty).Contains(busca, StringComparison.OrdinalIgnoreCase) ||
                 (i.OrigemSaida ?? string.Empty).Contains(busca, StringComparison.OrdinalIgnoreCase) ||
                 i.TipoTexto.Contains(busca, StringComparison.OrdinalIgnoreCase)).ToList();
+        }
+
+        private void BtnLimparBuscaHistorico_Click(object sender, RoutedEventArgs e)
+        {
+            if (txtBusca != null) txtBusca.Text = string.Empty;
+            txtBusca?.Focus();
         }
 
         private void BtnLigarHistorico_Click(object sender, RoutedEventArgs e)

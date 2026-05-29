@@ -1,6 +1,6 @@
 {
-  "version": "1.3.1",
-  "url": "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v1.3.1/WavenVoIP_Setup.exe",
-  "notes": "v1.3.1 — Mute: silence G.711 correto. Fix: silence injection envia 0xFF (PCMU) ou 0xD5 (PCMA) — 0x00 decodificava como ruido alto e causava MOH no Asterisk. Cliente ouve silencio real durante mute.",
+  "version": "1.3.2",
+  "url": "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v1.3.2/WavenVoIP_Setup.exe",
+  "notes": "v1.3.2 — Hold completo + CDR canais corretos + Performance. Hold: mic silenciado ao pausar, WaveOut pausado, buffer limpo ao retomar. CDR: WhatsApp TIM/Vivo nao mais classificados como Operadora. Performance: debounce busca, LINQ em background, cache favoritos.",
   "date": "2026-05-29"
 }
