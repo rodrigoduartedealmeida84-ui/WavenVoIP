@@ -1,7 +1,7 @@
 {
-    "versao":  "1.3.2",
-    "zip":  "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v1.3.2/WavenVoIP.zip",
-    "sha256":  "f74e0aec3e552cae920dee94f42d9bd502a584a45b5081c389c6050b4afca8e0",
-    "data":  "2026-05-29",
-    "notas":  "v1.3.2 - Hold + CDR + Performance\n[FIX] Hold: mic silenciado ao pausar, WaveOut pausado, buffer limpo ao retomar\n[FIX] CDR: chamadas WhatsApp TIM/Vivo identificadas corretamente (nao mais Operadora)\n[FIX] Mute: silence G.711 correto (0xFF PCMU, 0xD5 PCMA)\n[PERF] Busca com debounce 300ms, LINQ em background, cache favoritos"
+    "versao":  "1.4.2",
+    "zip":  "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v1.4.2/WavenVoIP.zip",
+    "sha256":  "21fcfe7e6024126d0acaa857b6d962232fcb60947bad1f056ef0b374d8b764f7",
+    "data":  "2026-06-02",
+    "notas":  "v1.4.2 - Configuracao automatica Waven API + WhatsApp\n[NEW] Migracao automatica: Waven API e WhatsApp ja vem configurados apos atualizar\n[NEW] CDR e AMI via API (sem timeout direto no MySQL/Asterisk)\n[FIX] Icone bandeja robusto + recuperacao apos reinicio do Explorer\n[FIX] Autostart: aguarda rede (8s) antes de registrar SIP"
 }
