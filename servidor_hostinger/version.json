@@ -1,7 +1,7 @@
 {
-    "versao":  "1.4.2",
-    "zip":  "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v1.4.2/WavenVoIP.zip",
-    "sha256":  "21fcfe7e6024126d0acaa857b6d962232fcb60947bad1f056ef0b374d8b764f7",
-    "data":  "2026-06-02",
-    "notas":  "v1.4.2 - Configuracao automatica Waven API + WhatsApp\n[NEW] Migracao automatica: Waven API e WhatsApp ja vem configurados apos atualizar\n[NEW] CDR e AMI via API (sem timeout direto no MySQL/Asterisk)\n[FIX] Icone bandeja robusto + recuperacao apos reinicio do Explorer\n[FIX] Autostart: aguarda rede (8s) antes de registrar SIP"
+    "versao":  "1.4.3",
+    "zip":  "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v1.4.3/WavenVoIP.zip",
+    "sha256":  "f223fa78beea6aef493a58deb7198f7346c761459e064008a6f56cdd7e64fcb2",
+    "data":  "2026-06-03",
+    "notas":  "v1.4.3 - Anti-ressurreicao de contatos + Edicao Google + Tombstone\n[FIX] Edicao de contato compartilhado voltava nome antigo apos sync\n[FIX] Exclusao de contato ressurregia apos sync (tombstone implementado)\n[FIX] Contato Google editado voltava nome antigo (conversao para empresa)\n[FIX] Contato Google excluido reaparecia na proxima sync Google\n[FIX] Modal Contato Google cortava texto do botao (largura 420 para 560px)\n[UI] Botao renomeado para Salvar na empresa com banner verde"
 }
