@@ -146,7 +146,44 @@ namespace WavenVoIP.Services
 
             try
             {
-                var linhas = await BuscarLinhasCdrAsync(config, diasRetencao);
+                // ── Branch: CDR via Waven API ─────────────────────────────────────
+                List<CdrChamada> linhas;
+                if (config.UsarWavenApi &&
+                    !string.IsNullOrWhiteSpace(config.WavenApiUrl) &&
+                    !string.IsNullOrWhiteSpace(config.WavenApiToken))
+                {
+                    Log($"CLIENT_CDR_USING_API | ramal={config.Ramal} dias={diasRetencao}");
+                    var apiRows = await WavenApiService.GetCdrCallsAsync(config.Ramal, diasRetencao)
+                                                       .ConfigureAwait(false);
+                    if (apiRows == null)
+                    {
+                        Log("API_CDR_QUERY_ERROR | falha ao buscar CDR via API");
+                        return resultado;
+                    }
+                    Log($"API_CDR_QUERY_OK | rows={apiRows.Count}");
+                    linhas = apiRows.Select(r => new CdrChamada
+                    {
+                        CallDate      = r.CallDate,
+                        Src           = r.Src,
+                        Dst           = r.Dst,
+                        Channel       = r.Channel,
+                        DstChannel    = r.DstChannel,
+                        LastApp       = r.LastApp,
+                        LastData      = r.LastData,
+                        Duration      = r.Duration,
+                        BillSec       = r.BillSec,
+                        Disposition   = r.Disposition,
+                        UniqueId      = r.UniqueId,
+                        RecordingFile = r.RecordingFile,
+                        LinkedId      = r.LinkedId,
+                        Clid          = r.Clid,
+                        DContext      = r.DContext
+                    }).ToList();
+                }
+                else
+                {
+                    linhas = await BuscarLinhasCdrAsync(config, diasRetencao);
+                }
                 Log($"CDR_ROWS_FOUND quantidade={linhas.Count}");
 
                 // Raw-row diagnostic for the target number

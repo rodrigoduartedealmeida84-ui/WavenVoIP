@@ -1,0 +1,13 @@
+{
+  "WavenApi": {
+    "BearerToken": "SUBSTITUA_POR_TOKEN_SEGURO_MINIMO_32_CARACTERES",
+    "MySql": {
+      "User": "waven",
+      "Password": "SENHA_MYSQL_CDR"
+    },
+    "Ami": {
+      "User": "waven",
+      "Password": "SENHA_AMI_ASTERISK"
+    }
+  }
+}

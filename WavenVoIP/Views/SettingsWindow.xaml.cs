@@ -69,6 +69,14 @@ namespace WavenVoIP.Views
             txtSipAmiUsuario.Text = _sipConfig.AmiUsuario;
             txtSipAmiSenha.Password = _sipConfig.AmiSenha;
 
+            // Waven API
+            chkUsarWavenApi.IsChecked  = _sipConfig.UsarWavenApi;
+            txtWavenApiUrl.Text        = _sipConfig.WavenApiUrl;
+            pwdWavenApiToken.Password  = _sipConfig.WavenApiToken;
+            chkUsarWavenApi.Checked   += (_, _) => AtualizarLabelsApiMode();
+            chkUsarWavenApi.Unchecked += (_, _) => AtualizarLabelsApiMode();
+            AtualizarLabelsApiMode();
+
             // CDR
             chkCdrAtivo.IsChecked = _sipConfig.CdrAtivo;
             txtCdrHost.Text    = string.IsNullOrWhiteSpace(_sipConfig.CdrHost) ? _sipConfig.ServerIp : _sipConfig.CdrHost;
@@ -297,6 +305,13 @@ namespace WavenVoIP.Views
             if (TagDaCombo(cmbGoogleSyncInterval) is string gTag    && int.TryParse(gTag,     out var gSec))      _sipConfig.GoogleSyncIntervalSeconds     = gSec;
             if (TagDaCombo(cmbHistoricoModo)     is string modoTag && !string.IsNullOrWhiteSpace(modoTag))        _sipConfig.HistoricoModoExibicao         = modoTag;
 
+            // Waven API
+            _sipConfig.UsarWavenApi  = chkUsarWavenApi.IsChecked == true;
+            var apiUrl = txtWavenApiUrl.Text?.Trim() ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(apiUrl)) _sipConfig.WavenApiUrl = apiUrl;
+            var apiToken = pwdWavenApiToken.Password?.Trim() ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(apiToken)) _sipConfig.WavenApiToken = apiToken;
+
             _sipConfig.AutoUpdateEnabled    = chkAutoUpdate.IsChecked    == true;
             _sipConfig.LogEnabled           = chkLogAtivo.IsChecked      == true;
             _sipConfig.LogDetailedEnabled   = chkLogDetalhado.IsChecked  == true;
@@ -355,9 +370,49 @@ namespace WavenVoIP.Views
             Close();
         }
 
+        private void AtualizarLabelsApiMode()
+        {
+            var usandoApi = chkUsarWavenApi?.IsChecked == true &&
+                            !string.IsNullOrWhiteSpace(txtWavenApiUrl?.Text);
+
+            if (btnTestarAmi != null)
+                btnTestarAmi.Content = usandoApi ? "Testar AMI via API" : "Testar AMI";
+
+            if (btnTestarCdr != null)
+                btnTestarCdr.Content = usandoApi ? "Testar CDR via API" : "Testar CDR / MySQL";
+
+            if (usandoApi)
+            {
+                if (txtAmiResultado != null && string.IsNullOrWhiteSpace(txtAmiResultado.Text))
+                    SetResultado(txtAmiResultado,
+                        "Waven API ativa — AMI será acessado via https://api.almeidagas.com. As configurações diretas abaixo são usadas apenas como fallback.", null);
+
+                if (txtCdrResultado != null && string.IsNullOrWhiteSpace(txtCdrResultado.Text))
+                    SetResultado(txtCdrResultado,
+                        "Waven API ativa — CDR será acessado via https://api.almeidagas.com. As configurações diretas abaixo são usadas apenas como fallback.", null);
+            }
+        }
+
         private async void BtnTestarAmi_Click(object sender, RoutedEventArgs e)
         {
             btnTestarAmi.IsEnabled = false;
+
+            // Modo API: não conecta direto no AMI
+            if (_sipConfig.UsarWavenApi && !string.IsNullOrWhiteSpace(_sipConfig.WavenApiUrl) && !string.IsNullOrWhiteSpace(_sipConfig.WavenApiToken))
+            {
+                SetResultado(txtAmiResultado, "Testando AMI via Waven API...", null);
+                try
+                {
+                    var (ok, msg) = await WavenApiService.TestarAmiAsync();
+                    SetResultado(txtAmiResultado, ok ? $"✔ {msg}" : $"✘ {msg}", ok);
+                    LogHelper.Ami($"AMI_TEST_VIA_API ok={ok} msg={msg}");
+                }
+                catch (Exception ex) { SetResultado(txtAmiResultado, $"✘ {ex.Message}", false); }
+                finally { btnTestarAmi.IsEnabled = true; }
+                return;
+            }
+
+            // Modo direto: conecta via TCP
             SetResultado(txtAmiResultado, "Testando AMI...", null);
             var host  = txtSipAmiHost.Text.Trim();
             var porta = int.TryParse(txtSipAmiPorta.Text.Trim(), out var p) ? p : 5038;
@@ -409,6 +464,23 @@ namespace WavenVoIP.Views
         private async void BtnTestarCdr_Click(object sender, RoutedEventArgs e)
         {
             btnTestarCdr.IsEnabled = false;
+
+            // Modo API: não conecta direto no MySQL
+            if (_sipConfig.UsarWavenApi && !string.IsNullOrWhiteSpace(_sipConfig.WavenApiUrl) && !string.IsNullOrWhiteSpace(_sipConfig.WavenApiToken))
+            {
+                SetResultado(txtCdrResultado, "Testando CDR via Waven API...", null);
+                try
+                {
+                    var (ok, msg) = await WavenApiService.TestarCdrAsync();
+                    SetResultado(txtCdrResultado, ok ? $"✔ {msg}" : $"✘ {msg}", ok);
+                    LogHelper.Cdr($"CDR_TEST_VIA_API ok={ok} msg={msg}");
+                }
+                catch (Exception ex) { SetResultado(txtCdrResultado, $"✘ {ex.Message}", false); }
+                finally { btnTestarCdr.IsEnabled = true; }
+                return;
+            }
+
+            // Modo direto: conecta via MySQL
             SetResultado(txtCdrResultado, "Testando MySQL...", null);
             var cs = new MySqlConnectionStringBuilder
             {
@@ -932,16 +1004,93 @@ namespace WavenVoIP.Views
 
                 if (ativo)
                 {
-                    var exe = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
+                    // Environment.ProcessPath e mais confiavel que MainModule.FileName em .NET 6+
+                    var exe = Environment.ProcessPath
+                              ?? System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
                     if (!string.IsNullOrWhiteSpace(exe))
-                        key.SetValue("WavenVoIP", "\"" + exe + "\"");
+                    {
+                        // /autostart permite detectar e atrasar o registro SIP ate a rede estar pronta
+                        key.SetValue("WavenVoIP", $"\"{exe}\" /autostart");
+                        WavenVoIP.Services.LogHelper.Info($"AUTOSTART_REGISTERED | path={exe}");
+                    }
                 }
                 else
                 {
                     key.DeleteValue("WavenVoIP", false);
+                    WavenVoIP.Services.LogHelper.Info("AUTOSTART_UNREGISTERED");
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                WavenVoIP.App.LogCrash("AUTOSTART_CONFIG_FAILED", "ConfigurarInicializacaoWindows falhou", ex);
+            }
+        }
+
+        // ── Waven API ─────────────────────────────────────────────────────────
+
+        private async void BtnTestarWavenApi_Click(object sender, RoutedEventArgs e)
+        {
+            var url   = txtWavenApiUrl.Text?.Trim() ?? string.Empty;
+            var token = pwdWavenApiToken.Password?.Trim() ?? string.Empty;
+
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                txtWavenApiStatus.Text = "Informe a URL da API.";
+                return;
+            }
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                txtWavenApiStatus.Text = "Informe o token de acesso.";
+                return;
+            }
+
+            // Salva temporariamente para o WavenApiService ler
+            _sipConfig.WavenApiUrl   = url;
+            _sipConfig.WavenApiToken = token;
+            _sipConfig.Salvar();
+
+            btnTestarWavenApi.IsEnabled = false;
+            txtWavenApiStatus.Text = "Testando...";
+            try
+            {
+                var (ok, versao, erro) = await WavenVoIP.Services.WavenApiService.TestarAsync().ConfigureAwait(true);
+                txtWavenApiStatus.Text = ok
+                    ? $"API online — versão {versao}"
+                    : $"Falha: {erro}";
+            }
+            finally
+            {
+                btnTestarWavenApi.IsEnabled = true;
+            }
+        }
+
+        private async void BtnSincronizarAgora_Click(object sender, RoutedEventArgs e)
+        {
+            var cfg = SipConfig.CarregarSalva();
+            if (cfg?.UsarWavenApi != true ||
+                string.IsNullOrWhiteSpace(cfg.WavenApiToken))
+            {
+                txtWavenApiStatus.Text = "Ative e configure a API antes de sincronizar.";
+                return;
+            }
+
+            btnSincronizarAgora.IsEnabled = false;
+            txtWavenApiStatus.Text = "Sincronizando...";
+            try
+            {
+                var svc = new WavenVoIP.Services.WavenApiSyncService(cfg.Ramal);
+                await svc.SincronizarAsync().ConfigureAwait(true);
+                svc.Dispose();
+                txtWavenApiStatus.Text = "Sincronização concluída.";
+            }
+            catch (Exception ex)
+            {
+                txtWavenApiStatus.Text = $"Erro: {ex.Message}";
+            }
+            finally
+            {
+                btnSincronizarAgora.IsEnabled = true;
+            }
         }
     }
 }

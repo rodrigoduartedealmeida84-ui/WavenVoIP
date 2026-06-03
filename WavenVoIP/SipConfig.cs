@@ -178,5 +178,13 @@ namespace WavenVoIP
         // ── Company config auto-sync v1.2.14 ──────────────────────────────────
         public string    CompanyConfigVersion  { get; set; } = string.Empty;
         public DateTime? CompanyConfigLastSync { get; set; }
+
+        // ── Waven API v1 ───────────────────────────────────────────────────────
+        public bool   UsarWavenApi   { get; set; } = false;
+        public string WavenApiUrl    { get; set; } = "https://api.almeidagas.com";
+        public string WavenApiToken  { get; set; } = string.Empty;
+
+        // ── Migrações automáticas ──────────────────────────────────────────────
+        public bool MigracaoAplicada142 { get; set; } = false;
     }
 }

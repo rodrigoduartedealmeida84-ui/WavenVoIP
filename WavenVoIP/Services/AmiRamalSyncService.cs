@@ -14,9 +14,37 @@ namespace WavenVoIP.Services
     {
         public static async Task<List<Contato>> BuscarRamaisAsync(SipConfig config)
         {
-            var resultado = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             if (config == null || !config.AmiAtivo)
                 return new List<Contato>();
+
+            // ── Branch: AMI via Waven API ─────────────────────────────────────
+            if (config.UsarWavenApi &&
+                !string.IsNullOrWhiteSpace(config.WavenApiUrl) &&
+                !string.IsNullOrWhiteSpace(config.WavenApiToken))
+            {
+                LogHelper.Info("CLIENT_AMI_USING_API | sincronizando ramais via Waven API");
+                var extensions = await WavenApiService.GetAmiExtensionsAsync().ConfigureAwait(false);
+                if (extensions == null)
+                {
+                    LogHelper.Info("API_AMI_CONNECT_ERROR | falha ao buscar ramais via API");
+                    throw new InvalidOperationException("Falha ao conectar ao AMI via Waven API.");
+                }
+                LogHelper.Info($"API_AMI_CONNECT_OK | extensions={extensions.Count}");
+                return extensions
+                    .Select(e => new Contato
+                    {
+                        Numero         = e.Ramal,
+                        Nome           = string.IsNullOrWhiteSpace(e.Nome) ? e.Ramal : e.Nome,
+                        Observacao     = "Ramal Issabel (via API)",
+                        EhRamalIssabel = true,
+                        AtualizadoEm   = DateTime.Now
+                    })
+                    .OrderBy(c => c.Numero)
+                    .ToList();
+            }
+
+            // ── Conexao direta TCP (UsarWavenApi=false) ───────────────────────
+            var resultado = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
             var host = string.IsNullOrWhiteSpace(config.AmiHost) ? config.ServerIp : config.AmiHost.Trim();
             var porta = config.AmiPorta <= 0 ? 5038 : config.AmiPorta;

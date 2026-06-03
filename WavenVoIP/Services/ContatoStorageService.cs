@@ -182,13 +182,30 @@ namespace WavenVoIP.Services
                     PhoneNumberNormalizer.NormalizeBrazilPhone(SomenteDigitos(c.Numero)) == numero))
                     continue;
 
+                // Se está na lista de suprimidos (tombstone), não reimportar
+                if (ContactTombstoneService.EstaSuprimido(g.GoogleContactId, numero))
+                {
+                    LogHelper.Info($"GOOGLE_SYNC_SUPPRESSED_BY_TOMBSTONE | googleId={g.GoogleContactId} numero={numero} nome={g.Nome}");
+                    continue;
+                }
+
+                // Se existe contato não-Google vinculado ao mesmo GoogleContactId (foi convertido para empresa),
+                // não sobrescrever com dados antigos do Google
+                if (!string.IsNullOrWhiteSpace(g.GoogleContactId) &&
+                    contatos.Any(c => !c.FonteGoogle && c.GoogleContactId == g.GoogleContactId))
+                {
+                    LogHelper.Info($"GOOGLE_CONTACT_NOT_OVERWRITING_SHARED | googleId={g.GoogleContactId} nome={g.Nome}");
+                    continue;
+                }
+
                 contatos.Add(new Contato
                 {
-                    Nome = g.Nome,
-                    Numero = numero,
-                    Observacao = "Google Contacts",
-                    FonteGoogle = true,
-                    AtualizadoEm = DateTime.Now
+                    Nome            = g.Nome,
+                    Numero          = numero,
+                    Observacao      = "Google Contacts",
+                    FonteGoogle     = true,
+                    AtualizadoEm    = DateTime.Now,
+                    GoogleContactId = g.GoogleContactId
                 });
                 adicionados++;
             }

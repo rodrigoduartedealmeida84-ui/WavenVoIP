@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Windows.Interop;
 using Microsoft.Win32;
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
@@ -30,6 +32,11 @@ namespace WavenVoIP.Views
         private TaskCompletionSource<SaidaChamada?>? _routeSelectorTcs;
         private WF.NotifyIcon? _trayIcon;
         private bool _fechamentoReal;
+
+        // P/Invoke para recuperar ícone da bandeja quando Explorer reinicia
+        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+        private static extern uint RegisterWindowMessage(string lpString);
+        private static readonly uint _wmTaskbarCreated = RegisterWindowMessage("TaskbarCreated");
         private readonly DispatcherTimer _reconnectTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
         private readonly DispatcherTimer _amiSyncTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(10) };
         private readonly DispatcherTimer _googleSyncTimer = new DispatcherTimer();
@@ -263,6 +270,17 @@ namespace WavenVoIP.Views
                 InicializarPainelLogs();
                 IntegrationAutoReconnectService.ReconectarAgora += OnIntegracaoReconectarAgora;
                 Closed += (_, _) => IntegrationAutoReconnectService.ReconectarAgora -= OnIntegracaoReconectarAgora;
+
+                // Hook WndProc para detectar reinicialização do Explorer e recuperar ícone da bandeja
+                try
+                {
+                    var src = HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);
+                    src?.AddHook(WndProc);
+                }
+                catch (Exception exHook)
+                {
+                    App.LogCrash("WNDPROC_HOOK_FAILED", "Falha ao registrar WndProc hook", exHook);
+                }
             }
             catch (Exception ex)
             {
@@ -377,7 +395,20 @@ namespace WavenVoIP.Views
             try
             {
                 var config = MontarConfigAmiAtual();
-                if (!config.AmiAtivo || string.IsNullOrWhiteSpace(config.AmiHost) || string.IsNullOrWhiteSpace(config.AmiUsuario) || string.IsNullOrWhiteSpace(config.AmiSenha))
+                var usandoApi = config.UsarWavenApi &&
+                                !string.IsNullOrWhiteSpace(config.WavenApiUrl) &&
+                                !string.IsNullOrWhiteSpace(config.WavenApiToken);
+
+                if (!config.AmiAtivo)
+                {
+                    AtualizarStatusAmiContatos("AMI: marque 'Ativar' nas Configurações", "#94A3B8");
+                    if (mostrarMensagem)
+                        MessageBox.Show("Marque 'Ativar sincronização AMI' nas Configurações.", "Waven VoIP");
+                    return;
+                }
+
+                // Conexão direta exige host/usuário/senha; modo API não precisa dessas credenciais
+                if (!usandoApi && (string.IsNullOrWhiteSpace(config.AmiHost) || string.IsNullOrWhiteSpace(config.AmiUsuario) || string.IsNullOrWhiteSpace(config.AmiSenha)))
                 {
                     AtualizarStatusAmiContatos("AMI: configure host, usuário, senha e marque Ativar", "#94A3B8");
                     if (mostrarMensagem)
@@ -385,8 +416,9 @@ namespace WavenVoIP.Views
                     return;
                 }
 
-                txtStatus.Text = "Sincronizando ramais do Issabel via AMI...";
-                AtualizarStatusAmiContatos($"AMI: conectando em {config.AmiHost}:{config.AmiPorta}...", "#F59E0B");
+                var modoLabel = usandoApi ? "via API" : $"em {config.AmiHost}:{config.AmiPorta}";
+                txtStatus.Text = $"Sincronizando ramais do Issabel {modoLabel}...";
+                AtualizarStatusAmiContatos($"AMI: conectando {modoLabel}...", "#F59E0B");
                 var ramais = await AmiRamalSyncService.BuscarRamaisAsync(config);
                 var alterados = ContatoStorageService.SincronizarRamaisIssabel(ramais);
                 AtualizarContatosShell();
@@ -797,15 +829,32 @@ namespace WavenVoIP.Views
 
         private void BtnEditarContatoShell_Click(object sender, RoutedEventArgs e)
         {
-            if (sender is FrameworkElement fe && fe.Tag is Contato contato)
+            if (sender is not FrameworkElement fe || fe.Tag is not Contato contato) return;
+
+            var cfg = SipConfig.CarregarSalva();
+            var ehCompartilhado = cfg?.UsarWavenApi == true &&
+                                  !contato.EhRamalIssabel && !contato.FonteGoogle;
+
+            if (ehCompartilhado)
             {
-                var dlg = new Views.SalvarContatoDialog(contato) { Owner = this };
-                if (dlg.ShowDialog() == true)
+                var warn = new Views.SharedContactWarningDialog(Views.SharedContactWarningModo.Editar)
+                    { Owner = this };
+                warn.ShowDialog();
+
+                if (!warn.Confirmado)
                 {
-                    AtualizarContatosShell();
-                    if (dlg.AdicionadoAosFavoritos) _ = CarregarFavoritosAsync();
-                    AtualizarExportContatos();
+                    Services.LogHelper.Info($"CONTACT_SHARED_EDIT_WARNING_CANCELLED | nome={contato.Nome}");
+                    return;
                 }
+                Services.LogHelper.Info($"CONTACT_SHARED_EDIT_WARNING_ACCEPTED | nome={contato.Nome}");
+            }
+
+            var dlg = new Views.SalvarContatoDialog(contato) { Owner = this };
+            if (dlg.ShowDialog() == true)
+            {
+                AtualizarContatosShell();
+                if (dlg.AdicionadoAosFavoritos) _ = CarregarFavoritosAsync();
+                AtualizarExportContatos();
             }
         }
 
@@ -836,16 +885,60 @@ namespace WavenVoIP.Views
                 AbrirTelaWhatsApp(numero, "contato");
         }
 
-        private void BtnExcluirContatoShell_Click(object sender, RoutedEventArgs e)
+        private async void BtnExcluirContatoShell_Click(object sender, RoutedEventArgs e)
         {
-            if (sender is FrameworkElement fe && fe.Tag is Contato contato)
+            if (sender is not FrameworkElement fe || fe.Tag is not Contato contato) return;
+
+            var cfg = SipConfig.CarregarSalva();
+            var ehCompartilhado = cfg?.UsarWavenApi == true &&
+                                  !contato.EhRamalIssabel && !contato.FonteGoogle;
+
+            if (ehCompartilhado)
             {
-                var contatos = ContatoStorageService.Carregar();
-                contatos.RemoveAll(c => c.Nome == contato.Nome && c.Numero == contato.Numero && c.Observacao == contato.Observacao);
-                ContatoStorageService.Salvar(contatos);
-                _ = Task.Run(() => Services.CompanyContactsService.MarcarExcluidoNoExport(contato.Numero));
-                AtualizarContatosShell();
+                var origemGoogle = !string.IsNullOrWhiteSpace(contato.GoogleContactId);
+                var warn = new Views.SharedContactWarningDialog(Views.SharedContactWarningModo.Excluir, origemGoogle)
+                    { Owner = this };
+                warn.ShowDialog();
+
+                if (!warn.Confirmado)
+                {
+                    Services.LogHelper.Info($"CONTACT_SHARED_DELETE_WARNING_CANCELLED | nome={contato.Nome}");
+                    return;
+                }
+                Services.LogHelper.Info($"CONTACT_SHARED_DELETE_WARNING_ACCEPTED | nome={contato.Nome}");
             }
+            else
+            {
+                if (MessageBox.Show($"Excluir {contato.Nome}?", "Waven VoIP",
+                        MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+                    return;
+            }
+
+            // Push exclusão para a API se for contato compartilhado
+            if (ehCompartilhado && !string.IsNullOrWhiteSpace(contato.WavenApiId))
+            {
+                var ok = await Services.WavenApiService.ExcluirContatoAsync(contato.WavenApiId, cfg!.Ramal);
+                if (!ok)
+                {
+                    Services.WavenApiSyncService.EnfileirarOffline(new Models.WavenApiOfflineOp
+                    {
+                        Op        = "DELETE",
+                        ContactId = contato.WavenApiId,
+                        Ramal     = cfg.Ramal
+                    });
+                    Services.LogHelper.Info($"API_CONTACT_OFFLINE_QUEUE_SAVED | op=DELETE id={contato.WavenApiId}");
+                }
+                else
+                {
+                    Services.LogHelper.Info($"API_CONTACT_DELETED | id={contato.WavenApiId} nome={contato.Nome}");
+                }
+            }
+
+            var contatos = ContatoStorageService.Carregar();
+            contatos.RemoveAll(c => c.Nome == contato.Nome && c.Numero == contato.Numero && c.Observacao == contato.Observacao);
+            ContatoStorageService.Salvar(contatos);
+            _ = Task.Run(() => Services.CompanyContactsService.MarcarExcluidoNoExport(contato.Numero));
+            AtualizarContatosShell();
         }
 
         private void TxtBuscaContatosShell_TextChanged(object sender, TextChangedEventArgs e)
@@ -944,6 +1037,9 @@ namespace WavenVoIP.Views
                     _favoritos.Remove(item);
                     Services.FavoritesStorageService.Remover(numero);
                     AtualizarVisibilidadeFavoritosVazio();
+
+                    // Push para API (pessoal, sem alerta — favorito é ação individual)
+                    EnviarFavoritoApiAsync(contactId: null, numero: numero, adicionar: false);
                 }
             }
             catch { }
@@ -959,6 +1055,7 @@ namespace WavenVoIP.Views
                 if (contato.EhFavorito)
                 {
                     Services.FavoritesStorageService.Remover(contato.Numero);
+                    EnviarFavoritoApiAsync(contato.WavenApiId, contato.Numero, adicionar: false);
                 }
                 else
                 {
@@ -968,12 +1065,47 @@ namespace WavenVoIP.Views
                         Numero  = contato.Numero,
                         Favorito = true
                     });
+                    EnviarFavoritoApiAsync(contato.WavenApiId, contato.Numero, adicionar: true);
                 }
 
                 AtualizarContatosShell();
                 _ = CarregarFavoritosAsync();
             }
             catch { }
+        }
+
+        private void EnviarFavoritoApiAsync(string? contactId, string numero, bool adicionar)
+        {
+            var cfg = SipConfig.CarregarSalva();
+            if (cfg?.UsarWavenApi != true || string.IsNullOrWhiteSpace(cfg.WavenApiToken)) return;
+            if (string.IsNullOrWhiteSpace(contactId)) return; // contato não sincronizado com API ainda
+
+            var ramal = cfg.Ramal;
+            _ = Task.Run(async () =>
+            {
+                bool ok;
+                if (adicionar)
+                    ok = await Services.WavenApiService.AdicionarFavoritoAsync(contactId, ramal).ConfigureAwait(false);
+                else
+                    ok = await Services.WavenApiService.RemoverFavoritoAsync(contactId, ramal).ConfigureAwait(false);
+
+                if (!ok)
+                {
+                    Services.WavenApiSyncService.EnfileirarOffline(new Models.WavenApiOfflineOp
+                    {
+                        Op        = adicionar ? "FAVORITE_ADD" : "FAVORITE_REMOVE",
+                        ContactId = contactId,
+                        Payload   = System.Text.Json.JsonSerializer.Serialize(
+                            new { TipoFavorito = "usuario", CriadoPor = ramal }),
+                        Ramal     = ramal
+                    });
+                    Services.LogHelper.Info($"API_CONTACT_OFFLINE_QUEUE_SAVED | op={(adicionar ? "FAVORITE_ADD" : "FAVORITE_REMOVE")} id={contactId}");
+                }
+                else
+                {
+                    Services.LogHelper.Info($"API_CONTACT_FAVORITE_UPDATED | id={contactId} ramal={ramal} favorito={adicionar}");
+                }
+            });
         }
 
         private void BtnExportarContatosEmpresa_Click(object sender, RoutedEventArgs e)
@@ -1268,7 +1400,23 @@ namespace WavenVoIP.Views
             try
             {
                 var config = SipConfig.CarregarSalva() ?? new SipConfig();
-                if (!config.CdrAtivo || string.IsNullOrWhiteSpace(config.CdrHost) || string.IsNullOrWhiteSpace(config.CdrUsuario))
+                var usandoApi = config.UsarWavenApi &&
+                                !string.IsNullOrWhiteSpace(config.WavenApiUrl) &&
+                                !string.IsNullOrWhiteSpace(config.WavenApiToken);
+
+                if (!config.CdrAtivo)
+                {
+                    if (!silencioso)
+                        MessageBox.Show(
+                            usandoApi
+                                ? "Ative o CDR nas Configurações para buscar o histórico via API."
+                                : "CDR não configurado. Preencha Host, Usuário e Senha nas Configurações → CDR.",
+                            "Waven VoIP");
+                    return;
+                }
+
+                // Conexão direta exige host e usuário; modo API não precisa dessas credenciais
+                if (!usandoApi && (string.IsNullOrWhiteSpace(config.CdrHost) || string.IsNullOrWhiteSpace(config.CdrUsuario)))
                 {
                     if (!silencioso)
                         MessageBox.Show("CDR não configurado. Preencha Host, Usuário e Senha nas Configurações → CDR.", "Waven VoIP");
@@ -1411,9 +1559,23 @@ namespace WavenVoIP.Views
         {
             try
             {
+                var config = SipConfig.CarregarSalva() ?? new SipConfig();
+
+                if (config.UsarWavenApi && !string.IsNullOrWhiteSpace(config.WavenApiUrl) && !string.IsNullOrWhiteSpace(config.WavenApiToken))
+                {
+                    if (txtStatusCdrConfig != null) txtStatusCdrConfig.Text = "Testando CDR via API...";
+                    RegistrarUiDiagnostico("CDR_TEST_VIA_API");
+                    var (ok, msg) = await Services.WavenApiService.TestarCdrAsync();
+                    if (txtStatusCdrConfig != null) txtStatusCdrConfig.Text = ok ? "CDR via API OK" : $"Falha: {msg}";
+                    txtStatus.Text = ok ? $"CDR via API: {msg}" : $"Falha CDR API: {msg}";
+                    if (!ok)
+                        MessageBox.Show($"Falha ao testar CDR via Waven API:\n\n{msg}", "Waven VoIP - CDR", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
                 if (txtStatusCdrConfig != null) txtStatusCdrConfig.Text = "Testando...";
-                var config = MontarConfigCdrAtual();
-                await Task.Run(() => IssabelCdrService.TestarConexaoAsync(config));
+                var configCdr = MontarConfigCdrAtual();
+                await Task.Run(() => IssabelCdrService.TestarConexaoAsync(configCdr));
                 if (txtStatusCdrConfig != null) txtStatusCdrConfig.Text = "Conexão OK";
                 txtStatus.Text = "Conexão CDR estabelecida com sucesso.";
                 RegistrarUiDiagnostico("CDR_CONNECTION_OK");
@@ -1792,24 +1954,96 @@ namespace WavenVoIP.Views
             catch { }
         }
 
-                private void ConfigurarBandeja()
+        private void ConfigurarBandeja()
         {
             try
             {
-                _trayIcon = new WF.NotifyIcon
-                {
-                    Text = "Waven VoIP",
-                    Visible = true,
-                    Icon = System.Drawing.Icon.ExtractAssociatedIcon(System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName ?? string.Empty)
-                };
+                _trayIcon = new WF.NotifyIcon { Text = "Waven VoIP" };
+                _trayIcon.Icon = CarregarIconeBandeja();
+                _trayIcon.Visible = true;
 
                 var menu = new WF.ContextMenuStrip();
                 menu.Items.Add("Abrir", null, (_, __) => RestaurarJanelas());
                 menu.Items.Add("Sair", null, (_, __) => { _fechamentoReal = true; _trayIcon?.Dispose(); Close(); });
                 _trayIcon.ContextMenuStrip = menu;
                 _trayIcon.DoubleClick += (_, __) => RestaurarJanelas();
+
+                Services.LogHelper.Info($"TRAY_ICON_CREATED | icon={((_trayIcon.Icon != null) ? "ok" : "null")}");
+            }
+            catch (Exception ex)
+            {
+                App.LogCrash("TRAY_ICON_INIT_FAILED", "ConfigurarBandeja falhou", ex);
+            }
+        }
+
+        private static System.Drawing.Icon CarregarIconeBandeja()
+        {
+            // 1ª tentativa: arquivo Assets\wavenvoip.ico no diretório do app (copiado pelo publish)
+            try
+            {
+                var assetsIco = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets", "wavenvoip.ico");
+                if (File.Exists(assetsIco)) return new System.Drawing.Icon(assetsIco);
             }
             catch { }
+
+            // 2ª tentativa: extrair do exe em execução (funciona quando ApplicationIcon está embutido)
+            try
+            {
+                var exePath = Environment.ProcessPath;
+                if (!string.IsNullOrWhiteSpace(exePath) && File.Exists(exePath))
+                {
+                    var icon = System.Drawing.Icon.ExtractAssociatedIcon(exePath);
+                    if (icon != null) return icon;
+                }
+            }
+            catch { }
+
+            // 3ª tentativa: recurso embarcado no assembly
+            try
+            {
+                var asm = System.Reflection.Assembly.GetExecutingAssembly();
+                var icoResource = asm.GetManifestResourceNames()
+                    .FirstOrDefault(n => n.EndsWith(".ico", StringComparison.OrdinalIgnoreCase));
+                if (icoResource != null)
+                {
+                    using var stream = asm.GetManifestResourceStream(icoResource);
+                    if (stream != null) return new System.Drawing.Icon(stream);
+                }
+            }
+            catch { }
+
+            // Fallback: ícone padrão do sistema
+            return System.Drawing.SystemIcons.Application;
+        }
+
+        private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+        {
+            if (_wmTaskbarCreated != 0 && (uint)msg == _wmTaskbarCreated)
+                Dispatcher.BeginInvoke(new Action(RecuperarIconeBandeja));
+            return IntPtr.Zero;
+        }
+
+        private void RecuperarIconeBandeja()
+        {
+            try
+            {
+                if (_trayIcon != null)
+                {
+                    // Re-seta Visible para forçar re-registro da bandeja
+                    _trayIcon.Visible = false;
+                    _trayIcon.Visible = true;
+                    Services.LogHelper.Info("TRAY_ICON_RECOVERED | Explorer reiniciado — icone da bandeja restaurado");
+                }
+                else
+                {
+                    ConfigurarBandeja();
+                    Services.LogHelper.Info("TRAY_ICON_RECREATED | Explorer reiniciado — icone da bandeja recriado");
+                }
+            }
+            catch (Exception ex)
+            {
+                App.LogCrash("TRAY_ICON_RECOVERY_FAILED", "RecuperarIconeBandeja falhou", ex);
+            }
         }
 
         private void DialerShellWindow_Closing(object? sender, CancelEventArgs e)

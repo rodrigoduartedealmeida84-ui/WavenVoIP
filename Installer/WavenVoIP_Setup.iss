@@ -1,5 +1,5 @@
 #define MyAppName      "WavenVoIP"
-#define MyAppVersion   "1.1.2"
+#define MyAppVersion   "1.4.0"
 #define MyAppPublisher "Almeida Gas"
 #define MyAppURL       "https://almeidagas.com"
 #define MyAppExe       "WavenVoIP.exe"

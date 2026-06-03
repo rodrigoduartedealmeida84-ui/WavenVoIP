@@ -133,11 +133,12 @@ namespace WavenVoIP.Services
 
                             contatos.Add(new Contato
                             {
-                                Nome         = nome,
-                                Numero       = numero,
-                                Observacao   = "Google Contacts",
-                                FonteGoogle  = true,
-                                AtualizadoEm = DateTime.Now
+                                Nome            = nome,
+                                Numero          = numero,
+                                Observacao      = "Google Contacts",
+                                FonteGoogle     = true,
+                                AtualizadoEm    = DateTime.Now,
+                                GoogleContactId = person.ResourceName // ex: "people/c1234567890"
                             });
                         }
                     }
@@ -215,6 +216,36 @@ namespace WavenVoIP.Services
                 return JsonSerializer.Deserialize<List<Contato>>(json) ?? new List<Contato>();
             }
             catch { return new List<Contato>(); }
+        }
+
+        /// Exclui um contato do Google Contacts pelo resourceName (ex: "people/c1234").
+        /// Requer escopo contacts (leitura+escrita). Retorna false se token ausente ou sem permissão.
+        public static async Task<bool> ExcluirContatoGoogleAsync(string resourceName, CancellationToken ct = default)
+        {
+            try
+            {
+                var credential = await ObterCredencialSilenciosamente(ct);
+                if (credential == null)
+                {
+                    LogHelper.Info($"GOOGLE_CONTACT_DELETE_SKIPPED | reason=no_token resourceName={resourceName}");
+                    return false;
+                }
+
+                var service = new PeopleServiceService(new BaseClientService.Initializer
+                {
+                    HttpClientInitializer = credential,
+                    ApplicationName       = _appName
+                });
+
+                await service.People.DeleteContact(resourceName).ExecuteAsync(ct);
+                LogHelper.Info($"GOOGLE_CONTACT_DELETED | resourceName={resourceName}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LogHelper.Info($"GOOGLE_CONTACT_DELETE_FAILED | resourceName={resourceName} error={ex.Message}");
+                return false;
+            }
         }
 
         public static async Task LimparTokenAsync()

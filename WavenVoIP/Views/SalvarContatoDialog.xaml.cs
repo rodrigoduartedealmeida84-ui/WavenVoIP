@@ -35,9 +35,9 @@ namespace WavenVoIP.Views
             if (contato.FonteGoogle)
             {
                 txtDialogTitulo.Text = "Contato Google";
-                txtDialogSubtitulo.Text = "Contatos Google são somente leitura. Você pode salvar uma cópia local.";
+                txtDialogSubtitulo.Text = "Este contato será salvo como contato compartilhado da empresa pela Waven API e ficará visível para todos os ramais.";
                 bannerGoogle.Visibility = Visibility.Visible;
-                btnSalvar.Content = "Salvar cópia local";
+                btnSalvar.Content = "Salvar na empresa";
             }
             else
             {
@@ -49,7 +49,7 @@ namespace WavenVoIP.Views
             MouseLeftButtonDown += (_, e) => { try { DragMove(); } catch { } };
         }
 
-        private void BtnSalvar_Click(object sender, RoutedEventArgs e)
+        private async void BtnSalvar_Click(object sender, RoutedEventArgs e)
         {
             var nome   = txtNome.Text?.Trim() ?? string.Empty;
             var numero = new string((txtNumero.Text ?? "").Where(char.IsDigit).ToArray());
@@ -83,7 +83,7 @@ namespace WavenVoIP.Views
 
                 if (ehGoogle)
                 {
-                    // Google → salvar como local; se já existe local com mesmo número normalizado, atualizar
+                    // Google → converter para contato da empresa; se já existe local com mesmo número, atualizar
                     var existenteLocal = contatos.FirstOrDefault(c =>
                     {
                         if (c.FonteGoogle) return false;
@@ -97,20 +97,82 @@ namespace WavenVoIP.Views
                         existenteLocal.Nome        = nome;
                         existenteLocal.Numero      = numeroNorm;
                         existenteLocal.Observacao  = string.IsNullOrWhiteSpace(obs) ? existenteLocal.Observacao : obs;
-                        existenteLocal.AtualizadoEm = DateTime.Now;
+                        existenteLocal.AtualizadoEm = DateTime.UtcNow;
+                        if (string.IsNullOrWhiteSpace(existenteLocal.GoogleContactId))
+                            existenteLocal.GoogleContactId = _contatoOriginal.GoogleContactId;
                     }
                     else
                     {
                         contatos.Add(new Contato
                         {
-                            Nome         = nome,
-                            Numero       = numeroNorm,
-                            Observacao   = string.IsNullOrWhiteSpace(obs) ? "Cópia local" : obs,
-                            EhRamalIssabel = false,
-                            FonteGoogle  = false,
-                            AtualizadoEm = DateTime.Now
+                            Nome            = nome,
+                            Numero          = numeroNorm,
+                            Observacao      = string.IsNullOrWhiteSpace(obs) ? "Contato empresa" : obs,
+                            EhRamalIssabel  = false,
+                            FonteGoogle     = false,
+                            AtualizadoEm    = DateTime.UtcNow,
+                            GoogleContactId = _contatoOriginal.GoogleContactId
                         });
                     }
+
+                    ContatoStorageService.Salvar(contatos);
+
+                    // Se API ativa, criar na Waven API para distribuir para todos os ramais
+                    var cfgGoogle = SipConfig.CarregarSalva();
+                    if (cfgGoogle?.UsarWavenApi == true && !string.IsNullOrWhiteSpace(cfgGoogle.WavenApiToken))
+                    {
+                        LogHelper.Info($"CONTACT_UPDATE_API_START | googleId={_contatoOriginal.GoogleContactId} nome={nome}");
+                        var (apiOk, apiContact, _) = await WavenApiService.CriarContatoAsync(
+                            nome, numeroNorm, empresa: null, observacao: obs, ramal: cfgGoogle.Ramal)
+                            .ConfigureAwait(true);
+
+                        if (apiOk && apiContact != null)
+                        {
+                            // Vincula WavenApiId ao contato local recém-criado
+                            var todosAtual = ContatoStorageService.Carregar();
+                            var localCopy = todosAtual.FirstOrDefault(c =>
+                                !c.FonteGoogle && c.GoogleContactId == _contatoOriginal.GoogleContactId);
+                            if (localCopy != null)
+                            {
+                                localCopy.WavenApiId = apiContact.Id;
+                                ContatoStorageService.Salvar(todosAtual);
+                            }
+                            LogHelper.Info($"GOOGLE_CONTACT_CONVERTED_TO_SHARED | googleId={_contatoOriginal.GoogleContactId} wavenId={apiContact.Id} nome={nome}");
+                            LogHelper.Info($"CONTACT_UPDATE_API_OK | id={apiContact.Id} nome={nome}");
+                        }
+                        else if (apiOk)
+                        {
+                            // 409 duplicado — WavenApiId será vinculado na próxima sync
+                            LogHelper.Info($"GOOGLE_CONTACT_CONVERTED_TO_SHARED | googleId={_contatoOriginal.GoogleContactId} wavenId=pending_sync nome={nome}");
+                            LogHelper.Info($"CONTACT_UPDATE_API_OK | nome={nome} motivo=duplicate_already_exists");
+                        }
+                        else
+                        {
+                            WavenApiSyncService.EnfileirarOffline(new Models.WavenApiOfflineOp
+                            {
+                                Op      = "CREATE",
+                                Payload = System.Text.Json.JsonSerializer.Serialize(
+                                    new { nome, numero = numeroNorm, observacao = obs, criadoPor = cfgGoogle.Ramal }),
+                                Ramal   = cfgGoogle.Ramal
+                            });
+                            LogHelper.Info($"CONTACT_UPDATE_API_FAIL | googleId={_contatoOriginal.GoogleContactId} nome={nome} motivo=offline_queued");
+                        }
+                    }
+                    else if (!string.IsNullOrWhiteSpace(_contatoOriginal.GoogleContactId))
+                    {
+                        LogHelper.Info($"GOOGLE_CONTACT_CONVERTED_TO_SHARED | googleId={_contatoOriginal.GoogleContactId} wavenId=none_api_disabled nome={nome}");
+                    }
+
+                    if (chkFavoritos?.IsChecked == true)
+                    {
+                        var adicionado = FavoritesStorageService.Adicionar(new Models.FavoriteItem
+                            { Nome = nome, Numero = numeroNorm, Favorito = true });
+                        AdicionadoAosFavoritos = adicionado;
+                    }
+
+                    DialogResult = true;
+                    Close();
+                    return;
                 }
                 else
                 {
@@ -125,7 +187,7 @@ namespace WavenVoIP.Views
 
                     if (original != null)
                     {
-                        // If number changed, check for normalized conflict
+                        // Se número mudou, verificar conflito
                         if (numeroNorm != numOrigNorm)
                         {
                             var conflito = contatos.FirstOrDefault(c =>
@@ -144,13 +206,61 @@ namespace WavenVoIP.Views
                         original.Nome        = nome;
                         original.Numero      = numeroNorm;
                         original.Observacao  = obs;
-                        original.AtualizadoEm = DateTime.Now;
+                        original.AtualizadoEm = DateTime.UtcNow;
                     }
                     else
                     {
-                        // Edge case: not found — add as new
-                        contatos.Add(new Contato { Nome = nome, Numero = numeroNorm, Observacao = obs, AtualizadoEm = DateTime.Now });
+                        contatos.Add(new Contato { Nome = nome, Numero = numeroNorm, Observacao = obs, AtualizadoEm = DateTime.UtcNow });
                     }
+
+                    ContatoStorageService.Salvar(contatos);
+
+                    // Push para API se for contato compartilhado
+                    if (!string.IsNullOrWhiteSpace(_contatoOriginal.WavenApiId))
+                    {
+                        var cfg = SipConfig.CarregarSalva();
+                        if (cfg?.UsarWavenApi == true && !string.IsNullOrWhiteSpace(cfg.WavenApiToken))
+                        {
+                            LogHelper.Info($"CONTACT_UPDATE_API_START | id={_contatoOriginal.WavenApiId} nome={nome}");
+                            var ok = await WavenApiService.AtualizarContatoAsync(
+                                _contatoOriginal.WavenApiId, nome,
+                                empresa: null, observacao: obs,
+                                ramal: cfg.Ramal, atualizadoEm: DateTime.UtcNow)
+                                .ConfigureAwait(true);
+
+                            if (ok)
+                            {
+                                LogHelper.Info($"CONTACT_UPDATE_API_OK | id={_contatoOriginal.WavenApiId} nome={nome}");
+                            }
+                            else
+                            {
+                                WavenApiSyncService.EnfileirarOffline(new Models.WavenApiOfflineOp
+                                {
+                                    Op        = "UPDATE",
+                                    ContactId = _contatoOriginal.WavenApiId,
+                                    Payload   = System.Text.Json.JsonSerializer.Serialize(new
+                                    {
+                                        nome, observacao = obs,
+                                        atualizadoEm  = DateTime.UtcNow,
+                                        atualizadoPor = cfg.Ramal
+                                    }),
+                                    Ramal = cfg.Ramal
+                                });
+                                LogHelper.Info($"CONTACT_UPDATE_API_FAIL | id={_contatoOriginal.WavenApiId} nome={nome} motivo=offline_queued");
+                            }
+                        }
+                    }
+
+                    if (chkFavoritos?.IsChecked == true)
+                    {
+                        var adicionado = FavoritesStorageService.Adicionar(new Models.FavoriteItem
+                            { Nome = nome, Numero = numeroNorm, Favorito = true });
+                        AdicionadoAosFavoritos = adicionado;
+                    }
+
+                    DialogResult = true;
+                    Close();
+                    return;
                 }
             }
             else
@@ -169,7 +279,7 @@ namespace WavenVoIP.Views
                     existenteNorm.Nome        = nome;
                     existenteNorm.Numero      = numeroNorm;
                     if (!string.IsNullOrWhiteSpace(obs)) existenteNorm.Observacao = obs;
-                    existenteNorm.AtualizadoEm = DateTime.Now;
+                    existenteNorm.AtualizadoEm = DateTime.UtcNow;
                     ContatoStorageService.Salvar(contatos);
 
                     if (chkFavoritos?.IsChecked == true)
@@ -192,7 +302,7 @@ namespace WavenVoIP.Views
                     Numero       = numeroNorm,
                     Observacao   = obs,
                     EhRamalIssabel = false,
-                    AtualizadoEm = DateTime.Now
+                    AtualizadoEm = DateTime.UtcNow
                 });
             }
 

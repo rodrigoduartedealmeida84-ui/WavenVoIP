@@ -1,6 +1,7 @@
 using System;
 using System.ComponentModel;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Windows;
 using System.Threading.Tasks;
@@ -14,6 +15,7 @@ public partial class App : Application
 {
     private static Mutex? _instanceMutex;
     private static EventWaitHandle? _activateEvent;
+    private static WavenApiSyncService? _wavenSyncService;
 
     private static readonly string CrashLogPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
@@ -78,6 +80,9 @@ public partial class App : Application
 
         base.OnStartup(e);
 
+        // ── Migração automática v1.4.2 (roda uma vez por máquina, antes de tudo) ─
+        Services.MigracaoService.AplicarMigracao142();
+
         // ── Fresh install detection ───────────────────────────────────────────
         if (File.Exists(FreshInstallFlagPath))
         {
@@ -112,6 +117,10 @@ public partial class App : Application
             freshSetup.Show();
             return;
         }
+
+        var cmdArgs = Environment.GetCommandLineArgs();
+        var autostart = cmdArgs.Any(a => a.Equals("/autostart", StringComparison.OrdinalIgnoreCase));
+        LogHelper.Info(autostart ? "STARTUP_MODE=AUTOSTART | iniciado via inicializacao automatica do Windows" : "STARTUP_MODE=MANUAL");
 
         LogHelper.Info("INSTALL_MODE=UPGRADE — config existente detectada, iniciando normalmente");
 
@@ -151,20 +160,35 @@ public partial class App : Application
             // Allow update service to skip update while a call is in progress
             UpdateService.EmChamadaAtiva = () => sip.IsInCall || sip.IsDialing;
 
-            try
+            try { sip.Inicializar(config); } catch { }
+
+            if (autostart)
             {
-                sip.Inicializar(config);
-                sip.Registrar();
+                // Quando iniciado com Windows, a rede pode ainda nao estar pronta.
+                // Aguardamos 8s antes de tentar registrar; o reconnect timer cobre retentativas.
+                LogHelper.Info("AUTOSTART_REGISTER_DELAYED | aguardando 8s para rede estar disponivel");
+                _ = Task.Delay(TimeSpan.FromSeconds(8)).ContinueWith(_ =>
+                {
+                    try { Dispatcher.Invoke(() => sip.Registrar()); } catch { }
+                }, System.Threading.Tasks.TaskContinuationOptions.None);
             }
-            catch
+            else
             {
-                // Mesmo se a rede ainda não estiver pronta, abre o discador.
+                try { sip.Registrar(); } catch { }
             }
 
             var shell = new DialerShellWindow(sip);
             MainWindow = shell;
             shell.Show();
             _ = System.Threading.Tasks.Task.Run(WavenVoIP.Services.ContatoStorageService.MigrarContatosAntigos);
+
+            // Inicia sync com Waven API se estiver habilitado
+            if (config.UsarWavenApi && !string.IsNullOrWhiteSpace(config.WavenApiToken))
+            {
+                _wavenSyncService = new WavenApiSyncService(config.Ramal);
+                LogHelper.Info($"WAVEN_API_SYNC_STARTED | ramal={config.Ramal} url={config.WavenApiUrl}");
+            }
+
             return;
         }
 
@@ -189,6 +213,7 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _wavenSyncService?.Dispose();
         try { _activateEvent?.Set(); } catch { }
         _activateEvent?.Dispose();
         _instanceMutex?.ReleaseMutex();

@@ -687,7 +687,25 @@
                                                         <TextBlock Text="{Binding Nome, Converter={StaticResource InitialConverter}}" Foreground="{StaticResource PrimaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12" FontWeight="Bold"/>
                                                     </Border>
                                                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                                        <TextBlock Text="{Binding Nome}" FontWeight="Bold" FontSize="14" TextTrimming="CharacterEllipsis"/>
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <TextBlock Text="{Binding Nome}" FontWeight="Bold" FontSize="14" TextTrimming="CharacterEllipsis"/>
+                                                            <TextBlock FontSize="12" Margin="5,1,0,0" VerticalAlignment="Center"
+                                                                       FontFamily="Segoe UI Emoji"
+                                                                       Text="{Binding BadgeText}"
+                                                                       ToolTip="{Binding BadgeTooltip}">
+                                                                <TextBlock.Style>
+                                                                    <Style TargetType="TextBlock">
+                                                                        <Setter Property="Foreground" Value="#94A3B8"/>
+                                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding MostrarBadge}" Value="True">
+                                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </TextBlock.Style>
+                                                            </TextBlock>
+                                                        </StackPanel>
                                                         <TextBlock Text="{Binding Observacao}" Foreground="{StaticResource MutedBrush}" FontSize="11" TextTrimming="CharacterEllipsis"/>
                                                     </StackPanel>
                                                     <TextBlock Grid.Column="2" Text="{Binding Numero}" VerticalAlignment="Center" FontSize="13" TextTrimming="CharacterEllipsis" Foreground="#475569"/>

@@ -1,0 +1,30 @@
+[Unit]
+Description=Waven API v1
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=wavenapi
+Group=wavenapi
+WorkingDirectory=/opt/waven-api
+ExecStart=/opt/waven-api/WavenApi
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+
+Environment=ASPNETCORE_ENVIRONMENT=Production
+Environment=ASPNETCORE_URLS=http://127.0.0.1:5005
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/waven-api/data /opt/waven-api/logs
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=waven-api
+
+[Install]
+WantedBy=multi-user.target

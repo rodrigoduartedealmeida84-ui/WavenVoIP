@@ -4,15 +4,84 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "1.3.2";
+        public const string Versao  = "1.4.3";
         public const string NomeApp = "WavenVoIP";
 
-        public static readonly DateTime DataBuild = new DateTime(2026, 5, 29);
+        public static readonly DateTime DataBuild = new DateTime(2026, 6, 2);
 
         public static string VersaoCompleta => $"{NomeApp} v{Versao}";
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v1.4.3 — Anti-ressurreicao de contatos + Edicao Google + Tombstone (02/06/2026)\n" +
+            "• [FIX] Edicao de contato compartilhado voltava nome antigo apos sync — bug timezone UTC/Local no AtualizadoEm\n" +
+            "• [FIX] Exclusao de contato ressurregia apos sync — tombstone local previne recriacao pela API\n" +
+            "• [FIX] Contato Google editado voltava nome antigo — conversao correta Google→SharedCompany via Waven API\n" +
+            "• [FIX] Contato Google excluido reaparecia na sync — tombstone por GoogleContactId e NumeroNormalizado\n" +
+            "• [FIX] Google sem GoogleContactId (contatos antigos) nao recebia tombstone — corrigido\n" +
+            "• [FIX] Botoes Editar/Excluir de contatos Google sem GoogleContactId mostravam dialog errado\n" +
+            "• [FIX] Modal Contato Google: botao cortava texto — largura 420→560px, botoes com tamanhos fixos\n" +
+            "• [NEW] ContactTombstoneService: suppression list em contact-tombstones.json\n" +
+            "• [NEW] Tombstone por WavenApiId, GoogleContactId e NumeroNormalizado\n" +
+            "• [NEW] AplicarContatos: verifica fila offline antes de recriar contato excluido (anti-ressurreicao)\n" +
+            "• [NEW] AplicarContatos: nao sobrescreve edicao local se UPDATE pendente na fila offline\n" +
+            "• [NEW] Edicao de contato Google com API ativa: cria na Waven API + vincula WavenApiId\n" +
+            "• [NEW] SincronizarContatosGoogle: verifica tombstone antes de reimportar\n" +
+            "• [UI] Texto do botao: 'Salvar na empresa' (era 'copia local') — deixa claro que e compartilhado\n" +
+            "• [UI] Banner verde no modal indicando que sera compartilhado via Waven API\n" +
+            "• [LOG] CONTACT_UPDATE_API_START | CONTACT_UPDATE_API_OK | CONTACT_UPDATE_API_FAIL\n" +
+            "• [LOG] CONTACT_DELETE_API_START | CONTACT_DELETE_API_OK | CONTACT_DELETE_API_FAIL\n" +
+            "• [LOG] GOOGLE_SYNC_SUPPRESSED_BY_TOMBSTONE | GOOGLE_CONTACT_CONVERTED_TO_SHARED\n" +
+            "• [LOG] GOOGLE_CONTACT_NOT_OVERWRITING_SHARED | CONTACT_TOMBSTONE_CREATED\n" +
+            "• [LOG] API_SYNC_SUPPRESSED_BY_TOMBSTONE | API_CONTACT_UPDATE_SKIPPED_PENDING\n" +
+            "\n" +
+            "v1.4.2 — Configuracao automatica para todos os ramais (02/06/2026)\n" +
+            "• [NEW] Migracao automatica v1.4.2: configura Waven API e WhatsApp API silenciosamente no primeiro start\n" +
+            "• [NEW] Waven API ativada automaticamente em todos os ramais apos atualizacao\n" +
+            "• [NEW] CDR e AMI habilitados automaticamente para funcionar via API\n" +
+            "• [NEW] WhatsApp API atualizado para novo endpoint wavenchat.com.br automaticamente\n" +
+            "• [SAFE] Migracao nao sobrescreve usuario SIP, ramal, senha, Google token, audio, favoritos\n" +
+            "• [SAFE] Tokens mascarados nos logs — nunca expostos\n" +
+            "• [SAFE] Migracao roda apenas uma vez por maquina (flag MigracaoAplicada142)\n" +
+            "• [LOG] AUTO_MIGRATION_142_APPLIED | AUTO_MIGRATION_142_ALREADY_APPLIED\n" +
+            "\n" +
+            "v1.4.1 — CDR e AMI via Waven API (02/06/2026)\n" +
+            "• [NEW] Fase 2: CDR via API — historico e gravacoes sem conexao direta ao MySQL\n" +
+            "• [NEW] Fase 3: AMI via API — ramais do Issabel sem conexao direta na porta 5038\n" +
+            "• [NEW] Quando UsarWavenApi=true: CDR passa por https://api.almeidagas.com/api/cdr/calls\n" +
+            "• [NEW] Quando UsarWavenApi=true: AMI passa por https://api.almeidagas.com/api/ami/extensions\n" +
+            "• [NEW] API: GET /api/cdr/calls — consulta MySQL local no servidor\n" +
+            "• [NEW] API: GET /api/cdr/test — testa conexao MySQL\n" +
+            "• [NEW] API: GET /api/cdr/recordings — serve arquivo de gravacao do servidor\n" +
+            "• [NEW] API: GET /api/ami/extensions — consulta AMI local no servidor\n" +
+            "• [NEW] API: GET /api/ami/status — verifica acessibilidade do AMI\n" +
+            "• [NEW] API: POST /api/ami/test — testa login AMI\n" +
+            "• [FIX] Sem mais Connect Timeout 3306/5038 no cliente quando UsarWavenApi=true\n" +
+            "• [FIX] Credenciais MySQL/AMI ficam APENAS no servidor (appsettings.Production.json)\n" +
+            "• [LOG] CLIENT_CDR_USING_API | API_CDR_QUERY_START | API_CDR_QUERY_OK | API_CDR_QUERY_ERROR\n" +
+            "• [LOG] CLIENT_AMI_USING_API | API_AMI_CONNECT_START | API_AMI_CONNECT_OK | API_AMI_CONNECT_ERROR\n" +
+            "\n" +
+            "v1.4.0 — Waven API + Autostart + Bandeja (01/06/2026)\n" +
+            "• [NEW] Waven API v1: sincronizacao de contatos compartilhados entre ramais\n" +
+            "• [NEW] Favoritos por usuario (ramal) e favoritos globais da empresa\n" +
+            "• [NEW] Sincronizacao incremental (since=lastSyncUtc) — apenas mudancas desde ultimo sync\n" +
+            "• [NEW] Soft delete com tombstone — exclusao propagada para todos os ramais\n" +
+            "• [NEW] Reativacao automatica de contato excluido ao criar com mesmo numero\n" +
+            "• [NEW] Offline queue: operacoes CREATE/UPDATE/DELETE/FAVORITE_ADD/FAVORITE_REMOVE enfileiradas offline\n" +
+            "• [NEW] Migracao automatica dos 7 favoritos atuais como favoritos globais na primeira ativacao\n" +
+            "• [FIX] Offline queue: ops CREATE e UPDATE agora sao executadas ao reconectar (estavam sendo descartadas)\n" +
+            "• [FIX] Bandeja: icone carregado com fallback robusto — System.Drawing.SystemIcons.Application se exe nao tiver icone\n" +
+            "• [FIX] Bandeja: recuperacao automatica do icone quando Explorer.exe e reiniciado (WM_TASKBARCREATED)\n" +
+            "• [FIX] Autostart: caminho registrado no registro usa Environment.ProcessPath (mais confiavel que MainModule.FileName)\n" +
+            "• [FIX] Autostart: flag /autostart adicionada ao comando de inicializacao automatica\n" +
+            "• [FIX] Autostart: registro SIP atrasado 8s quando iniciado via autostart — aguarda rede estar disponivel\n" +
+            "• [FIX] WavenApiSyncService: CancellationToken previne callback em andamento apos Dispose\n" +
+            "• [LOG] STARTUP_MODE=AUTOSTART/MANUAL | AUTOSTART_REGISTERED | AUTOSTART_UNREGISTERED\n" +
+            "• [LOG] TRAY_ICON_CREATED | TRAY_ICON_RECOVERED | TRAY_ICON_RECREATED | TRAY_ICON_INIT_FAILED\n" +
+            "• [LOG] AUTOSTART_SIP_DELAY | AUTOSTART_REGISTER_DELAYED\n" +
+            "• [LOG] API_CONTACT_SYNC_START/DONE | API_CONTACT_CREATED/UPDATED/DELETED\n" +
+            "• [LOG] API_CONTACT_FAVORITE_MIGRATED | API_CONTACT_OFFLINE_QUEUE_SAVED/SENT\n" +
+            "\n" +
             "v1.3.2 — Hold + CDR canal correto (29/05/2026)\n" +
             "• [FIX] CDR: chamadas WhatsApp TIM/Vivo/Operadora nao mais classificadas como Operadora\n" +
             "• [FIX] DedurzirTronco() identifica canal via DID no campo channel do Asterisk (SIP/PJSIP)\n" +
