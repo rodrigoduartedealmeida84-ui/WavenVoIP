@@ -1,7 +1,7 @@
 {
-    "versao":  "1.4.3",
-    "zip":  "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v1.4.3/WavenVoIP.zip",
-    "sha256":  "f223fa78beea6aef493a58deb7198f7346c761459e064008a6f56cdd7e64fcb2",
-    "data":  "2026-06-03",
-    "notas":  "v1.4.3 - Anti-ressurreicao de contatos + Edicao Google + Tombstone\n[FIX] Edicao de contato compartilhado voltava nome antigo apos sync\n[FIX] Exclusao de contato ressurregia apos sync (tombstone implementado)\n[FIX] Contato Google editado voltava nome antigo (conversao para empresa)\n[FIX] Contato Google excluido reaparecia na proxima sync Google\n[FIX] Modal Contato Google cortava texto do botao (largura 420 para 560px)\n[UI] Botao renomeado para Salvar na empresa com banner verde"
+    "versao":  "1.4.4",
+    "zip":     "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v1.4.4/WavenVoIP.zip",
+    "sha256":  "996af3a1fdb35b5aa1aca092ca9eac7bbcedc9550efbee90d64744bb578d249d",
+    "data":    "2026-06-08",
+    "notas":   "v1.4.4 - WhatsApp WABA template oficial + anti-spam\n[NEW] Botao WhatsApp envia template nova_conversa via API oficial WABA\n[NEW] Migracao automatica: atualiza URL e token WhatsApp para todos os ramais\n[NEW] Anti-spam: bloqueia reenvio do mesmo numero em menos de 5 minutos\n[NEW] Erros amigaveis: 401, 404, 429, 500, timeout\n[SAFE] Nao envia automaticamente — somente ao clicar no botao\n[SAFE] Nao depende mais de QR Code"
 }
