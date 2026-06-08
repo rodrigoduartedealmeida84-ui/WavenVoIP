@@ -80,8 +80,9 @@ public partial class App : Application
 
         base.OnStartup(e);
 
-        // ── Migração automática v1.4.2 (roda uma vez por máquina, antes de tudo) ─
+        // ── Migrações automáticas (rodam uma vez por máquina, antes de tudo) ────
         Services.MigracaoService.AplicarMigracao142();
+        Services.MigracaoService.AplicarMigracao144();
 
         // ── Fresh install detection ───────────────────────────────────────────
         if (File.Exists(FreshInstallFlagPath))

@@ -21,7 +21,6 @@ namespace WavenVoIP.Views
 
             if (temNome)
             {
-                // Modo contato: mostra avatar + nome, esconde campo editável
                 panelContatoNome.Visibility  = Visibility.Visible;
                 panelNumeroManual.Visibility = Visibility.Collapsed;
 
@@ -29,12 +28,11 @@ namespace WavenVoIP.Views
                 txtAvatarInicial.Text = ObterInicial(nome);
 
                 var normalizado = WhatsAppService.NormalizarTelefoneParaEnvio(numero);
-                txtNumeroFormatado.Text     = FormatarTelefoneDisplay(normalizado);
-                txtNumeroNormalizado.Text   = "Será enviado para: " + normalizado;
+                txtNumeroFormatado.Text   = FormatarTelefoneDisplay(normalizado);
+                txtNumeroNormalizado.Text = "Será enviado para: " + normalizado;
             }
             else
             {
-                // Modo manual: esconde avatar, mostra campo editável
                 panelContatoNome.Visibility  = Visibility.Collapsed;
                 panelNumeroManual.Visibility = Visibility.Visible;
 
@@ -42,22 +40,6 @@ namespace WavenVoIP.Views
                 AtualizarNumeroNormalizado();
                 txtNumero.TextChanged += (_, _) => AtualizarNumeroNormalizado();
             }
-
-            txtMensagem.Text = string.IsNullOrWhiteSpace(mensagemPadrao)
-                ? "Olá! Estamos falando com você pelo Grupo Almeida Gás."
-                : mensagemPadrao;
-
-            AtualizarContador();
-            txtMensagem.TextChanged += (_, _) => AtualizarContador();
-        }
-
-        private void AtualizarContador()
-        {
-            var len = txtMensagem.Text?.Length ?? 0;
-            txtContadorChars.Text = $"{len} / 1000";
-            txtContadorChars.Foreground = len > 900
-                ? new SolidColorBrush(Color.FromRgb(185, 28, 28))
-                : (Brush)FindResource("MutedBrush");
         }
 
         private void AtualizarNumeroNormalizado()
@@ -65,12 +47,12 @@ namespace WavenVoIP.Views
             try
             {
                 var n = WhatsAppService.NormalizarTelefoneParaEnvio(txtNumero.Text);
-                txtNumeroNormalizado.Text = "Será enviado para: " + n;
+                txtNumeroNormalizado.Text       = "Será enviado para: " + n;
                 txtNumeroNormalizado.Foreground = new SolidColorBrush(Color.FromRgb(22, 163, 74));
             }
             catch
             {
-                txtNumeroNormalizado.Text = "Informe o número com DDD.";
+                txtNumeroNormalizado.Text       = "Informe o número com DDD.";
                 txtNumeroNormalizado.Foreground = new SolidColorBrush(Color.FromRgb(185, 28, 28));
             }
         }
@@ -81,22 +63,36 @@ namespace WavenVoIP.Views
                 ? txtNumero.Text
                 : _numeroOriginal;
 
-            btnEnviar.IsEnabled = false;
-            txtRetorno.Text       = "Enviando...";
+            btnEnviar.IsEnabled   = false;
+            txtRetorno.Text       = "Enviando template...";
             txtRetorno.Foreground = (Brush)FindResource("MutedBrush");
+
             try
             {
-                var resultado = await WhatsAppService.EnviarMensagemAsync(numero, txtMensagem.Text, _tipoEvento);
+                var resultado = await WhatsAppService.EnviarTemplateWabaAsync(numero, _tipoEvento);
+
+                if (resultado.Bloqueado)
+                {
+                    txtRetorno.Text       = resultado.Debug;
+                    txtRetorno.Foreground = new SolidColorBrush(Color.FromRgb(202, 138, 4));
+                    MessageBox.Show(resultado.Debug, "Waven VoIP — Anti-spam");
+                    return;
+                }
+
                 if (resultado.Sucesso)
                 {
-                    txtRetorno.Text       = $"✔ Mensagem enviada. HTTP {resultado.HttpStatusCode} · {resultado.NumeroNormalizado}";
+                    txtRetorno.Text       = $"✔ Template WhatsApp enviado. Aguarde o cliente responder para continuar o atendimento.";
                     txtRetorno.Foreground = new SolidColorBrush(Color.FromRgb(21, 128, 61));
-                    MessageBox.Show("Mensagem enviada com sucesso.", "Waven VoIP");
+                    MessageBox.Show(
+                        "Template WhatsApp enviado.\nAguarde o cliente responder para continuar o atendimento.",
+                        "Waven VoIP");
                 }
                 else
                 {
-                    txtRetorno.Text       = $"✘ Falha no envio. HTTP {resultado.HttpStatusCode}\n{resultado.Debug}\n{resultado.RespostaBruta}";
+                    var mensagemErro = ObterMensagemErro(resultado.HttpStatusCode, resultado.Debug);
+                    txtRetorno.Text       = $"✘ {mensagemErro}";
                     txtRetorno.Foreground = new SolidColorBrush(Color.FromRgb(185, 28, 28));
+                    MessageBox.Show(mensagemErro, "Waven VoIP — Erro no envio");
                 }
             }
             catch (Exception ex)
@@ -108,6 +104,24 @@ namespace WavenVoIP.Views
             {
                 btnEnviar.IsEnabled = true;
             }
+        }
+
+        private static string ObterMensagemErro(int httpCode, string debug)
+        {
+            if (httpCode == 0 && debug.Contains("timeout", StringComparison.OrdinalIgnoreCase))
+                return "API Waven Chat indisponível (timeout). Verifique a conexão.";
+            if (httpCode == 0 && !string.IsNullOrWhiteSpace(debug))
+                return debug;
+
+            return httpCode switch
+            {
+                401  => "Token inválido ou expirado. Verifique o Bearer Token em Configurações.",
+                404  => "Canal ou endpoint inválido. Verifique a URL da API em Configurações.",
+                429  => "Limite de envio atingido. Aguarde antes de tentar novamente.",
+                500  => "Erro interno da API Waven Chat. Tente novamente em alguns instantes.",
+                >= 500 => $"Erro interno da API (HTTP {httpCode}). Tente novamente.",
+                _    => $"Falha no envio (HTTP {httpCode}). {debug}"
+            };
         }
 
         private void BtnCancelar_Click(object sender, RoutedEventArgs e) => Close();

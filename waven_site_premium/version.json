@@ -1,6 +1,6 @@
 {
-  "version": "1.3.2",
-  "url": "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v1.3.2/WavenVoIP_Setup.exe",
-  "notes": "v1.3.2 — Hold completo + CDR canais corretos + Performance. Hold: mic silenciado ao pausar, WaveOut pausado, buffer limpo ao retomar. CDR: WhatsApp TIM/Vivo nao mais classificados como Operadora. Performance: debounce busca, LINQ em background, cache favoritos.",
-  "date": "2026-05-29"
+  "version": "1.4.4",
+  "url": "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v1.4.4/WavenVoIP_Setup.exe",
+  "notes": "v1.4.4 — WhatsApp WABA template oficial + anti-spam. Botao WhatsApp agora envia template nova_conversa via API oficial WABA. Migracao automatica para todos os ramais. Anti-spam: bloqueia reenvio do mesmo numero em menos de 5 minutos. Nao depende mais de QR Code.",
+  "date": "2026-06-08"
 }

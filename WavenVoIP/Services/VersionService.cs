@@ -4,15 +4,29 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "1.4.3";
+        public const string Versao  = "1.4.4";
         public const string NomeApp = "WavenVoIP";
 
-        public static readonly DateTime DataBuild = new DateTime(2026, 6, 2);
+        public static readonly DateTime DataBuild = new DateTime(2026, 6, 8);
 
         public static string VersaoCompleta => $"{NomeApp} v{Versao}";
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v1.4.4 — WhatsApp WABA template oficial + anti-spam (08/06/2026)\n" +
+            "• [NEW] Botao WhatsApp agora envia template nova_conversa via API oficial WABA\n" +
+            "• [NEW] Migracao automatica WABA v1.4.4: atualiza URL e token para todos os ramais\n" +
+            "• [NEW] Anti-spam: bloqueia reenvio do mesmo numero em menos de 5 minutos\n" +
+            "• [NEW] Feedback visual: loading, sucesso e erros amigaveis por codigo HTTP\n" +
+            "• [NEW] Tratamento de erros: 401, 404, 429, 500, timeout\n" +
+            "• [SAFE] Nao envia automaticamente — somente ao clicar no botao WhatsApp\n" +
+            "• [SAFE] Nao depende mais de QR Code para iniciar conversa\n" +
+            "• [SAFE] Token nunca aparece completo nos logs (mascarado: 15fdce************12e9)\n" +
+            "• [SAFE] Migracao nao altera SIP, ramal, senha, Waven API, audio, contatos, historico\n" +
+            "• [LOG] WABA_TEMPLATE_SEND_START | WABA_TEMPLATE_SEND_SUCCESS | WABA_TEMPLATE_SEND_FAIL\n" +
+            "• [LOG] WABA_TEMPLATE_BLOCKED | WABA_INVALID_PHONE\n" +
+            "• [LOG] AUTO_MIGRATION_WABA_144_APPLIED | AUTO_MIGRATION_WABA_144_ALREADY_APPLIED\n" +
+            "\n" +
             "v1.4.3 — Anti-ressurreicao de contatos + Edicao Google + Tombstone (02/06/2026)\n" +
             "• [FIX] Edicao de contato compartilhado voltava nome antigo apos sync — bug timezone UTC/Local no AtualizadoEm\n" +
             "• [FIX] Exclusao de contato ressurregia apos sync — tombstone local previne recriacao pela API\n" +

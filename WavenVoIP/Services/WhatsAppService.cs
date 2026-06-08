@@ -1,7 +1,8 @@
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
+using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 using WavenVoIP.Models;
 
@@ -38,7 +39,12 @@ namespace WavenVoIP.Services
             return $"waven_{tipoEvento}_{DateTime.Now:yyyyMMddHHmmssfff}_{Guid.NewGuid():N}";
         }
 
-        public static async Task<WhatsAppResultado> EnviarMensagemAsync(string telefone, string mensagem, string tipoEvento = "manual", string? externalKey = null)
+        /// <summary>
+        /// Envia template WABA nova_conversa via API oficial Waven Chat.
+        /// Retorna Bloqueado=true se anti-spam (mesmo número nos últimos 5 min).
+        /// </summary>
+        public static async Task<WhatsAppResultado> EnviarTemplateWabaAsync(
+            string telefone, string tipoEvento = "manual", string? externalKey = null)
         {
             var config = WhatsAppConfigService.Carregar();
             var resultado = new WhatsAppResultado();
@@ -47,85 +53,121 @@ namespace WavenVoIP.Services
             externalKey ??= GerarExternalKey(tipoEvento);
             resultado.ExternalKey = externalKey;
 
+            if (string.IsNullOrWhiteSpace(numeroNormalizado) || numeroNormalizado.Length < 12)
+            {
+                resultado.Debug = "Número inválido. Use DDD + número.";
+                LogHelper.WhatsApp($"WABA_INVALID_PHONE | numero_original={telefone} normalizado={numeroNormalizado}");
+                return resultado;
+            }
+
             if (string.IsNullOrWhiteSpace(config.ApiUrl))
             {
                 resultado.Debug = "Configure a URL da API do WhatsApp em Configurações.";
                 return resultado;
             }
+
             if (string.IsNullOrWhiteSpace(config.BearerToken))
             {
                 resultado.Debug = "Configure o Bearer Token do canal em Configurações.";
                 return resultado;
             }
-            if (string.IsNullOrWhiteSpace(numeroNormalizado) || numeroNormalizado.Length < 12)
+
+            // Anti-spam: bloqueia se mesmo número recebeu template nos últimos 5 minutos
+            if (WhatsAppLogService.EnviadoRecentementeParaNumero(numeroNormalizado, 5))
             {
-                resultado.Debug = "Número inválido. Use DDD + número.";
-                return resultado;
-            }
-            if (string.IsNullOrWhiteSpace(mensagem))
-            {
-                resultado.Debug = "Mensagem vazia.";
-                return resultado;
-            }
-            if (WhatsAppLogService.JaExiste(externalKey))
-            {
-                resultado.Debug = "Envio ignorado: externalKey já usado.";
+                resultado.Bloqueado = true;
+                resultado.Debug = "Template já enviado recentemente para este cliente.";
+                LogHelper.WhatsApp($"WABA_TEMPLATE_BLOCKED | numero={numeroNormalizado}");
                 return resultado;
             }
 
-            var endpoint = MontarEndpoint(config.ApiUrl);
-            var query = BuildQuery(new Dictionary<string, string>
+            var endpoint = config.ApiUrl.TrimEnd('/') + "/template";
+            var tokenMascarado = Mascarar(config.BearerToken);
+
+            LogHelper.WhatsApp(
+                $"WABA_TEMPLATE_SEND_START | numero={numeroNormalizado} " +
+                $"endpoint={endpoint} token={tokenMascarado}");
+
+            var payload = new
             {
-                ["body"] = mensagem,
-                ["number"] = numeroNormalizado,
-                ["externalKey"] = externalKey,
-                ["bearertoken"] = config.BearerToken
-            });
-            var url = endpoint + "?" + query;
+                number = numeroNormalizado,
+                isClosed = false,
+                templateData = new
+                {
+                    messaging_product = "whatsapp",
+                    to = numeroNormalizado,
+                    type = "template",
+                    template = new
+                    {
+                        name = "nova_conversa",
+                        language = new { code = "pt_BR" }
+                    }
+                }
+            };
 
             try
             {
                 using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
-                client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", config.BearerToken);
-                var response = await client.GetAsync(url);
+                client.DefaultRequestHeaders.Authorization =
+                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", config.BearerToken);
+
+                var json    = JsonSerializer.Serialize(payload);
+                var content = new StringContent(json, Encoding.UTF8, "application/json");
+                var response = await client.PostAsync(endpoint, content);
+
                 resultado.HttpStatusCode = (int)response.StatusCode;
-                resultado.RespostaBruta = await response.Content.ReadAsStringAsync();
-                resultado.Sucesso = response.IsSuccessStatusCode;
-                resultado.Debug = $"GET {endpoint}\nNúmero: {numeroNormalizado}\nHTTP: {resultado.HttpStatusCode}";
+                resultado.RespostaBruta  = await response.Content.ReadAsStringAsync();
+                resultado.Sucesso        = response.IsSuccessStatusCode;
+                resultado.Debug          = $"POST {endpoint}\nNúmero: {numeroNormalizado}\nHTTP: {resultado.HttpStatusCode}";
+
+                if (resultado.Sucesso)
+                    LogHelper.WhatsApp(
+                        $"WABA_TEMPLATE_SEND_SUCCESS | numero={numeroNormalizado} http={resultado.HttpStatusCode}");
+                else
+                    LogHelper.WhatsApp(
+                        $"WABA_TEMPLATE_SEND_FAIL | numero={numeroNormalizado} http={resultado.HttpStatusCode} resposta={resultado.RespostaBruta}");
+            }
+            catch (TaskCanceledException)
+            {
+                resultado.Debug = "API indisponível (timeout).";
+                LogHelper.WhatsApp($"WABA_TEMPLATE_SEND_FAIL | numero={numeroNormalizado} timeout=true");
             }
             catch (Exception ex)
             {
-                resultado.Debug = ex.ToString();
+                resultado.Debug = ex.Message;
+                LogHelper.WhatsApp(
+                    $"WABA_TEMPLATE_SEND_FAIL | numero={numeroNormalizado} " +
+                    $"ex={ex.GetType().Name}: {ex.Message}");
             }
 
             WhatsAppLogService.Registrar(new WhatsAppEnvioLog
             {
-                TipoEvento = tipoEvento,
-                ExternalKey = externalKey,
-                Numero = numeroNormalizado,
-                Mensagem = mensagem,
+                TipoEvento    = tipoEvento,
+                ExternalKey   = externalKey,
+                Numero        = numeroNormalizado,
+                Mensagem      = "template:nova_conversa",
                 HttpStatusCode = resultado.HttpStatusCode,
-                RespostaApi = resultado.RespostaBruta,
-                Debug = resultado.Debug,
-                DataHora = DateTime.Now
+                RespostaApi   = resultado.RespostaBruta,
+                Debug         = resultado.Debug,
+                DataHora      = DateTime.Now
             });
 
             return resultado;
         }
 
-        private static string MontarEndpoint(string apiUrl)
-        {
-            var url = (apiUrl ?? string.Empty).Trim().TrimEnd('/');
-            if (url.EndsWith("/params", StringComparison.OrdinalIgnoreCase))
-                return url + "/";
-            if (url.EndsWith("/params/", StringComparison.OrdinalIgnoreCase))
-                return url;
-            return url + "/params/";
-        }
+        /// <summary>
+        /// Mantido para compatibilidade com telas de configuração e teste.
+        /// Ignora o parâmetro mensagem e usa o template WABA nova_conversa.
+        /// </summary>
+        public static Task<WhatsAppResultado> EnviarMensagemAsync(
+            string telefone, string mensagem, string tipoEvento = "manual", string? externalKey = null)
+            => EnviarTemplateWabaAsync(telefone, tipoEvento, externalKey);
 
-        private static string BuildQuery(Dictionary<string, string> parametros)
+        private static string Mascarar(string token)
         {
-            return string.Join("&", parametros.Select(p => Uri.EscapeDataString(p.Key) + "=" + Uri.EscapeDataString(p.Value ?? string.Empty)));
+            if (string.IsNullOrWhiteSpace(token)) return "(vazio)";
+            if (token.Length <= 10) return "***";
+            return token[..6] + "************" + token[^4..];
         }
 
         private static string SomenteDigitos(string texto)

@@ -34,6 +34,16 @@ namespace WavenVoIP.Services
             return Carregar().Any(l => string.Equals(l.ExternalKey, externalKey, StringComparison.OrdinalIgnoreCase));
         }
 
+        public static bool EnviadoRecentementeParaNumero(string numero, int minutos = 5)
+        {
+            if (string.IsNullOrWhiteSpace(numero)) return false;
+            var limite = DateTime.Now.AddMinutes(-minutos);
+            return Carregar().Any(l =>
+                string.Equals(l.Numero, numero, StringComparison.OrdinalIgnoreCase) &&
+                l.DataHora >= limite &&
+                l.HttpStatusCode >= 200 && l.HttpStatusCode < 300);
+        }
+
         public static void Registrar(WhatsAppEnvioLog log)
         {
             var logs = Carregar();

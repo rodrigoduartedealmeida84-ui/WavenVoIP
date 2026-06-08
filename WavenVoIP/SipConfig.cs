@@ -185,6 +185,7 @@ namespace WavenVoIP
         public string WavenApiToken  { get; set; } = string.Empty;
 
         // ── Migrações automáticas ──────────────────────────────────────────────
-        public bool MigracaoAplicada142 { get; set; } = false;
+        public bool MigracaoAplicada142   { get; set; } = false;
+        public bool MigracaoWaba144Aplicada { get; set; } = false;
     }
 }
