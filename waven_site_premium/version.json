@@ -1,6 +1,6 @@
 {
-  "version": "1.4.4",
-  "url": "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v1.4.4/WavenVoIP_Setup.exe",
-  "notes": "v1.4.4 — WhatsApp WABA template oficial + anti-spam. Botao WhatsApp agora envia template nova_conversa via API oficial WABA. Migracao automatica para todos os ramais. Anti-spam: bloqueia reenvio do mesmo numero em menos de 5 minutos. Nao depende mais de QR Code.",
-  "date": "2026-06-08"
+  "version": "1.4.5",
+  "url": "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v1.4.5/WavenVoIP_Setup.exe",
+  "notes": "v1.4.5 — Template WABA novo_atendimento + botao Continuar Conversa. Template trocado para novo_atendimento (pt_BR, APROVADO, MARKETING). Botao QUICK_REPLY 'Continuar Conversa' exibido ao cliente. Anti-spam de 5 minutos mantido.",
+  "date": "2026-06-11"
 }

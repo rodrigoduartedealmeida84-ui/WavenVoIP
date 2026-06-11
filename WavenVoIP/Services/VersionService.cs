@@ -4,15 +4,26 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "1.4.4";
+        public const string Versao  = "1.4.5";
         public const string NomeApp = "WavenVoIP";
 
-        public static readonly DateTime DataBuild = new DateTime(2026, 6, 8);
+        public static readonly DateTime DataBuild = new DateTime(2026, 6, 11);
 
         public static string VersaoCompleta => $"{NomeApp} v{Versao}";
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v1.4.5 — Template WABA novo_atendimento + botao Continuar Conversa (11/06/2026)\n" +
+            "• [NEW] Template WABA trocado: nova_conversa → novo_atendimento (pt_BR, APROVADO, MARKETING)\n" +
+            "• [NEW] Botao QUICK_REPLY 'Continuar Conversa' exibido ao cliente no WhatsApp\n" +
+            "• [UI] Interface atualizada: exibe template novo_atendimento / pt_BR / APROVADO\n" +
+            "• [UI] Interface exibe botao: Continuar Conversa (QUICK_REPLY)\n" +
+            "• [SAFE] Nao envia automaticamente — somente ao clicar no botao WhatsApp\n" +
+            "• [SAFE] Anti-spam de 5 minutos mantido\n" +
+            "• [SAFE] Normalizacao de numero mantida\n" +
+            "• [SAFE] Nao altera SIP, ramal, Waven API, CDR, AMI, contatos ou favoritos\n" +
+            "• [LOG] WABA_TEMPLATE_SEND_START | WABA_TEMPLATE_SEND_SUCCESS | WABA_TEMPLATE_SEND_FAIL\n" +
+            "\n" +
             "v1.4.4 — WhatsApp WABA template oficial + anti-spam (08/06/2026)\n" +
             "• [NEW] Botao WhatsApp agora envia template nova_conversa via API oficial WABA\n" +
             "• [NEW] Migracao automatica WABA v1.4.4: atualiza URL e token para todos os ramais\n" +

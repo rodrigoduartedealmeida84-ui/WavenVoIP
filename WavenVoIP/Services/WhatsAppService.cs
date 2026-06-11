@@ -40,7 +40,7 @@ namespace WavenVoIP.Services
         }
 
         /// <summary>
-        /// Envia template WABA nova_conversa via API oficial Waven Chat.
+        /// Envia template WABA novo_atendimento via API oficial Waven Chat.
         /// Retorna Bloqueado=true se anti-spam (mesmo número nos últimos 5 min).
         /// </summary>
         public static async Task<WhatsAppResultado> EnviarTemplateWabaAsync(
@@ -99,7 +99,7 @@ namespace WavenVoIP.Services
                     type = "template",
                     template = new
                     {
-                        name = "nova_conversa",
+                        name = "novo_atendimento",
                         language = new { code = "pt_BR" }
                     }
                 }
@@ -145,7 +145,7 @@ namespace WavenVoIP.Services
                 TipoEvento    = tipoEvento,
                 ExternalKey   = externalKey,
                 Numero        = numeroNormalizado,
-                Mensagem      = "template:nova_conversa",
+                Mensagem      = "template:novo_atendimento",
                 HttpStatusCode = resultado.HttpStatusCode,
                 RespostaApi   = resultado.RespostaBruta,
                 Debug         = resultado.Debug,
@@ -157,7 +157,7 @@ namespace WavenVoIP.Services
 
         /// <summary>
         /// Mantido para compatibilidade com telas de configuração e teste.
-        /// Ignora o parâmetro mensagem e usa o template WABA nova_conversa.
+        /// Ignora o parâmetro mensagem e usa o template WABA novo_atendimento.
         /// </summary>
         public static Task<WhatsAppResultado> EnviarMensagemAsync(
             string telefone, string mensagem, string tipoEvento = "manual", string? externalKey = null)

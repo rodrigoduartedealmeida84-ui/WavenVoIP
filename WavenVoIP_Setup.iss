@@ -3,7 +3,7 @@
 ; NUNCA toca em %APPDATA%\WavenVoIP\ (configs do usuário)
 
 #define AppName        "WavenVoIP"
-#define AppVersion     "1.4.4"
+#define AppVersion     "1.4.5"
 #define AppPublisher   "Almeida Gás"
 #define AppURL         "https://almeidagas.com/waven/"
 #define AppExeName     "WavenVoIP.exe"

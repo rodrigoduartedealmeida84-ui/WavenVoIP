@@ -1,7 +1,7 @@
 {
-    "versao":  "1.4.4",
-    "zip":     "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v1.4.4/WavenVoIP.zip",
-    "sha256":  "996af3a1fdb35b5aa1aca092ca9eac7bbcedc9550efbee90d64744bb578d249d",
-    "data":    "2026-06-08",
-    "notas":   "v1.4.4 - WhatsApp WABA template oficial + anti-spam\n[NEW] Botao WhatsApp envia template nova_conversa via API oficial WABA\n[NEW] Migracao automatica: atualiza URL e token WhatsApp para todos os ramais\n[NEW] Anti-spam: bloqueia reenvio do mesmo numero em menos de 5 minutos\n[NEW] Erros amigaveis: 401, 404, 429, 500, timeout\n[SAFE] Nao envia automaticamente — somente ao clicar no botao\n[SAFE] Nao depende mais de QR Code"
+    "versao":  "1.4.5",
+    "zip":     "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v1.4.5/WavenVoIP.zip",
+    "sha256":  "d08b69d95f5190c68235cfe87e716c88610ad4ffcc8630ef4d4adbdd85598a58",
+    "data":    "2026-06-11",
+    "notas":   "v1.4.5 - Template WABA novo_atendimento + botao Continuar Conversa\n[NEW] Template trocado: nova_conversa → novo_atendimento (pt_BR, APROVADO)\n[NEW] Botao QUICK_REPLY 'Continuar Conversa' exibido ao cliente\n[SAFE] Nao envia automaticamente — somente ao clicar no botao\n[SAFE] Anti-spam de 5 minutos mantido"
 }

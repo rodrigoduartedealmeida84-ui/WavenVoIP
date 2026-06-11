@@ -97,11 +97,13 @@
                                            HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#16A34A"/>
                             </Border>
                             <StackPanel Grid.Column="1">
-                                <TextBlock Text="nova_conversa" FontSize="15" FontWeight="Bold" Foreground="#1E293B"/>
+                                <TextBlock Text="novo_atendimento" FontSize="15" FontWeight="Bold" Foreground="#1E293B"/>
                                 <TextBlock Text="Idioma: pt_BR  •  Status: APROVADO" FontSize="12"
                                            Foreground="#16A34A" FontWeight="SemiBold" Margin="0,4,0,0"/>
+                                <TextBlock Text="Botão: Continuar Conversa (QUICK_REPLY)" FontSize="12"
+                                           Foreground="#0369A1" FontWeight="SemiBold" Margin="0,4,0,0"/>
                                 <TextBlock FontSize="12" Foreground="#64748B" Margin="0,6,0,0" TextWrapping="Wrap"
-                                           Text="O cliente será convidado a iniciar o atendimento via WhatsApp. Aguarde a resposta para continuar a conversa."/>
+                                           Text="O cliente receberá um convite de atendimento com o botão 'Continuar Conversa'. Aguarde a resposta para continuar o atendimento."/>
                             </StackPanel>
                         </Grid>
                     </StackPanel>
