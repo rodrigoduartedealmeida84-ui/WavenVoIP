@@ -34,19 +34,24 @@ namespace WavenVoIP.Views
 
         private void Tecla_Click(object sender, RoutedEventArgs e)
         {
-            if (sender is Button b && b.Content != null)
-                Enviar(b.Content.ToString() ?? string.Empty);
+            if (sender is Button b && b.Tag != null)
+                Enviar(b.Tag.ToString() ?? string.Empty);
         }
 
         private void Enviar(string digito)
         {
             if (string.IsNullOrWhiteSpace(digito)) return;
-            bool ok = _enviarDtmf(digito);
-            if (ok)
-            {
-                txtEnviado.Text += digito;
-                txtEnviado.CaretIndex = txtEnviado.Text.Length;
-            }
+
+            // Exibição é apenas visual: não depende do retorno do envio,
+            // que continua sendo disparado da mesma forma de antes.
+            txtEnviado.Text += digito;
+
+            _enviarDtmf(digito);
+        }
+
+        private void Limpar_Click(object sender, RoutedEventArgs e)
+        {
+            txtEnviado.Text = string.Empty;
         }
 
         private void Fechar_Click(object sender, RoutedEventArgs e) => Close();

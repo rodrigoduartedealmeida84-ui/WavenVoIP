@@ -1,7 +1,7 @@
 {
-    "versao":  "1.4.5",
-    "zip":     "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v1.4.5/WavenVoIP.zip",
-    "sha256":  "d08b69d95f5190c68235cfe87e716c88610ad4ffcc8630ef4d4adbdd85598a58",
-    "data":    "2026-06-11",
-    "notas":   "v1.4.5 - Template WABA novo_atendimento + botao Continuar Conversa\n[NEW] Template trocado: nova_conversa → novo_atendimento (pt_BR, APROVADO)\n[NEW] Botao QUICK_REPLY 'Continuar Conversa' exibido ao cliente\n[SAFE] Nao envia automaticamente — somente ao clicar no botao\n[SAFE] Anti-spam de 5 minutos mantido"
+    "versao": "2.0.0",
+    "zip": "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.0.0/WavenVoIP.zip",
+    "sha256": "2462b961ee2118ec877ed4f70dcb06ffd8a82a266088363aa47a1ab94dcdb834",
+    "data": "2026-06-22",
+    "notas": "WavenVoIP 2.0 - Nova versao principal\n[NEW] Teclado DTMF totalmente redesenhado\n[FIX] Display do DTMF corrigido - mostra todos os digitos pressionados\n[SAFE] Envio automatico de DTMF mantido (logica SIP inalterada)\n[PERF] Pesquisa de contatos muito mais rapida\n[PERF] Melhor desempenho em listas grandes\n[NEW] Exclusao de contato com opcao Desfazer\n[FIX] Melhor tratamento de contatos Google (edicao, exclusao, tombstones)\n[NEW] Integracao completa com Waven API\n[NEW] Integracao oficial com Waven Chat (WABA) - template novo_atendimento\n[SAFE] Anti-spam para envio de templates mantido\n[FIX] Melhorias de estabilidade e correcoes diversas"
 }

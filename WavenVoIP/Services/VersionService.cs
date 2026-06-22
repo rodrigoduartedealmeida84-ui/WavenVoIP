@@ -4,15 +4,27 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "1.4.5";
+        public const string Versao  = "2.0.0";
         public const string NomeApp = "WavenVoIP";
 
-        public static readonly DateTime DataBuild = new DateTime(2026, 6, 11);
+        public static readonly DateTime DataBuild = new DateTime(2026, 6, 22);
 
         public static string VersaoCompleta => $"{NomeApp} v{Versao}";
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v2.0.0 — Nova versao principal: DTMF redesenhado + pesquisa rapida + UX (22/06/2026)\n" +
+            "• [NEW] Teclado DTMF totalmente redesenhado: visual moderno, botoes maiores, letras ABC/DEF sob os numeros\n" +
+            "• [FIX] Display do DTMF: mostra todos os digitos pressionados (123#) — nao dependia mais do retorno do envio\n" +
+            "• [NEW] Botao dedicado para limpar o display do DTMF (apenas visual, nao reenvia tons)\n" +
+            "• [FIX] Layout do DTMF sem corte de numeros/letras em 100%/125%/150% de escala do Windows\n" +
+            "• [SAFE] Envio automatico de DTMF na chamada mantido exatamente como antes (logica SIP inalterada)\n" +
+            "• [PERF] Pesquisa de contatos e listas grandes com desempenho melhorado\n" +
+            "• [NEW] Exclusao de contato com opcao Desfazer (Undo)\n" +
+            "• [IMPROVE] Tratamento de contatos Google: edicao, exclusao e tombstones mais consistentes\n" +
+            "• [IMPROVE] Integracao Waven API, WhatsApp WABA (template novo_atendimento) e anti-spam consolidados\n" +
+            "• [STABILITY] Melhorias gerais de estabilidade e correcoes diversas\n" +
+            "\n" +
             "v1.4.5 — Template WABA novo_atendimento + botao Continuar Conversa (11/06/2026)\n" +
             "• [NEW] Template WABA trocado: nova_conversa → novo_atendimento (pt_BR, APROVADO, MARKETING)\n" +
             "• [NEW] Botao QUICK_REPLY 'Continuar Conversa' exibido ao cliente no WhatsApp\n" +
