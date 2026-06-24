@@ -40,6 +40,11 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        // v2.1.1 — Quando iniciado pelo Run key do Windows (autostart), o processo herda
+        // o WorkingDirectory do explorer.exe (ex: System32), não a pasta do executável.
+        // Isso quebra qualquer caminho relativo (ícone, assets). Corrige sempre na raiz.
+        try { Environment.CurrentDirectory = AppDomain.CurrentDomain.BaseDirectory; } catch { }
+
         const string mutexName = "WavenVoIP_SingleInstance_v79";
         const string eventName = "WavenVoIP_ActivateEvent_v79";
 
@@ -162,6 +167,14 @@ public partial class App : Application
             UpdateService.EmChamadaAtiva = () => sip.IsInCall || sip.IsDialing;
 
             try { sip.Inicializar(config); } catch { }
+
+            // v2.1.1 — Offline é controlado localmente: se o último estado salvo era
+            // Offline, o app inicia bloqueando chamadas, sem tentar voltar Online sozinho.
+            if (config.IsOfflinePersistido)
+            {
+                sip.EntrarOffline();
+                LogHelper.Info("APP_INICIADO_OFFLINE_POR_CONFIG_SALVA");
+            }
 
             if (autostart)
             {

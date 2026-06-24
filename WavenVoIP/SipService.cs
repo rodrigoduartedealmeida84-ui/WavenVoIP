@@ -52,6 +52,10 @@ namespace WavenVoIP
         public bool IsOnHold => _emEspera;
         public bool IsDialing => _chamadaSaindoEmAndamento;
 
+        // v2.1.1 — Offline controlado localmente pelo WavenVoIP, sem depender de
+        // discagem de código de função no Issabel/Asterisk (*78/*79).
+        public bool ModoOffline { get; private set; }
+
         public event Action<string>? StatusChanged;
         public event Action<string>? IncomingCallReceived;
         public event Action? IncomingCallEnded;
@@ -178,6 +182,16 @@ namespace WavenVoIP
         {
             try
             {
+                if (ModoOffline)
+                {
+                    var callIdOffline = ObterCallId(req);
+                    var fromOffline = req.Header?.From?.FromURI?.User ?? "Desconhecido";
+                    LogHelper.Sip($"CALL_BLOCKED_OFFLINE | Call-ID={callIdOffline} From={fromOffline}", LogLevel.WARN);
+                    RegistrarSinalSip($"CALL_BLOCKED_OFFLINE Call-ID={callIdOffline} From={fromOffline}");
+                    EnviarRespostaOcupado(req);
+                    return;
+                }
+
                 var sw = System.Diagnostics.Stopwatch.StartNew();
                 var callId = ObterCallId(req);
                 _ultimoInviteRecebido = DateTime.Now;
@@ -438,6 +452,59 @@ namespace WavenVoIP
             };
 
             _registerUserAgent.Start();
+        }
+
+        // v2.1.1 — controle local de Offline (substitui dependência de *78/*79 no Issabel)
+        public void EntrarOffline()
+        {
+            ModoOffline = true;
+            LogHelper.Info("OFFLINE_ATIVADO_LOCAL");
+        }
+
+        public void SairOffline()
+        {
+            ModoOffline = false;
+            LogHelper.Info("OFFLINE_DESATIVADO_LOCAL");
+        }
+
+        /// Garante registro SIP ativo: confere transporte, registra/renova se necessário
+        /// e aguarda confirmação até o timeout. Usado para recuperar recebimento de
+        /// chamadas após período Offline ou queda de rede.
+        public async Task<bool> GarantirRegistradoAsync(int timeoutSegundos = 12)
+        {
+            LogHelper.Info("SIP_VERIFICANDO_TRANSPORTE");
+            if (_sipTransport == null)
+            {
+                LogHelper.Error("SIP_TRANSPORTE_INDISPONIVEL");
+                return false;
+            }
+
+            if (_userAgent == null)
+            {
+                LogHelper.Info("SIP_USERAGENT_AUSENTE_RECRIANDO");
+                try { CriarUserAgent(); }
+                catch (Exception ex) { LogHelper.Error("SIP_USERAGENT_RECRIAR_FALHOU", ex); return false; }
+            }
+
+            LogHelper.Info("SIP_VERIFICANDO_REGISTRO");
+            if (IsRegistered)
+            {
+                LogHelper.Info("SIP_REGISTRO_OK_JA_ATIVO");
+                return true;
+            }
+
+            LogHelper.Info("SIP_RENOVANDO_REGISTRO");
+            try { Registrar(); }
+            catch (Exception ex) { LogHelper.Error("SIP_RENOVAR_REGISTRO_FALHOU", ex); return false; }
+
+            var inicio = DateTime.Now;
+            while ((DateTime.Now - inicio).TotalSeconds < timeoutSegundos)
+            {
+                if (IsRegistered) return true;
+                await Task.Delay(300);
+            }
+
+            return IsRegistered;
         }
 
         public async Task<bool> Ligar(string numeroFinal)

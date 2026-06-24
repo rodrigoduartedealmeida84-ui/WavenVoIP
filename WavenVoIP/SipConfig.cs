@@ -187,5 +187,9 @@ namespace WavenVoIP
         // ── Migrações automáticas ──────────────────────────────────────────────
         public bool MigracaoAplicada142   { get; set; } = false;
         public bool MigracaoWaba144Aplicada { get; set; } = false;
+
+        // ── Status Online/Offline v2.1.1 ───────────────────────────────────────
+        // Controlado localmente pelo WavenVoIP — não depende de discagem no Issabel.
+        public bool IsOfflinePersistido { get; set; } = false;
     }
 }

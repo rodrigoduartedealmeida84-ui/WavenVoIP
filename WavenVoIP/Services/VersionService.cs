@@ -4,15 +4,25 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "2.0.0";
+        public const string Versao  = "2.1.1";
         public const string NomeApp = "WavenVoIP";
 
-        public static readonly DateTime DataBuild = new DateTime(2026, 6, 22);
+        public static readonly DateTime DataBuild = new DateTime(2026, 6, 24);
 
         public static string VersaoCompleta => $"{NomeApp} v{Versao}";
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v2.1.1 — Correcao Online/Offline + icone no autostart (24/06/2026)\n" +
+            "• [FIX] Online/Offline agora e controlado localmente pelo WavenVoIP — nao depende mais de discar *78/*79 no Issabel\n" +
+            "• [FIX] Ao voltar Online, o app forca verificacao/renovacao do registro SIP antes de mostrar o ramal pronto\n" +
+            "• [NEW] Estado Offline persiste apos fechar ou reiniciar o Windows — app abre Offline se foi o ultimo estado salvo\n" +
+            "• [SAFE] Chamada recebida enquanto Offline e rejeitada de forma limpa (486 Busy), sem tocar localmente\n" +
+            "• [FIX] Icone/logo da janela principal carregado via caminho absoluto, corrigindo icone em branco ao iniciar com o Windows\n" +
+            "• [FIX] WorkingDirectory corrigido no startup automatico do Windows (Run key herdava diretorio do explorer.exe)\n" +
+            "• [LOG] USUARIO_CLICOU_ONLINE | USUARIO_CLICOU_OFFLINE | OFFLINE_ATIVADO_LOCAL | RAMAL_PRONTO_PARA_RECEBER_CHAMADAS\n" +
+            "• [LOG] APP_INICIADO_OFFLINE_POR_CONFIG_SALVA | CALL_BLOCKED_OFFLINE | FALHA_AO_VOLTAR_ONLINE\n" +
+            "\n" +
             "v2.0.0 — Nova versao principal: DTMF redesenhado + pesquisa rapida + UX (22/06/2026)\n" +
             "• [NEW] Teclado DTMF totalmente redesenhado: visual moderno, botoes maiores, letras ABC/DEF sob os numeros\n" +
             "• [FIX] Display do DTMF: mostra todos os digitos pressionados (123#) — nao dependia mais do retorno do envio\n" +

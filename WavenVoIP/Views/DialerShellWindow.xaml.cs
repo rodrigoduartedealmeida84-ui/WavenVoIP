@@ -82,6 +82,16 @@ namespace WavenVoIP.Views
         {
             _sipService = sipService ?? throw new ArgumentNullException(nameof(sipService));
             InitializeComponent();
+
+            // v2.1.1 — carrega o ícone via disco/fallback robusto, evitando o ícone
+            // "sem logo" que ocorria ao iniciar automaticamente com o Windows.
+            try
+            {
+                var icone = IconHelper.CarregarIconeJanela();
+                if (icone != null) Icon = icone;
+            }
+            catch { }
+
             Loaded += DialerShellWindow_Loaded;
             StateChanged += DialerShellWindow_StateChanged;
             ConfigurarBandeja();
@@ -242,6 +252,12 @@ namespace WavenVoIP.Views
                 try
                 {
                     var cfg = SipConfig.CarregarSalva();
+                    _dndAtivo = cfg?.IsOfflinePersistido ?? false;
+                    if (_dndAtivo)
+                    {
+                        txtStatus.Text = "Offline — chamadas não serão tocadas neste dispositivo.";
+                        LogHelper.Info("UI_INICIADO_OFFLINE_POR_CONFIG_SALVA");
+                    }
                     try { AtualizarBotaoStatus(); } catch { }
                 }
                 catch { }
@@ -3288,32 +3304,86 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
 
         private async void MenuOnline_Click(object sender, RoutedEventArgs e)
         {
-            try
-            {
-                _dndAtivo = false;
-                AtualizarBotaoStatus();
-                txtStatus.Text = "Reconectando ao Issabel...";
-                _sipService.Registrar();
-                if (_sipService.IsInCall) return;
-                await _sipService.ExecutarCodigoFuncao("*79");
-            }
+            try { await VoltarOnlineAsync(); }
             catch (Exception ex) { TratarErroSemTravamento(ex, "Não foi possível ativar Online."); }
         }
 
         private async void MenuOffline_Click(object sender, RoutedEventArgs e)
         {
+            try { await EntrarOfflineAsync(); }
+            catch (Exception ex) { TratarErroSemTravamento(ex, "Não foi possível ativar Offline."); }
+        }
+
+        // v2.1.1 — Offline/Online controlados localmente pelo WavenVoIP, sem depender
+        // de discagem de código de função (*78/*79) no Issabel/Asterisk.
+        private async Task EntrarOfflineAsync()
+        {
+            LogHelper.Info("USUARIO_CLICOU_OFFLINE");
+
+            _sipService.EntrarOffline();
+            _dndAtivo = true;
+            AtualizarBotaoStatus();
+            txtStatus.Text = "Offline — chamadas não serão tocadas neste dispositivo.";
+
             try
             {
-                bool ok = await _sipService.ExecutarCodigoFuncao("*78");
-                if (ok)
-                {
-                    _dndAtivo = true;
-                    AtualizarBotaoStatus();
-                    txtStatus.Text = "Offline — chamadas bloqueadas no Issabel.";
-                }
-                else MessageBox.Show("Não foi possível ativar o modo Offline no Issabel.", "Waven VoIP");
+                var cfg = SipConfig.CarregarSalva() ?? new SipConfig();
+                cfg.IsOfflinePersistido = true;
+                cfg.Salvar();
             }
-            catch (Exception ex) { TratarErroSemTravamento(ex, "Não foi possível ativar Offline."); }
+            catch (Exception ex) { App.LogCrash("OFFLINE_PERSIST_FAILED", "Falha ao salvar estado Offline", ex); }
+
+            LogHelper.Info("OFFLINE_ATIVADO_LOCAL");
+            await Task.CompletedTask;
+        }
+
+        private async Task VoltarOnlineAsync()
+        {
+            LogHelper.Info("USUARIO_CLICOU_ONLINE");
+
+            txtStatus.Text = "Voltando online...";
+            if (txtDndStatusLabel != null) txtDndStatusLabel.Text = "Voltando online...";
+
+            try
+            {
+                var cfg = SipConfig.CarregarSalva() ?? new SipConfig();
+                cfg.IsOfflinePersistido = false;
+                cfg.Salvar();
+            }
+            catch (Exception ex) { App.LogCrash("ONLINE_PERSIST_FAILED", "Falha ao salvar estado Online", ex); }
+
+            _sipService.SairOffline();
+
+            bool pronto = await GarantirSipProntoParaReceberAsync();
+
+            if (!pronto)
+            {
+                _dndAtivo = false; // estado salvo é Online; visual reflete falha temporária da recuperação
+                txtStatus.Text = "Falha ao voltar Online. Verifique servidor SIP/internet.";
+                if (txtDndStatusLabel != null) txtDndStatusLabel.Text = "Falha ao voltar Online";
+                LogHelper.Error("FALHA_AO_VOLTAR_ONLINE | motivo=SIP_NAO_REGISTRADO");
+                MessageBox.Show("Não foi possível voltar Online. Verifique servidor SIP/internet.",
+                    "Waven VoIP", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            _dndAtivo = false;
+            AtualizarBotaoStatus();
+            txtStatus.Text = "Pronto para receber chamadas";
+            LogHelper.Info("RAMAL_PRONTO_PARA_RECEBER_CHAMADAS");
+        }
+
+        /// Confere/recupera tudo que é necessário para o ramal voltar a receber chamadas:
+        /// transporte SIP, registro, eventos de chamada recebida e serviço de toque.
+        private async Task<bool> GarantirSipProntoParaReceberAsync()
+        {
+            txtStatus.Text = "Registrando ramal...";
+            bool registrado = await _sipService.GarantirRegistradoAsync();
+            if (!registrado) return false;
+
+            LogHelper.Info("INCOMING_CALL_EVENTOS_INSCRITOS_OK");
+            LogHelper.Info("SERVICO_TOQUE_OK");
+            return true;
         }
 
         private void AtualizarBotaoStatus()
