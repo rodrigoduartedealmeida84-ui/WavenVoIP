@@ -674,7 +674,7 @@
                             </StackPanel>
 
                             <Border Grid.Row="1" Style="{StaticResource CardStyle}" Padding="0">
-                                <ListView x:Name="gridContatosShell" BorderThickness="0" Background="Transparent" ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                <ListView x:Name="gridContatosShell" BorderThickness="0" Background="Transparent" ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Disabled" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" VirtualizingPanel.ScrollUnit="Pixel">
                                     <ListView.ItemContainerStyle>
                                         <Style TargetType="ListViewItem"><Setter Property="Padding" Value="0"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="BorderThickness" Value="0"/></Style>
                                     </ListView.ItemContainerStyle>
@@ -811,7 +811,7 @@
                                 <TextBlock x:Name="txtStatusHistorico" Text="" FontSize="11" Foreground="#94A3B8" HorizontalAlignment="Right" Margin="0,4,0,0"/>
                             </StackPanel>
                             <Border Grid.Row="1" Style="{StaticResource CardStyle}" Padding="0">
-                                <ListView x:Name="gridHistoricoShell" BorderThickness="0" Background="Transparent" ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Disabled" MouseDoubleClick="GridHistoricoShell_MouseDoubleClick">
+                                <ListView x:Name="gridHistoricoShell" BorderThickness="0" Background="Transparent" ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Disabled" MouseDoubleClick="GridHistoricoShell_MouseDoubleClick" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" VirtualizingPanel.ScrollUnit="Pixel">
                                     <ListView.ItemContainerStyle>
                                         <Style TargetType="ListViewItem">
                                             <Setter Property="Padding" Value="0"/>

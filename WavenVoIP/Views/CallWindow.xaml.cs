@@ -109,7 +109,12 @@ namespace WavenVoIP.Views
                 PararTomDeChamando();
                 try { OnHangupRequested?.Invoke(); } catch { }
             }
+            // _timer (contador de duracao) nao era parado aqui — ficava rodando a cada 1s
+            // mantendo a janela viva na memoria (leak) mesmo apos fechada. CallWindow se
+            // acumula a cada chamada atendida ao longo de um dia de uso.
+            _timer.Stop();
             _pulseTimer?.Stop();
+            try { _ringbackPlayer.Close(); } catch { }
         }
 
         public string DuracaoAtual

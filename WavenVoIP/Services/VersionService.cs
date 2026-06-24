@@ -4,7 +4,7 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "2.1.1";
+        public const string Versao  = "2.2.0";
         public const string NomeApp = "WavenVoIP";
 
         public static readonly DateTime DataBuild = new DateTime(2026, 6, 24);
@@ -13,6 +13,13 @@ namespace WavenVoIP.Services
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v2.2.0 — Melhorias de desempenho, fluidez, inicializacao, pesquisa, timers, logs e reducao de travamentos (24/06/2026)\n" +
+            "• [PERF] Logs gravados em fila assincrona por thread dedicada — chamadas a LogHelper (UI thread, cliques, eventos SIP) nao bloqueiam mais em I/O de disco\n" +
+            "• [FIX] Corrigido memory/CPU leak: contador de duracao do CallWindow continuava rodando a cada 1s apos a janela ser fechada\n" +
+            "• [PERF] Removida leitura/regravacao duplicada do historico.json na thread de UI durante a inicializacao (retencao ja era aplicada em background)\n" +
+            "• [PERF] Virtualizacao explicita (Recycling) nas listas de contatos e historico da tela principal\n" +
+            "• [SAFE] Nenhuma mudanca em SIP, audio, fluxo de chamadas ou configuracoes do usuario\n" +
+            "\n" +
             "v2.1.1 — Correcao Online/Offline + icone no autostart (24/06/2026)\n" +
             "• [FIX] Online/Offline agora e controlado localmente pelo WavenVoIP — nao depende mais de discar *78/*79 no Issabel\n" +
             "• [FIX] Ao voltar Online, o app forca verificacao/renovacao do registro SIP antes de mostrar o ramal pronto\n" +

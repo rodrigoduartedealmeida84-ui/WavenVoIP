@@ -264,7 +264,9 @@ namespace WavenVoIP.Views
 
                 CarregarPreferenciasNaTela();
                 CarregarDispositivosAudioNaTela();
-                AplicarRetencaoHistorico();
+                // AplicarRetencaoHistorico() removido daqui — fazia a mesma leitura/filtro/
+                // regravacao sincrona do historico.json na UI thread que CarregarComRetencao()
+                // ja faz em background dentro de AtualizarHistoricoShell() (chamado abaixo).
                 CarregarDadosDasAbas();
                 _ = ImportarContatosEmpresaECarregarFavoritosAsync();
                 _ = SincronizarContatosRemotosAsync();
@@ -2939,11 +2941,6 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
             {
                 try { txtHistoricoRetencaoDias.Text = "7"; } catch { }
             }
-        }
-
-        private void AplicarRetencaoHistorico()
-        {
-            HistoricoStorageService.LimparAntigas(ObterDiasRetencaoHistorico());
         }
 
         private void BtnSalvarPreferencias_Click(object sender, RoutedEventArgs e)

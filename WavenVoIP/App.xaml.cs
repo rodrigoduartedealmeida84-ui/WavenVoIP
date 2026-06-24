@@ -232,6 +232,7 @@ public partial class App : Application
         _activateEvent?.Dispose();
         _instanceMutex?.ReleaseMutex();
         _instanceMutex?.Dispose();
+        try { LogHelper.Flush(TimeSpan.FromMilliseconds(500)); } catch { }
         base.OnExit(e);
     }
 

@@ -168,7 +168,12 @@ public static class UpdateService
         {
             Reportar(new UpdateProgress { Stage = UpdateStage.Checking, Message = "Verificando atualizacoes..." });
             LogHelper.Update($"[CHECK] Local={VersionService.Versao}");
-            LogHelper.Update($"[CHECK_URL] {VersionUrl}");
+
+            // Cache-busting: raw.githubusercontent.com fica atras de CDN e pode servir
+            // uma copia antiga por alguns minutos apos um push. A query string unica
+            // forca tratamento como recurso novo e evita falso "ja esta atualizado".
+            var urlComCacheBusting = $"{VersionUrl}?ticks={DateTime.UtcNow.Ticks}";
+            LogHelper.Update($"[CHECK_URL] {urlComCacheBusting}");
 
             string json;
             try
@@ -176,7 +181,8 @@ public static class UpdateService
                 using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
                 http.DefaultRequestHeaders.CacheControl =
                     new System.Net.Http.Headers.CacheControlHeaderValue { NoCache = true };
-                json = await http.GetStringAsync(VersionUrl);
+                http.DefaultRequestHeaders.Pragma.ParseAdd("no-cache");
+                json = await http.GetStringAsync(urlComCacheBusting);
                 LogHelper.Update($"[CHECK_JSON] Recebido {json.Length} bytes: {json.Replace('\n', ' ').Replace('\r', ' ')}");
             }
             catch (Exception ex)
@@ -184,6 +190,7 @@ public static class UpdateService
                 var errMsg = $"Erro ao consultar servidor: {ex.Message}";
                 Reportar(new UpdateProgress { Stage = UpdateStage.Error, Message = errMsg, ErrorMessage = ex.Message });
                 LogHelper.Update($"[CHECK_ERROR] {ex.GetType().Name}: {ex.Message}", LogLevel.WARN);
+                LogHelper.Update("[DECISAO] ERRO_FALHA_DOWNLOAD_VERSION_JSON", LogLevel.WARN);
                 return UpdateCheckResult.Erro;
             }
 
@@ -196,6 +203,7 @@ public static class UpdateService
                 var errMsg = "version.json invalido: campos 'versao'/'zip' ausentes";
                 Reportar(new UpdateProgress { Stage = UpdateStage.Error, Message = errMsg, ErrorMessage = errMsg });
                 LogHelper.Update($"[CHECK_SKIP] {errMsg}");
+                LogHelper.Update("[DECISAO] ERRO_CAMPO_VERSAO_AUSENTE", LogLevel.WARN);
                 return UpdateCheckResult.Erro;
             }
 
@@ -210,6 +218,7 @@ public static class UpdateService
             if (string.IsNullOrWhiteSpace(versaoRemota) || string.IsNullOrWhiteSpace(zipUrl))
             {
                 Reportar(new UpdateProgress { Stage = UpdateStage.Error, Message = "version.json invalido", ErrorMessage = "versao ou zip vazios" });
+                LogHelper.Update("[DECISAO] ERRO_VERSAO_OU_ZIP_VAZIOS", LogLevel.WARN);
                 return UpdateCheckResult.Erro;
             }
 
@@ -220,6 +229,7 @@ public static class UpdateService
             if (!IsRemotaMaior(versaoRemota, VersionService.Versao))
             {
                 LogHelper.Update($"[CHECK_OK] Versao atual e a mais recente ({VersionService.Versao})");
+                LogHelper.Update("[DECISAO] NAO_ATUALIZAR");
                 Reportar(new UpdateProgress
                 {
                     Stage         = UpdateStage.UpToDate,
@@ -231,6 +241,7 @@ public static class UpdateService
             }
 
             LogHelper.Update($"[DISPONIVEL] Atualizacao disponivel: {VersionService.Versao} -> {versaoRemota}");
+            LogHelper.Update("[DECISAO] ATUALIZAR");
             _pendingZipUrl = zipUrl;
             _pendingSha256 = sha256;
             _pendingVersao = versaoRemota;
@@ -271,6 +282,7 @@ public static class UpdateService
                 ErrorMessage = ex.ToString()
             });
             LogHelper.Update($"[CHECK_ERROR] {ex.GetType().Name}: {ex.Message}", LogLevel.WARN);
+            LogHelper.Update("[DECISAO] ERRO_INESPERADO", LogLevel.WARN);
             return UpdateCheckResult.Erro;
         }
         finally

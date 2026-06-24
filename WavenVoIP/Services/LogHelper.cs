@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Concurrent;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Threading;
 
 namespace WavenVoIP.Services
 {
@@ -27,7 +29,32 @@ namespace WavenVoIP.Services
 
         private const long MaxBytes = 3 * 1024 * 1024; // 3 MB per file before rotation
 
-        private static readonly object _lock = new object();
+        // Escrita em disco roda numa thread dedicada — chamadas a Append() (feitas direto
+        // na UI thread em vários pontos: handlers de clique, StatusChanged, etc.) so
+        // enfileiram a linha e retornam na hora, sem bloquear em I/O de disco.
+        private static readonly BlockingCollection<(string Channel, string Line)> _queue = new();
+        private static readonly Thread _writerThread;
+
+        static LogHelper()
+        {
+            _writerThread = new Thread(WriterLoop) { IsBackground = true, Name = "LogHelperWriter" };
+            _writerThread.Start();
+        }
+
+        private static void WriterLoop()
+        {
+            foreach (var (channel, line) in _queue.GetConsumingEnumerable())
+            {
+                try
+                {
+                    Directory.CreateDirectory(_logDir);
+                    var path = Path.Combine(_logDir, $"{channel}.log");
+                    RotateIfNeeded(path);
+                    File.AppendAllText(path, line);
+                }
+                catch { /* logging must never crash the app */ }
+            }
+        }
 
         internal static bool IsEnabled         { get; private set; } = true;
         internal static bool IsDetailedEnabled { get; private set; } = false;
@@ -39,6 +66,14 @@ namespace WavenVoIP.Services
         }
 
         internal static string LogDir => _logDir;
+
+        /// Espera a fila de escrita esvaziar (usado no encerramento do app, para nao perder as ultimas linhas).
+        internal static void Flush(TimeSpan timeout)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            while (_queue.Count > 0 && sw.Elapsed < timeout)
+                Thread.Sleep(10);
+        }
 
         /// Fired on every log call — subscribers must be fast and non-throwing.
         internal static event Action<LogEntry>? LogWritten;
@@ -88,17 +123,11 @@ namespace WavenVoIP.Services
             try
             {
                 var line = $"{ts:yyyy-MM-dd HH:mm:ss.fff} [{level,-5}] [{caller}] {msg}{Environment.NewLine}";
-                lock (_lock)
-                {
-                    Directory.CreateDirectory(_logDir);
-                    var path = Path.Combine(_logDir, $"{channel}.log");
-                    RotateIfNeeded(path);
-                    File.AppendAllText(path, line);
-                }
+                _queue.Add((channel, line));
             }
             catch { /* logging must never crash the app */ }
 
-            // Fire outside lock so a slow/throwing subscriber never stalls other threads
+            // Subscriber roda no thread chamador — deve ser rapido e nao lancar
             try
             {
                 LogWritten?.Invoke(new LogEntry
