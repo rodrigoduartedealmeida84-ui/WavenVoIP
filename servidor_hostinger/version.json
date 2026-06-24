@@ -1,7 +1,7 @@
 {
-    "versao": "2.0.0",
-    "zip": "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.0.0/WavenVoIP.zip",
-    "sha256": "2462b961ee2118ec877ed4f70dcb06ffd8a82a266088363aa47a1ab94dcdb834",
-    "data": "2026-06-22",
-    "notas": "WavenVoIP 2.0 - Nova versao principal\n[NEW] Teclado DTMF totalmente redesenhado\n[FIX] Display do DTMF corrigido - mostra todos os digitos pressionados\n[SAFE] Envio automatico de DTMF mantido (logica SIP inalterada)\n[PERF] Pesquisa de contatos muito mais rapida\n[PERF] Melhor desempenho em listas grandes\n[NEW] Exclusao de contato com opcao Desfazer\n[FIX] Melhor tratamento de contatos Google (edicao, exclusao, tombstones)\n[NEW] Integracao completa com Waven API\n[NEW] Integracao oficial com Waven Chat (WABA) - template novo_atendimento\n[SAFE] Anti-spam para envio de templates mantido\n[FIX] Melhorias de estabilidade e correcoes diversas"
+    "versao": "2.1.1",
+    "zip": "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.1.1/WavenVoIP.zip",
+    "sha256": "a3a01ad373ebb6989a7850b83214c7eabb5a97f84c4b5fa3d4153dbe45b1e442",
+    "data": "2026-06-24",
+    "notas": "WavenVoIP 2.1.1 - Correcao Online/Offline + icone no autostart\n[FIX] Online/Offline agora e controlado localmente pelo WavenVoIP - nao depende mais de discar codigo no Issabel\n[FIX] Ao voltar Online, o app forca verificacao/renovacao do registro SIP antes de liberar o ramal\n[NEW] Estado Offline persiste apos fechar ou reiniciar o Windows\n[SAFE] Chamada recebida enquanto Offline e rejeitada de forma limpa, sem tocar localmente\n[FIX] Icone/logo da janela principal corrigido ao iniciar automaticamente com o Windows\n[SAFE] Nao altera configuracoes SIP, ramal, senha, historico ou audio de chamada"
 }
