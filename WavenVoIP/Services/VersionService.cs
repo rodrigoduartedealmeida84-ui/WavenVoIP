@@ -4,7 +4,7 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "2.2.1";
+        public const string Versao  = "2.2.2";
         public const string NomeApp = "WavenVoIP";
 
         public static readonly DateTime DataBuild = new DateTime(2026, 6, 29);
@@ -13,6 +13,11 @@ namespace WavenVoIP.Services
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v2.2.2 — Correcao visual do campo de discagem: numero nao cortado (29/06/2026)\n" +
+            "• [FIX] Campo de discagem: numero digitado nao e mais cortado na parte inferior\n" +
+            "• [FIX] Centralizacao vertical corrigida — TextBox auto-dimensiona a altura da linha e o layout centraliza no campo\n" +
+            "• [SAFE] Nenhuma alteracao em SIP, audio, codecs, fluxo de chamadas ou configuracoes do usuario\n" +
+            "\n" +
             "v2.2.1 — Ramais ao Vivo, discador, contatos globais, sincronizacao API, WhatsApp/Wavoip (29/06/2026)\n" +
             "• [UI] Popup de chamada recebida: botao Fechar vermelho no canto superior direito\n" +
             "• [UI] Popup de chamada perdida (MissedCallPopup) redesenhado com cabecalho colorido e botao Fechar vermelho\n" +

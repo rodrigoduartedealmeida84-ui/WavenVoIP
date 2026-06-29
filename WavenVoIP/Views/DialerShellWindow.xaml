@@ -500,7 +500,7 @@
                                                      FontSize="20"
                                                      FontWeight="SemiBold"
                                                      TextAlignment="Center"
-                                                     VerticalContentAlignment="Center"
+                                                     VerticalAlignment="Center"
                                                      Background="Transparent"
                                                      BorderThickness="0"
                                                      FocusVisualStyle="{x:Null}"
@@ -510,12 +510,14 @@
                                                      ToolTip="Digite o número ou use o teclado">
                                                 <TextBox.Template>
                                                     <ControlTemplate TargetType="TextBox">
-                                                        <ScrollViewer x:Name="PART_ContentHost"
-                                                                      Background="Transparent"
-                                                                      Focusable="False"
-                                                                      HorizontalScrollBarVisibility="Hidden"
-                                                                      VerticalScrollBarVisibility="Hidden"
-                                                                      VerticalAlignment="Center"/>
+                                                        <Border Background="{TemplateBinding Background}"
+                                                                BorderBrush="{TemplateBinding BorderBrush}"
+                                                                BorderThickness="{TemplateBinding BorderThickness}">
+                                                            <ScrollViewer x:Name="PART_ContentHost"
+                                                                          Focusable="False"
+                                                                          HorizontalScrollBarVisibility="Hidden"
+                                                                          VerticalScrollBarVisibility="Hidden"/>
+                                                        </Border>
                                                     </ControlTemplate>
                                                 </TextBox.Template>
                                             </TextBox>
