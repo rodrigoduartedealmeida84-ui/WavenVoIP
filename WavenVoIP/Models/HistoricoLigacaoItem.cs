@@ -72,7 +72,23 @@ namespace WavenVoIP.Models
                         !string.Equals(Nome, Numero, StringComparison.OrdinalIgnoreCase) &&
                         !string.Equals(Nome, numLimpo, StringComparison.OrdinalIgnoreCase) &&
                         !EhLabelSipTecnico(Nome))
-                        return Nome;
+                    {
+                        // Normalizar Nome puramente numérico para corrigir números concatenados
+                        // vindos do CDR (ex: "6699661750066996617500" → "66996617500").
+                        var soDigitos = new string(Nome.Where(char.IsDigit).ToArray());
+                        if (soDigitos.Length > 0 &&
+                            string.Equals(soDigitos, Nome.Trim(), StringComparison.Ordinal))
+                        {
+                            var nomeNorm = LimparPrefixoRota(soDigitos);
+                            if (!string.Equals(nomeNorm, numLimpo, StringComparison.OrdinalIgnoreCase))
+                                return nomeNorm;
+                            // Nome era o número concatenado — retornar numLimpo abaixo
+                        }
+                        else
+                        {
+                            return Nome;
+                        }
+                    }
 
                     return numLimpo;
                 }
@@ -82,17 +98,62 @@ namespace WavenVoIP.Models
 
         public string OrigemSaida { get; set; } = "";
 
-        public string NumeroLimpoVisual => LimparPrefixoRota(Numero);
+        public string NumeroLimpoVisual
+        {
+            get
+            {
+                var ramal = RamalDaConversaInterna();
+                if (!string.IsNullOrWhiteSpace(ramal)) return ramal;
+                return LimparPrefixoRota(Numero);
+            }
+        }
+
+        // Retorna o número limpo apenas quando NomeExibido é diferente (há nome real).
+        // Quando não há contato salvo, NomeExibido JÁ é o número — evita duplicidade.
+        [JsonIgnore]
+        public string NumeroSubtitulo
+        {
+            get
+            {
+                var nome = NomeExibido;
+                var num  = NumeroLimpoVisual;
+                if (string.IsNullOrWhiteSpace(num)) return string.Empty;
+                if (string.Equals(nome, num, StringComparison.OrdinalIgnoreCase)) return string.Empty;
+                return num;
+            }
+        }
+
+        [JsonIgnore]
+        public Visibility VisibilidadeNumero =>
+            string.IsNullOrWhiteSpace(NumeroSubtitulo) ? Visibility.Collapsed : Visibility.Visible;
 
         public string OrigemSaidaVisual
         {
             get
             {
+                // When both ramal fields confirm an internal call, override any stored channel.
+                if (EhChamadaRamalInterno()) return "Ramal interno";
                 var canal = CanalIdentificacaoService.NormalizarCanal(OrigemSaida, Tipo, Numero);
                 if (canal == "Saída não identificada" && Tipo == TipoHistoricoLigacao.Realizada)
                     return DetectarSaidaPeloPrefixo(Numero);
                 return canal;
             }
+        }
+
+        private bool EhChamadaRamalInterno() =>
+            !string.IsNullOrWhiteSpace(RamalOrigem) &&
+            !string.IsNullOrWhiteSpace(RamalDestino) &&
+            WavenVoIP.DialPlanService.EhRamalInterno(RamalOrigem) &&
+            WavenVoIP.DialPlanService.EhRamalInterno(RamalDestino) &&
+            !string.Equals(RamalOrigem, RamalDestino, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(OrigemSaida, "Queue", StringComparison.OrdinalIgnoreCase) &&
+            OrigemSaida.IndexOf("WhatsApp", StringComparison.OrdinalIgnoreCase) < 0;
+
+        // Returns the "other party" ramal for internal ramal-to-ramal conversations.
+        private string RamalDaConversaInterna()
+        {
+            if (!EhChamadaRamalInterno()) return string.Empty;
+            return Tipo == TipoHistoricoLigacao.Realizada ? RamalDestino : RamalOrigem;
         }
 
         [JsonIgnore]
@@ -156,6 +217,11 @@ namespace WavenVoIP.Models
                 // Recebida / Perdida / NaoAtendidaNesseRamal: show who answered (or dest ramal)
                 if (!string.IsNullOrWhiteSpace(RamalAtendeu))
                     return NomeOuRamal(RamalAtendeu);
+                // Queue-abandoned call: RamalDestino is only the last ring attempt target,
+                // not proof the agent missed or rejected the call — hide to avoid false attribution.
+                if (Tipo == TipoHistoricoLigacao.Perdida &&
+                    string.Equals(OrigemSaida, "Queue", StringComparison.OrdinalIgnoreCase))
+                    return string.Empty;
                 if (!string.IsNullOrWhiteSpace(RamalDestino) && EhRamalString(RamalDestino))
                     return NomeOuRamal(RamalDestino);
                 return string.Empty;
@@ -209,12 +275,13 @@ namespace WavenVoIP.Models
         {
             var n = WavenVoIP.DialPlanService.RemoverDuplicacaoSequencial(numero ?? string.Empty);
             if (string.IsNullOrWhiteSpace(n)) return "Saída não identificada";
+            if (WavenVoIP.DialPlanService.EhRamalInterno(n)) return "Ramal interno";
             return n[0] switch
             {
                 '1' => "Operadora",
                 '2' => "WhatsApp TIM",
                 '3' => "WhatsApp Vivo",
-                _ => "Ramal interno / sem rota"
+                _ => "Saída não identificada"
             };
         }
     }

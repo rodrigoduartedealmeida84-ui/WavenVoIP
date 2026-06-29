@@ -1064,6 +1064,48 @@ namespace WavenVoIP.Views
             }
         }
 
+        private async void BtnTestarRamaisAoVivo_Click(object sender, RoutedEventArgs e)
+        {
+            var url   = txtWavenApiUrl.Text?.Trim() ?? string.Empty;
+            var token = pwdWavenApiToken.Password?.Trim() ?? string.Empty;
+
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                txtRamaisAoVivoStatus.Text      = "Informe a URL da API.";
+                txtRamaisAoVivoStatus.Foreground = System.Windows.Media.Brushes.OrangeRed;
+                return;
+            }
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                txtRamaisAoVivoStatus.Text      = "Informe o token de acesso.";
+                txtRamaisAoVivoStatus.Foreground = System.Windows.Media.Brushes.OrangeRed;
+                return;
+            }
+
+            // Salva temporariamente para WavenApiService ler
+            _sipConfig.WavenApiUrl   = url;
+            _sipConfig.WavenApiToken = token;
+            _sipConfig.Salvar();
+
+            btnTestarRamaisAoVivo.IsEnabled = false;
+            txtRamaisAoVivoStatus.Text      = "Testando endpoint de Ramais ao Vivo...";
+            txtRamaisAoVivoStatus.Foreground = FindResource("MutedBrush") as System.Windows.Media.Brush
+                                               ?? System.Windows.Media.Brushes.Gray;
+            try
+            {
+                var (ok, msg) = await WavenVoIP.Services.WavenApiService.TestarRamaisAoVivoAsync().ConfigureAwait(true);
+                txtRamaisAoVivoStatus.Text      = (ok ? "✔ " : "✘ ") + msg;
+                txtRamaisAoVivoStatus.Foreground = ok
+                    ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(22, 163, 74))
+                    : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(220, 38, 38));
+                LogHelper.Info($"RAMAIS_AO_VIVO_TEST ok={ok} msg={msg}");
+            }
+            finally
+            {
+                btnTestarRamaisAoVivo.IsEnabled = true;
+            }
+        }
+
         private async void BtnSincronizarAgora_Click(object sender, RoutedEventArgs e)
         {
             var cfg = SipConfig.CarregarSalva();

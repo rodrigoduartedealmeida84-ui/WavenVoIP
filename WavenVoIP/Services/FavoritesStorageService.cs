@@ -45,18 +45,24 @@ namespace WavenVoIP.Services
             InvalidarCache();
             try
             {
+                Log($"FAVORITE_SAVE_START | count={favoritos.Count}");
                 Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
                 var json = JsonSerializer.Serialize(favoritos, new JsonSerializerOptions { WriteIndented = true });
                 File.WriteAllText(_path, json);
+                Log($"FAVORITE_SAVE_OK | count={favoritos.Count}");
             }
-            catch { }
+            catch (Exception ex) { Log($"FAVORITE_SAVE_ERROR | {ex.Message}"); }
         }
 
         public static bool Adicionar(FavoriteItem item)
         {
             var lista = Carregar();
             var numero = SomenteDigitos(item.Numero);
-            if (lista.Any(f => SomenteDigitos(f.Numero) == numero)) return false;
+            if (lista.Any(f => SomenteDigitos(f.Numero) == numero))
+            {
+                Log($"FAVORITE_DUPLICATE_SKIP | nome={item.Nome} numero={item.Numero}");
+                return false;
+            }
             item.Ordem = lista.Count > 0 ? lista.Max(f => f.Ordem) + 1 : 0;
             lista.Add(item);
             Salvar(lista);

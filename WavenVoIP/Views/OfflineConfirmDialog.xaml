@@ -1,0 +1,122 @@
+<Window x:Class="WavenVoIP.Views.OfflineConfirmDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Ficar Offline?" SizeToContent="Height" Width="460"
+        WindowStartupLocation="CenterOwner"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        ResizeMode="NoResize">
+
+    <Window.Resources>
+        <Style x:Key="BtnAcao" TargetType="Button">
+            <Setter Property="Height"          Value="44"/>
+            <Setter Property="MinWidth"        Value="140"/>
+            <Setter Property="Padding"         Value="22,0"/>
+            <Setter Property="FontSize"        Value="13"/>
+            <Setter Property="FontWeight"      Value="SemiBold"/>
+            <Setter Property="Foreground"      Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor"          Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bd" Background="{TemplateBinding Background}"
+                                CornerRadius="11">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              Margin="{TemplateBinding Padding}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Opacity" Value="0.88"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="bd" Property="Opacity" Value="0.70"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="BtnCancelar" TargetType="Button" BasedOn="{StaticResource BtnAcao}">
+            <Setter Property="Background" Value="#F1F5F9"/>
+            <Setter Property="Foreground" Value="#475569"/>
+        </Style>
+    </Window.Resources>
+
+    <Border Background="White" CornerRadius="18" Padding="34,30">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="32" ShadowDepth="4" Opacity="0.18" Color="#000000"/>
+        </Border.Effect>
+        <StackPanel>
+
+            <!-- Ícone + Título -->
+            <Grid Margin="0,0,0,16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <Border Grid.Column="0" Width="54" Height="54" CornerRadius="27"
+                        Background="#FFF7ED" Margin="0,0,18,0" VerticalAlignment="Center">
+                    <TextBlock Text="&#x26A0;" FontSize="26"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                               Foreground="#EA580C"/>
+                </Border>
+
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="Ficar Offline?" FontSize="19" FontWeight="Bold"
+                               Foreground="#0F172A"/>
+                    <TextBlock Text="Esta ação requer confirmação" FontSize="12"
+                               Foreground="#94A3B8" Margin="0,4,0,0"/>
+                </StackPanel>
+            </Grid>
+
+            <!-- Separador -->
+            <Border Height="1" Background="#F1F5F9" Margin="0,0,0,18"/>
+
+            <!-- Mensagem principal — TextBlock.Text como atributo: 100% imune
+                 a whitespace normalization do XAML parser; espaços sempre preservados. -->
+            <StackPanel>
+                <TextBlock Text="Você está prestes a ficar Offline."
+                           TextWrapping="Wrap" FontSize="13.5" Foreground="#475569"/>
+                <TextBlock Text="Enquanto estiver Offline, você deixará de receber ligações pelo WavenVoIP."
+                           TextWrapping="Wrap" FontSize="13.5" Foreground="#475569" Margin="0,13,0,0"/>
+                <TextBlock Text="Deseja continuar?"
+                           TextWrapping="Wrap" FontSize="13.5" Foreground="#475569" Margin="0,13,0,0"/>
+            </StackPanel>
+
+            <!-- Banner: chamada ativa (oculto por padrão) -->
+            <Border x:Name="bannerChamada"
+                    Background="#FFF7ED" CornerRadius="10"
+                    BorderBrush="#FED7AA" BorderThickness="1"
+                    Padding="14,10" Margin="0,16,0,0"
+                    Visibility="Collapsed">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="&#x26A0;" FontSize="15"
+                               VerticalAlignment="Center" Margin="0,0,10,0"
+                               Foreground="#EA580C"/>
+                    <TextBlock Grid.Column="1"
+                               Text="Há uma chamada em andamento. Ela não será encerrada ao ficar Offline."
+                               TextWrapping="Wrap" FontSize="12.5" Foreground="#C2410C"
+                               FontWeight="SemiBold"/>
+                </Grid>
+            </Border>
+
+            <!-- Botões -->
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,26,0,0">
+                <Button x:Name="btnCancelar" Content="Cancelar"
+                        Style="{StaticResource BtnCancelar}"
+                        Click="BtnCancelar_Click" Margin="0,0,10,0"/>
+                <Button x:Name="btnFicarOffline" Content="Ficar Offline"
+                        Background="#EA580C"
+                        Style="{StaticResource BtnAcao}"
+                        Click="BtnFicarOffline_Click"/>
+            </StackPanel>
+
+        </StackPanel>
+    </Border>
+</Window>

@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Chamada perdida"
-        Height="110" Width="370"
+        Height="100" Width="360"
         WindowStartupLocation="Manual"
         ResizeMode="NoResize" Topmost="True"
         ShowInTaskbar="False" WindowStyle="None"
@@ -14,11 +14,11 @@
                 <Storyboard>
                     <DoubleAnimation Storyboard.TargetName="toastRoot"
                                      Storyboard.TargetProperty="Opacity"
-                                     From="0" To="1" Duration="0:0:0.25"/>
+                                     From="0" To="1" Duration="0:0:0.2"/>
                     <ThicknessAnimation Storyboard.TargetName="toastRoot"
                                         Storyboard.TargetProperty="Margin"
-                                        From="0,20,0,-20" To="0,0,0,0"
-                                        Duration="0:0:0.25">
+                                        From="8,22,8,6" To="8,6,8,6"
+                                        Duration="0:0:0.2">
                         <ThicknessAnimation.EasingFunction>
                             <CubicEase EasingMode="EaseOut"/>
                         </ThicknessAnimation.EasingFunction>
@@ -28,42 +28,54 @@
         </EventTrigger>
     </Window.Triggers>
 
-    <Border x:Name="toastRoot" Margin="10,6,10,10"
-            Background="White" CornerRadius="18"
-            BorderBrush="#DDD6FE" BorderThickness="1">
+    <Border x:Name="toastRoot" Margin="8,6,8,6"
+            Background="White" CornerRadius="14"
+            BorderBrush="#FECACA" BorderThickness="1.5">
         <Border.Effect>
-            <DropShadowEffect BlurRadius="28" ShadowDepth="6" Opacity="0.18" Color="#000000"/>
+            <DropShadowEffect BlurRadius="20" ShadowDepth="4" Opacity="0.18" Color="#000000"/>
         </Border.Effect>
-        <Grid Margin="14,10">
+
+        <Grid Margin="12,10">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="46"/>
+                <ColumnDefinition Width="40"/>
                 <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="30"/>
+                <ColumnDefinition Width="32"/>
             </Grid.ColumnDefinitions>
 
-            <!-- Missed call icon -->
-            <Border Width="38" Height="38" CornerRadius="19" Background="#FEE2E2" VerticalAlignment="Center">
-                <TextBlock Text="↘" Foreground="#DC2626" FontSize="20" FontWeight="Bold"
+            <!-- Ícone chamada perdida -->
+            <Border Width="34" Height="34" CornerRadius="17" Background="#FEE2E2" VerticalAlignment="Center">
+                <TextBlock Text="↘" Foreground="#DC2626" FontSize="16" FontWeight="Bold"
                            HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
 
-            <!-- Text -->
-            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="2,0,4,0">
-                <TextBlock Text="Chamada perdida" FontSize="13" FontWeight="Bold"
-                           Foreground="{StaticResource TextBrush}"/>
-                <TextBlock x:Name="txtCaller" Margin="0,2,0,0" FontSize="12"
-                           Foreground="{StaticResource MutedBrush}"
-                           TextWrapping="Wrap" TextTrimming="CharacterEllipsis"/>
+            <!-- Texto -->
+            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="6,0,4,0">
+                <TextBlock Text="Chamada perdida" FontSize="12" FontWeight="Bold"
+                           Foreground="#DC2626"/>
+                <TextBlock x:Name="txtCaller" Margin="0,2,0,0" FontSize="13" FontWeight="SemiBold"
+                           Foreground="#1E293B"
+                           TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
             </StackPanel>
 
-            <!-- Close -->
-            <Button Grid.Column="2" Content="×" Width="26" Height="26"
-                    Background="Transparent" BorderThickness="0"
-                    Foreground="{StaticResource MutedBrush}"
-                    FontSize="18" FontWeight="Bold"
-                    VerticalAlignment="Top" HorizontalAlignment="Right"
-                    Cursor="Hand" Click="Close_Click"
-                    ToolTip="Fechar"/>
+            <!-- Botão Fechar -->
+            <Button Grid.Column="2" Click="Close_Click" Cursor="Hand"
+                    Width="26" Height="26" VerticalAlignment="Top" HorizontalAlignment="Right"
+                    ToolTip="Fechar">
+                <Button.Template>
+                    <ControlTemplate TargetType="Button">
+                        <Grid>
+                            <Ellipse x:Name="circle" Fill="#EF4444"/>
+                            <TextBlock Text="✕" Foreground="White" FontSize="10" FontWeight="Bold"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="circle" Property="Fill" Value="#DC2626"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Button.Template>
+            </Button>
         </Grid>
     </Border>
 </Window>

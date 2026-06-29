@@ -307,9 +307,47 @@ namespace WavenVoIP.Views
             }
 
             ContatoStorageService.Salvar(contatos);
+            LogHelper.Info($"CONTACT_SAVE_OK | nome={nome} numero={numeroNorm}");
+
+            // Sincroniza novo contato com Waven API para que todos os ramais o vejam
+            var cfgNovo = SipConfig.CarregarSalva();
+            if (cfgNovo?.UsarWavenApi == true && !string.IsNullOrWhiteSpace(cfgNovo.WavenApiToken))
+            {
+                LogHelper.Info($"CONTACT_SAVE_API_START | nome={nome} numero={numeroNorm}");
+                var (apiOk, apiContact, _) = await WavenApiService.CriarContatoAsync(
+                    nome, numeroNorm, empresa: null, observacao: obs, ramal: cfgNovo.Ramal)
+                    .ConfigureAwait(true);
+
+                if (apiOk && apiContact != null)
+                {
+                    // Vincula WavenApiId para que edições futuras sejam propagadas
+                    var todosAtual = ContatoStorageService.Carregar();
+                    var localCopy = todosAtual.FirstOrDefault(c =>
+                        !c.EhRamalIssabel && !c.FonteGoogle &&
+                        new string(c.Numero.Where(char.IsDigit).ToArray()) == numeroNorm);
+                    if (localCopy != null && string.IsNullOrWhiteSpace(localCopy.WavenApiId))
+                    {
+                        localCopy.WavenApiId = apiContact.Id;
+                        ContatoStorageService.Salvar(todosAtual);
+                    }
+                    LogHelper.Info($"CONTACT_SAVE_API_OK | id={apiContact.Id} nome={nome}");
+                }
+                else if (!apiOk)
+                {
+                    WavenApiSyncService.EnfileirarOffline(new Models.WavenApiOfflineOp
+                    {
+                        Op      = "CREATE",
+                        Payload = System.Text.Json.JsonSerializer.Serialize(
+                            new { nome, numero = numeroNorm, observacao = obs, criadoPor = cfgNovo.Ramal }),
+                        Ramal   = cfgNovo.Ramal
+                    });
+                    LogHelper.Info($"CONTACT_SAVE_API_FAIL | nome={nome} motivo=offline_queued");
+                }
+            }
 
             if (chkFavoritos?.IsChecked == true)
             {
+                LogHelper.Info($"FAVORITE_SAVE_START | nome={nome} numero={numeroNorm}");
                 var adicionado = FavoritesStorageService.Adicionar(new Models.FavoriteItem
                 {
                     Nome     = nome,
@@ -317,6 +355,7 @@ namespace WavenVoIP.Views
                     Favorito = true
                 });
                 AdicionadoAosFavoritos = adicionado;
+                if (adicionado) LogHelper.Info($"FAVORITE_SAVE_OK | nome={nome} numero={numeroNorm}");
             }
 
             DialogResult = true;

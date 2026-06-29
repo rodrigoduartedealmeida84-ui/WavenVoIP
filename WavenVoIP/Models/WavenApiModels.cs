@@ -45,8 +45,9 @@ namespace WavenVoIP.Models
 
     public class WavenApiSyncState
     {
-        [JsonPropertyName("lastSyncUtc")]         public DateTime? LastSyncUtc         { get; set; }
-        [JsonPropertyName("migracaoConcluida")]   public bool      MigracaoConcluida   { get; set; }
+        [JsonPropertyName("lastSyncUtc")]         public DateTime? LastSyncUtc           { get; set; }
+        [JsonPropertyName("migracaoConcluida")]   public bool      MigracaoConcluida     { get; set; }
+        [JsonPropertyName("seedGlobaisConcluido")] public bool     SeedGlobaisConcluido  { get; set; }
     }
 
     // ── Fase 2: CDR via API ───────────────────────────────────────────────────
@@ -81,6 +82,57 @@ namespace WavenVoIP.Models
     {
         [JsonPropertyName("ramal")] public string Ramal { get; set; } = string.Empty;
         [JsonPropertyName("nome")]  public string Nome  { get; set; } = string.Empty;
+    }
+
+    public class ApiAmiPeer
+    {
+        [JsonPropertyName("ramal")]        public string Ramal        { get; set; } = string.Empty;
+        [JsonPropertyName("nome")]         public string Nome         { get; set; } = string.Empty;
+        [JsonPropertyName("status")]       public string Status       { get; set; } = "offline";
+        [JsonPropertyName("registrado")]   public bool   Registrado   { get; set; }
+        [JsonPropertyName("rawStatus")]    public string RawStatus    { get; set; } = string.Empty;
+        [JsonPropertyName("tecnologia")]   public string Tecnologia   { get; set; } = string.Empty;
+        [JsonPropertyName("numeroRemoto")] public string NumeroRemoto { get; set; } = string.Empty;
+        [JsonPropertyName("nomeRemoto")]   public string NomeRemoto   { get; set; } = string.Empty;
+        [JsonPropertyName("direcao")]      public string Direcao      { get; set; } = string.Empty;
+        [JsonPropertyName("canal")]        public string Canal        { get; set; } = string.Empty;
+        [JsonPropertyName("linhaUsada")]   public string LinhaUsada   { get; set; } = string.Empty;
+        [JsonPropertyName("nomeCanal")]    public string NomeCanal    { get; set; } = string.Empty;
+        [JsonPropertyName("tipoChamada")]  public string TipoChamada  { get; set; } = string.Empty;
+    }
+
+    // ── Fase 4: Filas em Tempo Real ───────────────────────────────────────────
+
+    public class ApiAmiQueue
+    {
+        [JsonPropertyName("fila")]                 public string                  Fila                 { get; set; } = string.Empty;
+        [JsonPropertyName("nome")]                 public string                  Nome                 { get; set; } = string.Empty;
+        [JsonPropertyName("aguardando")]           public int                     Aguardando           { get; set; }
+        [JsonPropertyName("atendidas")]            public int                     Atendidas            { get; set; }
+        [JsonPropertyName("abandonadas")]          public int                     Abandonadas          { get; set; }
+        [JsonPropertyName("tempoMedioEspera")]     public int                     TempoMedioEspera     { get; set; }
+        [JsonPropertyName("agentesOnline")]        public int                     AgentesOnline        { get; set; }
+        [JsonPropertyName("agentesOffline")]       public int                     AgentesOffline       { get; set; }
+        [JsonPropertyName("agentesEmAtendimento")] public int                     AgentesEmAtendimento { get; set; }
+        [JsonPropertyName("agentesPausados")]      public int                     AgentesPausados      { get; set; }
+        [JsonPropertyName("agentesTotal")]         public int                     AgentesTotal         { get; set; }
+        [JsonPropertyName("agentes")]              public List<ApiAmiQueueMember> Agentes              { get; set; } = new();
+        [JsonPropertyName("clientes")]             public List<ApiAmiQueueEntry>  Clientes             { get; set; } = new();
+    }
+
+    public class ApiAmiQueueMember
+    {
+        [JsonPropertyName("nome")]    public string Nome    { get; set; } = string.Empty;
+        [JsonPropertyName("ramal")]   public string Ramal   { get; set; } = string.Empty;
+        [JsonPropertyName("status")]  public string Status  { get; set; } = string.Empty;
+        [JsonPropertyName("pausado")] public bool   Pausado { get; set; }
+    }
+
+    public class ApiAmiQueueEntry
+    {
+        [JsonPropertyName("posicao")] public int    Posicao { get; set; }
+        [JsonPropertyName("numero")]  public string Numero  { get; set; } = string.Empty;
+        [JsonPropertyName("espera")]  public int    Espera  { get; set; }
     }
 
     // ── Operação na fila offline ──────────────────────────────────────────────

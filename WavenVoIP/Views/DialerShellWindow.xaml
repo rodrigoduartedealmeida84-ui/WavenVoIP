@@ -480,31 +480,58 @@
                                             Margin="0,0,0,40">
 
                                     <!-- Number input -->
-                                    <Grid Width="560" Height="46" Margin="0,0,0,8">
-                                        <Border Background="White" BorderBrush="#DDD6FE" BorderThickness="1.5" CornerRadius="16"/>
-                                        <TextBox x:Name="txtNumero"
-                                                 FontSize="20"
-                                                 FontWeight="SemiBold"
-                                                 TextAlignment="Center"
-                                                 VerticalContentAlignment="Center"
-                                                 Background="Transparent"
-                                                 BorderThickness="0"
-                                                 Padding="48,0,96,0"
-                                                 TextWrapping="NoWrap"
-                                                 HorizontalScrollBarVisibility="Auto"
-                                                 ToolTip="Digite o número ou use o teclado"/>
-                                        <TextBlock x:Name="txtNumeroPH" Text="Digite ou disque um número"
-                                                   FontSize="15" FontWeight="Normal" Foreground="#94A3B8"
-                                                   HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                   IsHitTestVisible="False"/>
-                                        <Button Content="⌫"
-                                                HorizontalAlignment="Right"
-                                                VerticalAlignment="Center"
-                                                Margin="0,0,6,0"
-                                                Style="{StaticResource InputEraseButton}"
-                                                ToolTip="Apagar último dígito"
-                                                Click="BtnApagar_Click"/>
-                                    </Grid>
+                                    <Border Background="White"
+                                            CornerRadius="16"
+                                            Width="560" Height="46" Margin="0,0,0,8">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Setter Property="BorderBrush"     Value="#DDD6FE"/>
+                                                <Setter Property="BorderThickness" Value="1.5"/>
+                                                <Style.Triggers>
+                                                    <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                                        <Setter Property="BorderBrush"     Value="#7C3AED"/>
+                                                        <Setter Property="BorderThickness" Value="2"/>
+                                                    </Trigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                        <Grid>
+                                            <TextBox x:Name="txtNumero"
+                                                     FontSize="20"
+                                                     FontWeight="SemiBold"
+                                                     TextAlignment="Center"
+                                                     VerticalContentAlignment="Center"
+                                                     Background="Transparent"
+                                                     BorderThickness="0"
+                                                     FocusVisualStyle="{x:Null}"
+                                                     Padding="48,0,96,0"
+                                                     TextWrapping="NoWrap"
+                                                     HorizontalScrollBarVisibility="Auto"
+                                                     ToolTip="Digite o número ou use o teclado">
+                                                <TextBox.Template>
+                                                    <ControlTemplate TargetType="TextBox">
+                                                        <ScrollViewer x:Name="PART_ContentHost"
+                                                                      Background="Transparent"
+                                                                      Focusable="False"
+                                                                      HorizontalScrollBarVisibility="Hidden"
+                                                                      VerticalScrollBarVisibility="Hidden"
+                                                                      VerticalAlignment="Center"/>
+                                                    </ControlTemplate>
+                                                </TextBox.Template>
+                                            </TextBox>
+                                            <TextBlock x:Name="txtNumeroPH" Text="Digite ou disque um número"
+                                                       FontSize="15" FontWeight="Normal" Foreground="#94A3B8"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                       IsHitTestVisible="False"/>
+                                            <Button Content="⌫"
+                                                    HorizontalAlignment="Right"
+                                                    VerticalAlignment="Center"
+                                                    Margin="0,0,6,0"
+                                                    Style="{StaticResource InputEraseButton}"
+                                                    ToolTip="Apagar último dígito"
+                                                    Click="BtnApagar_Click"/>
+                                        </Grid>
+                                    </Border>
 
                                     <!-- Numeric keypad -->
                                     <UniformGrid Rows="4" Columns="3" HorizontalAlignment="Center" Width="278">
@@ -856,7 +883,7 @@
                                                     <!-- Col 1: Contato / Número -->
                                                     <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="4,0,8,0">
                                                         <TextBlock Text="{Binding NomeExibido}" FontWeight="Bold" FontSize="13" TextTrimming="CharacterEllipsis" ToolTip="{Binding NomeExibido}"/>
-                                                        <TextBlock Text="{Binding NumeroLimpoVisual}" Foreground="{StaticResource MutedBrush}" FontSize="11" TextTrimming="CharacterEllipsis" ToolTip="{Binding NumeroLimpoVisual}"/>
+                                                        <TextBlock Text="{Binding NumeroSubtitulo}" Foreground="{StaticResource MutedBrush}" FontSize="11" TextTrimming="CharacterEllipsis" ToolTip="{Binding NumeroSubtitulo}" Visibility="{Binding VisibilidadeNumero}"/>
                                                     </StackPanel>
                                                     <!-- Col 2: Ramal / Origem (wider to show "Sabrina Pereira (102)") -->
                                                     <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="0,0,6,0">
@@ -1306,6 +1333,7 @@
                     <TabItem>
                         <local:DashboardControl x:Name="dashboardControl" Margin="0,4,0,0"/>
                     </TabItem>
+
                 </TabControl>
             </Grid>
         <Border x:Name="routeSelectorOverlay" Visibility="Collapsed" Background="#88000000" CornerRadius="18">

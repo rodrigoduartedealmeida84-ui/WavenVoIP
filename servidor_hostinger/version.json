@@ -1,7 +1,7 @@
 {
-    "versao": "2.2.0",
-    "zip": "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.2.0/WavenVoIP.zip",
-    "sha256": "471f1c7e74ddb902c0058ad86827a7aede69b86b92e88075f4bcf662a6648d60",
-    "data": "2026-06-24",
-    "notas": "WavenVoIP 2.2.0 - Melhoria de desempenho e fluidez geral\n[PERF] Logs agora sao gravados de forma assincrona para reduzir travamentos\n[FIX] Corrigido vazamento de timer na janela de chamada\n[PERF] Reduzido I/O sincrono na inicializacao\n[PERF] Melhorada virtualizacao de listas de contatos e historico\n[PERF] Reducao de uso de memoria, threads e handles\n[SAFE] Nenhuma alteracao na logica SIP/audio"
+    "versao": "2.2.1",
+    "zip": "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.2.1/WavenVoIP.zip",
+    "sha256": "c8b3e4ce16aa11f4136f42666164402273c83810369bf0972e022246fa3574da",
+    "data": "2026-06-29",
+    "notas": "WavenVoIP 2.2.1 - Ramais ao Vivo, discador, contatos globais, sincronizacao API, WhatsApp/Wavoip\n[UI] Popup de chamada recebida: botao Fechar vermelho\n[UI] Popup/toast de chamada perdida redesenhados\n[UI] Campo de discagem: contorno interno removido\n[UI] Ramais ao Vivo: filtros em dropdown (sem sobreposicao)\n[FIX] Performance por ramal atribuida ao agente (nao a fila)\n[FIX] WhatsApp/Wavoip: cancel antes do ring enviava BYE corretamente\n[FIX] Contatos: novos contatos agora sobem para a API (visivel para todos)\n[NEW] Favorito global 'Suporte Dlink Sistemas' propagado automaticamente\n[SAFE] Nenhuma alteracao em SIP, audio, codecs, configuracoes do usuario"
 }

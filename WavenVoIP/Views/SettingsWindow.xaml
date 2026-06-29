@@ -650,15 +650,19 @@
                                 </Border>
                                 <StackPanel VerticalAlignment="Center">
                                     <TextBlock Text="Waven API" FontSize="15" FontWeight="SemiBold"/>
-                                    <TextBlock Text="Contatos compartilhados entre todos os usuários da empresa" FontSize="12" Foreground="{StaticResource MutedBrush}"/>
+                                    <TextBlock Text="Contatos compartilhados + Ramais ao Vivo em tempo real" FontSize="12" Foreground="{StaticResource MutedBrush}"/>
                                 </StackPanel>
                             </StackPanel>
                         </Border>
                         <StackPanel Margin="22,16,22,20">
 
                             <!-- Ativar API -->
-                            <CheckBox x:Name="chkUsarWavenApi" Content="Usar API Waven para contatos compartilhados"
-                                      FontSize="14" Margin="0,0,0,16"/>
+                            <CheckBox x:Name="chkUsarWavenApi"
+                                      Content="Usar Waven API (contatos compartilhados + Ramais ao Vivo)"
+                                      FontSize="14" Margin="0,0,0,6"/>
+                            <TextBlock FontSize="12" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="24,0,0,16">
+                                Quando ativado: contatos são compartilhados entre usuários da empresa e o painel <Bold>Ramais ao Vivo</Bold> exibe status em tempo real (online/offline/em ligação) via API — sem precisar de IP liberado no Issabel.
+                            </TextBlock>
 
                             <!-- URL -->
                             <TextBlock Text="URL da API" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"/>
@@ -668,7 +672,7 @@
                             <TextBlock Text="Token de acesso" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"/>
                             <PasswordBox x:Name="pwdWavenApiToken" Margin="0,4,0,16"/>
 
-                            <!-- Botões -->
+                            <!-- Botões: API geral -->
                             <WrapPanel Margin="0,0,0,4">
                                 <Button x:Name="btnTestarWavenApi" Content="Testar API" Height="38" Padding="16,0"
                                         Style="{StaticResource SecondaryButtonStyle}"
@@ -678,7 +682,24 @@
                                         Click="BtnSincronizarAgora_Click"/>
                             </WrapPanel>
                             <TextBlock x:Name="txtWavenApiStatus" Text="" FontSize="12"
-                                       Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                                       Foreground="{StaticResource MutedBrush}" Margin="0,6,0,14" TextWrapping="Wrap"/>
+
+                            <!-- Separador + Ramais ao Vivo -->
+                            <Separator Margin="0,0,0,14"/>
+                            <TextBlock Text="Ramais ao Vivo" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,6"/>
+                            <TextBlock FontSize="12" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,10">
+                                Testa se o endpoint de status em tempo real está disponível na Waven API instalada no servidor.
+                            </TextBlock>
+                            <WrapPanel Margin="0,0,0,6">
+                                <Button x:Name="btnTestarRamaisAoVivo"
+                                        Content="▶ Testar Ramais ao Vivo" Height="38" Padding="16,0"
+                                        Style="{StaticResource SecondaryButtonStyle}"
+                                        Click="BtnTestarRamaisAoVivo_Click"/>
+                            </WrapPanel>
+                            <TextBlock x:Name="txtRamaisAoVivoStatus"
+                                       Text="Clique para verificar o endpoint de status de ramais."
+                                       FontSize="12" Foreground="{StaticResource MutedBrush}"
+                                       Margin="0,4,0,0" TextWrapping="Wrap"/>
 
                         </StackPanel>
                     </StackPanel>

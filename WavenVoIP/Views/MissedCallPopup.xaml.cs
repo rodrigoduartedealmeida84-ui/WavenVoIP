@@ -19,8 +19,11 @@ namespace WavenVoIP.Views
             var nomeDisplay = string.IsNullOrWhiteSpace(callerName) ||
                               string.Equals(callerName, callerNumber, StringComparison.OrdinalIgnoreCase)
                               ? numDisplay : callerName;
-            txtCallerName.Text   = nomeDisplay;
-            txtCallerNumber.Text = numDisplay;
+            txtCallerName.Text = nomeDisplay;
+            // Não mostrar número se já está no nome (evita duplicidade quando não há contato salvo)
+            var mesmoTexto = string.Equals(nomeDisplay, numDisplay, StringComparison.OrdinalIgnoreCase);
+            txtCallerNumber.Text       = mesmoTexto ? string.Empty : numDisplay;
+            txtCallerNumber.Visibility = mesmoTexto ? System.Windows.Visibility.Collapsed : System.Windows.Visibility.Visible;
             PosicionarBottomRight();
         }
 

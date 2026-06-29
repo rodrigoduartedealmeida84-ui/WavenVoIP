@@ -23,13 +23,20 @@ namespace WavenVoIP.Services
             try
             {
                 if (!File.Exists(_path))
+                {
+                    Log("CONTACTS_LOAD_OK | count=0 source=new");
                     return new List<Contato>();
+                }
 
+                Log("CONTACTS_LOAD_START");
                 var json = File.ReadAllText(_path);
-                return JsonSerializer.Deserialize<List<Contato>>(json) ?? new List<Contato>();
+                var result = JsonSerializer.Deserialize<List<Contato>>(json) ?? new List<Contato>();
+                Log($"CONTACTS_LOAD_OK | count={result.Count}");
+                return result;
             }
-            catch
+            catch (Exception ex)
             {
+                Log($"CONTACTS_LOAD_ERROR | {ex.Message}");
                 return new List<Contato>();
             }
         }
@@ -40,6 +47,7 @@ namespace WavenVoIP.Services
             var json = JsonSerializer.Serialize(contatos, new JsonSerializerOptions { WriteIndented = true });
             File.WriteAllText(_path, json);
             lock (_cacheLock) { _cache = null; }
+            Log($"CONTACT_SAVE_OK | count={contatos.Count}");
         }
 
         public static string ResolverNomePorNumero(string numero)

@@ -15,20 +15,81 @@ namespace WavenVoIP.Views
         private DateTime _dataInicio = DateTime.Today;
         private DateTime _dataFim    = DateTime.Today.AddDays(1).AddSeconds(-1);
         private readonly DispatcherTimer _autoRefresh = new() { Interval = TimeSpan.FromMinutes(2) };
+        private readonly DispatcherTimer _liveTimer   = new() { Interval = TimeSpan.FromSeconds(2) };
         private List<RamalMetrica> _todasMetricas = new();
+
+        // Handler nomeado para permitir desinscriçao no Unloaded
+        private void OnEstadoChangedLive() => Dispatcher.BeginInvoke(AtualizarCardsLive);
 
         public DashboardControl()
         {
             InitializeComponent();
             _autoRefresh.Tick += (_, _) => AtualizarDados();
-            _autoRefresh.Start();
+            _liveTimer.Tick   += (_, _) => AtualizarCardsLive();
             Loaded += (_, _) =>
             {
                 if (dpInicio != null) dpInicio.SelectedDate = DateTime.Today;
                 if (dpFim    != null) dpFim.SelectedDate    = DateTime.Today;
                 MarcarFiltro(btnFiltroHoje);
+                MarcarTab(btnTabMetricas);
                 AtualizarDados();
+                AtualizarCardsLive();
+
+                if (AmiMonitorService.Current != null)
+                {
+                    AmiMonitorService.Current.EstadoChanged -= OnEstadoChangedLive;
+                    AmiMonitorService.Current.EstadoChanged += OnEstadoChangedLive;
+                }
+
+                _autoRefresh.Start();
+                _liveTimer.Start();
             };
+            Unloaded += (_, _) =>
+            {
+                _autoRefresh.Stop();
+                _liveTimer.Stop();
+                if (AmiMonitorService.Current != null)
+                    AmiMonitorService.Current.EstadoChanged -= OnEstadoChangedLive;
+            };
+        }
+
+        private void BtnTabMetricas_Click(object sender, RoutedEventArgs e)
+        {
+            scrollMetricas.Visibility    = Visibility.Visible;
+            ramaisTab.Visibility         = Visibility.Collapsed;
+            filasTab.Visibility          = Visibility.Collapsed;
+            pnlFiltrosPeriodo.Visibility = Visibility.Visible;
+            MarcarTab(btnTabMetricas);
+        }
+
+        private void BtnTabRamais_Click(object sender, RoutedEventArgs e)
+        {
+            scrollMetricas.Visibility    = Visibility.Collapsed;
+            ramaisTab.Visibility         = Visibility.Visible;
+            filasTab.Visibility          = Visibility.Collapsed;
+            pnlFiltrosPeriodo.Visibility = Visibility.Collapsed;
+            MarcarTab(btnTabRamais);
+        }
+
+        private void BtnTabFilas_Click(object sender, RoutedEventArgs e)
+        {
+            scrollMetricas.Visibility    = Visibility.Collapsed;
+            ramaisTab.Visibility         = Visibility.Collapsed;
+            filasTab.Visibility          = Visibility.Visible;
+            pnlFiltrosPeriodo.Visibility = Visibility.Collapsed;
+            MarcarTab(btnTabFilas);
+        }
+
+        private void MarcarTab(Button ativo)
+        {
+            foreach (var btn in new[] { btnTabMetricas, btnTabRamais, btnTabFilas })
+            {
+                if (btn == null) continue;
+                bool sel = ReferenceEquals(btn, ativo);
+                btn.Background  = new SolidColorBrush(sel ? Color.FromRgb(124, 58, 237) : Color.FromRgb(243, 244, 246));
+                btn.Foreground  = new SolidColorBrush(sel ? Colors.White : Color.FromRgb(71, 85, 105));
+                btn.BorderBrush = new SolidColorBrush(sel ? Color.FromRgb(124, 58, 237) : Color.FromRgb(226, 232, 240));
+            }
         }
 
         public void AtualizarDados()
@@ -57,6 +118,30 @@ namespace WavenVoIP.Views
 
                 if (txtAtualizadoAs != null)
                     txtAtualizadoAs.Text = $"Atualizado às {DateTime.Now:HH:mm}";
+
+                AtualizarCardsLive();
+            }
+            catch { }
+        }
+
+        private void AtualizarCardsLive()
+        {
+            try
+            {
+                var ramais = AmiMonitorService.Current?.Ramais;
+                if (ramais == null || !AmiMonitorService.Current!.Conectado)
+                {
+                    txtRamaisOnline.Text    = "—";
+                    txtRamaisEmLigacao.Text = "—";
+                    txtRamaisOffline.Text   = "—";
+                    return;
+                }
+
+                txtRamaisOnline.Text    = ramais.Count(r => r.Status == StatusRamal.Online).ToString();
+                txtRamaisEmLigacao.Text = ramais.Count(r => r.Status == StatusRamal.EmLigacao ||
+                                                            r.Status == StatusRamal.Chamando ||
+                                                            r.Status == StatusRamal.Tocando).ToString();
+                txtRamaisOffline.Text   = ramais.Count(r => r.Status == StatusRamal.Offline).ToString();
             }
             catch { }
         }

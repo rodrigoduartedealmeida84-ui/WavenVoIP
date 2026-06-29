@@ -9,6 +9,12 @@
 
   </PropertyGroup>
   <ItemGroup>
+    <!-- Nunca publicar o config de producao real — apenas o .example vai no ZIP -->
+    <Content Update="appsettings.Production.json">
+      <CopyToPublishDirectory>Never</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.*" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.*">
       <PrivateAssets>all</PrivateAssets>

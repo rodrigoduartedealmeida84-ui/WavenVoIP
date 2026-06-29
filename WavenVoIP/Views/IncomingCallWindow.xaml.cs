@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Windows;
 using WavenVoIP.Services;
 
@@ -9,6 +10,8 @@ namespace WavenVoIP.Views
     public partial class IncomingCallWindow : Window
     {
         private readonly RingtoneService _ringtoneService = new RingtoneService();
+        private static readonly Regex _rexNomeNum =
+            new(@"^(.+)\s+\((\d+)\)$", RegexOptions.Compiled);
 
         public bool Aceita { get; private set; }
         public bool EncerradaPeloSistema { get; private set; }
@@ -19,11 +22,30 @@ namespace WavenVoIP.Views
         public IncomingCallWindow(string caller)
         {
             InitializeComponent();
-            txtCaller.Text = caller;
-            txtInitials.Text = GerarIniciais(caller);
+            SetarInfoChamador(caller);
             Loaded += IncomingCallWindow_Loaded;
             Closing += (_, __) => PararToque();
             Closed += (_, __) => _ringtoneService.Dispose();
+        }
+
+        private void SetarInfoChamador(string caller)
+        {
+            var m = _rexNomeNum.Match(caller ?? string.Empty);
+            if (m.Success)
+            {
+                var nome = m.Groups[1].Value.Trim();
+                var num  = m.Groups[2].Value.Trim();
+                txtCallerName.Text              = nome;
+                txtCallerNumDisplay.Text        = num;
+                txtCallerNumDisplay.Visibility  = Visibility.Visible;
+                txtInitials.Text                = GerarIniciais(nome);
+            }
+            else
+            {
+                txtCallerName.Text              = caller ?? string.Empty;
+                txtCallerNumDisplay.Visibility  = Visibility.Collapsed;
+                txtInitials.Text                = GerarIniciais(caller ?? string.Empty);
+            }
         }
 
         private static string GerarIniciais(string texto)
@@ -108,6 +130,13 @@ namespace WavenVoIP.Views
             RecusadaPeloUsuario = true;
             PararToque();
             RecusarSolicitado?.Invoke();
+            Close();
+        }
+
+        private void BtnFechar_Click(object sender, RoutedEventArgs e)
+        {
+            // Apenas fecha o popup — o shell detecta via Closed e chama IgnorarChamadaLocal()
+            PararToque();
             Close();
         }
     }

@@ -10,6 +10,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Linq;
 using System.Windows;
@@ -32,6 +33,8 @@ namespace WavenVoIP.Views
         private TaskCompletionSource<SaidaChamada?>? _routeSelectorTcs;
         private WF.NotifyIcon? _trayIcon;
         private bool _fechamentoReal;
+        // CTS para cancelar tasks de CDR agendadas após hangup caso a janela feche antes
+        private CancellationTokenSource _callEndCts = new();
 
         // P/Invoke para recuperar ícone da bandeja quando Explorer reinicia
         [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
@@ -146,7 +149,7 @@ namespace WavenVoIP.Views
                                     call.Closed += (_, __) => { if (ReferenceEquals(_activeCallWindow, call)) _activeCallWindow = null; };
                                     call.IniciarContador();
                                     call.Show();
-                                    IniciarControleHistoricoChamada(RegistrarHistorico(caller, TipoHistoricoLigacao.Recebida, "Em andamento", OrigemEntradaAtual()));
+                                    IniciarControleHistoricoChamada(RegistrarHistorico(caller, TipoHistoricoLigacao.Recebida, "Em andamento", OrigemEntradaAtual(caller)));
                                 }
                             }
                         };
@@ -159,7 +162,7 @@ namespace WavenVoIP.Views
                             if (_sipService.PossuiChamadaRecebidaPendente)
                             {
                                 _sipService.RecusarChamada();
-                                RegistrarHistorico(caller, TipoHistoricoLigacao.Perdida, "00:00", OrigemEntradaAtual());
+                                RegistrarHistorico(caller, TipoHistoricoLigacao.Perdida, "00:00", OrigemEntradaAtual(caller));
                                 MostrarNotificacaoChamadaPerdida(displayCaller);
                             }
                         };
@@ -229,14 +232,21 @@ namespace WavenVoIP.Views
                 });
 
                 // Sync CDR at 5 s, 15 s and 30 s after hangup — Asterisk/recording may take time to close
+                // Cancela o ciclo anterior caso um novo hangup chegue antes do fim
+                var oldCts = _callEndCts;
+                _callEndCts = new CancellationTokenSource();
+                oldCts.Cancel();
+                oldCts.Dispose();
+                var cdrCt = _callEndCts.Token;
                 foreach (var delay in new[] { 5000, 15000, 30000 })
                 {
                     var d = delay;
-                    _ = Task.Delay(d).ContinueWith(_ =>
+                    _ = Task.Delay(d, cdrCt).ContinueWith(t =>
                     {
+                        if (t.IsCanceled) return;
                         try { Dispatcher.BeginInvoke(new Action(async () => await ExecutarSyncCdrAsync(silencioso: true, diasOverride: 1))); }
                         catch { }
-                    });
+                    }, TaskContinuationOptions.None);
                 }
             };
         }
@@ -286,6 +296,7 @@ namespace WavenVoIP.Views
                 // Fix concatenated numbers on startup (fast, no HTTP validation)
                 _ = ExecutarReprocessarAsync(silencioso: true, validarUrls: false);
                 InicializarPainelLogs();
+                IniciarAmiMonitor();
                 IntegrationAutoReconnectService.ReconectarAgora += OnIntegracaoReconectarAgora;
                 Closed += (_, _) => IntegrationAutoReconnectService.ReconectarAgora -= OnIntegracaoReconectarAgora;
 
@@ -2064,9 +2075,55 @@ namespace WavenVoIP.Views
             }
         }
 
+        private void IniciarAmiMonitor()
+        {
+            try
+            {
+                var cfg = SipConfig.CarregarSalva();
+                if (cfg == null || !cfg.AmiAtivo) return;
+
+                bool modoApi = cfg.UsarWavenApi &&
+                               !string.IsNullOrWhiteSpace(cfg.WavenApiUrl) &&
+                               !string.IsNullOrWhiteSpace(cfg.WavenApiToken);
+
+                bool modoTcp = !string.IsNullOrWhiteSpace(cfg.AmiHost ?? cfg.ServerIp) &&
+                               !string.IsNullOrWhiteSpace(cfg.AmiUsuario) &&
+                               !string.IsNullOrWhiteSpace(cfg.AmiSenha);
+
+                if (modoApi || modoTcp)
+                {
+                    Services.AmiMonitorService.Iniciar(cfg);
+                    LogHelper.Info($"AMI_MONITOR_STARTED modo={(modoApi ? "API" : "TCP")}");
+                }
+                else
+                {
+                    LogHelper.Info("AMI_MONITOR_SKIP | nao ha modo API nem TCP configurado");
+                }
+            }
+            catch (Exception ex) { LogHelper.Info($"AMI_MONITOR_START_FAILED err={ex.Message}"); }
+        }
+
         private void DialerShellWindow_Closing(object? sender, CancelEventArgs e)
         {
-            if (_fechamentoReal) { try { _reconnectTimer.Stop(); } catch { } return; }
+            if (_fechamentoReal)
+            {
+                try
+                {
+                    _reconnectTimer.Stop();
+                    _amiSyncTimer.Stop();
+                    _cdrSyncTimer.Stop();
+                    _googleSyncTimer.Stop();
+                    _companyConfigTimer.Stop();
+                    _contactsSyncTimer.Stop();
+                    _debounceContatos.Stop();
+                    _debounceHistorico.Stop();
+                    _callEndCts.Cancel();
+                    _callEndCts.Dispose();
+                    Services.AmiMonitorService.PararCurrent();
+                }
+                catch { }
+                return;
+            }
             e.Cancel = true;
             Hide();
             try { _trayIcon?.ShowBalloonTip(1800, "Waven VoIP", "Continuo em segundo plano para receber chamadas.", WF.ToolTipIcon.Info); } catch { }
@@ -2172,6 +2229,7 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
             try { AtualizarBotaoStatus(); } catch { }
         }
         private void NavDashboard_Click(object sender, RoutedEventArgs e) { MainTabs.SelectedIndex = 4; AtualizarNavSelecionada(); AnimarAbaAtual(); dashboardControl?.AtualizarDados(); RegistrarUiDiagnostico("DASHBOARD_REFRESH"); }
+
 
         private void MainTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
@@ -2703,7 +2761,7 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
             catch { return "00:00"; }
         }
 
-        private string OrigemEntradaAtual()
+        private string OrigemEntradaAtual(string caller = "")
         {
             var origem = !string.IsNullOrWhiteSpace(_sipService.LastIncomingOrigin)
                 ? _sipService.LastIncomingOrigin
@@ -2711,7 +2769,10 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
 
             if (string.IsNullOrWhiteSpace(origem) ||
                 origem.Equals("Entrada não identificada", StringComparison.OrdinalIgnoreCase))
-                return "Operadora";
+            {
+                var numCaller = DialPlanService.RemoverDuplicacaoSequencial(caller ?? string.Empty);
+                return DialPlanService.EhRamalInterno(numCaller) ? "Ramal interno" : "Operadora";
+            }
 
             return origem;
         }
@@ -3316,6 +3377,15 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
         private async Task EntrarOfflineAsync()
         {
             LogHelper.Info("USUARIO_CLICOU_OFFLINE");
+
+            // Confirmação antes de ir Offline — modal customizado
+            bool emChamada = _activeCallWindow != null && _activeCallWindow.IsVisible;
+            var dlg = new OfflineConfirmDialog(emChamada) { Owner = this };
+            if (dlg.ShowDialog() != true)
+            {
+                LogHelper.Info("USUARIO_CANCELOU_OFFLINE");
+                return;
+            }
 
             _sipService.EntrarOffline();
             _dndAtivo = true;

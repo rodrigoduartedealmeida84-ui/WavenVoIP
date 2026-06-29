@@ -72,6 +72,14 @@ namespace WavenVoIP.Services
                 SalvarState(state);
             }
 
+            // 1b. Seed único: garante contatos globais pré-configurados em todas as instalações
+            if (!state.SeedGlobaisConcluido)
+            {
+                await SeedContatosGlobaisAsync();
+                state.SeedGlobaisConcluido = true;
+                SalvarState(state);
+            }
+
             // 2. Drena fila offline antes de sincronizar
             await DrenaFilaOfflineAsync();
 
@@ -156,6 +164,105 @@ namespace WavenVoIP.Services
             }
 
             Log($"API_CONTACT_GLOBAL_FAVORITE_MIGRATION_DONE | migrados={migrados}");
+        }
+
+        // ── Seed de contatos globais pré-configurados ─────────────────────────
+
+        private static readonly (string Nome, string Numero)[] _contatosGlobaisSeed = new[]
+        {
+            ("Suporte Dlink Sistemas", "3832010900"),
+        };
+
+        private async Task SeedContatosGlobaisAsync()
+        {
+            Log("API_CONTACT_GLOBAL_SEED_START");
+
+            // Garante que os contatos existem localmente independente da API
+            var contatos = ContatoStorageService.Carregar();
+            var favs = FavoritesStorageService.Carregar();
+            var localAlterou = false;
+
+            foreach (var (nome, numero) in _contatosGlobaisSeed)
+            {
+                var numNorm = PhoneNumberNormalizer.NormalizeBrazilPhone(
+                    new string(numero.Where(char.IsDigit).ToArray()));
+                if (string.IsNullOrWhiteSpace(numNorm)) numNorm = numero;
+
+                // Adiciona localmente se não existe
+                var existeLocal = contatos.Any(c =>
+                {
+                    var cn = PhoneNumberNormalizer.NormalizeBrazilPhone(
+                        new string(c.Numero.Where(char.IsDigit).ToArray()));
+                    return cn == numNorm;
+                });
+
+                if (!existeLocal)
+                {
+                    contatos.Add(new Contato
+                    {
+                        Nome         = nome,
+                        Numero       = numNorm,
+                        Observacao   = "Suporte técnico",
+                        AtualizadoEm = DateTime.UtcNow
+                    });
+                    localAlterou = true;
+                    Log($"API_CONTACT_GLOBAL_SEED_LOCAL_ADDED | nome={nome} numero={numNorm}");
+                }
+
+                // Adiciona como favorito local se não existe
+                if (!FavoritesStorageService.EhFavorito(numNorm))
+                {
+                    FavoritesStorageService.Adicionar(new FavoriteItem
+                    {
+                        Nome     = nome,
+                        Numero   = numNorm,
+                        Favorito = true
+                    });
+                    Log($"API_CONTACT_GLOBAL_SEED_FAVORITE_LOCAL | nome={nome}");
+                }
+
+                // Propaga para a API (CREATE + FAVORITE_ADD global) para distribuir a todos os ramais
+                var (apiOk, apiContact, _) = await WavenApiService.CriarContatoAsync(
+                    nome, numNorm, empresa: null, observacao: "Suporte técnico", ramal: "system")
+                    .ConfigureAwait(false);
+
+                if (!apiOk || apiContact == null)
+                {
+                    // offline — enfileira para tentar na próxima sync
+                    EnfileirarOffline(new WavenApiOfflineOp
+                    {
+                        Op      = "CREATE",
+                        Payload = JsonSerializer.Serialize(
+                            new { nome, numero = numNorm, observacao = "Suporte técnico", criadoPor = "system" }),
+                        Ramal   = "system"
+                    });
+                    Log($"API_CONTACT_GLOBAL_SEED_API_FAIL | nome={nome} motivo=offline_queued");
+                    continue;
+                }
+
+                // Vincula WavenApiId localmente
+                if (localAlterou)
+                {
+                    var novo = contatos.FirstOrDefault(c =>
+                    {
+                        var cn = PhoneNumberNormalizer.NormalizeBrazilPhone(
+                            new string(c.Numero.Where(char.IsDigit).ToArray()));
+                        return cn == numNorm && string.IsNullOrWhiteSpace(c.WavenApiId);
+                    });
+                    if (novo != null) novo.WavenApiId = apiContact.Id;
+                }
+
+                var favOk = await WavenApiService.AdicionarFavoritoAsync(
+                    apiContact.Id, ramal: "", tipoFavorito: "global", criadoPor: "system")
+                    .ConfigureAwait(false);
+
+                Log($"API_CONTACT_GLOBAL_SEED_API_OK | id={apiContact.Id} nome={nome} favorito={favOk}");
+            }
+
+            if (localAlterou)
+                ContatoStorageService.Salvar(contatos);
+
+            Log("API_CONTACT_GLOBAL_SEED_DONE");
         }
 
         // ── Aplica contatos da API na storage local ───────────────────────────

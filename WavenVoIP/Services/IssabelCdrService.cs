@@ -83,10 +83,58 @@ namespace WavenVoIP.Services
                     }
                 }
 
+                // Corrige Nome quando também é número concatenado. Ocorre quando o CDR não
+                // tem CLID e o fallback (numero externo) era duplicado — após Numero ser
+                // corrigido, Nome fica diferente e NomeExibido retornaria o Nome errado.
+                var nomeOrig   = item.Nome ?? string.Empty;
+                var nomeDigits = new string(nomeOrig.Where(char.IsDigit).ToArray());
+                if (nomeDigits.Length > 0 &&
+                    string.Equals(nomeDigits, nomeOrig.Trim(), StringComparison.Ordinal))
+                {
+                    var nomeCorr = DialPlanService.RemoverDuplicacaoSequencial(nomeDigits);
+                    if (!string.Equals(nomeCorr, nomeDigits, StringComparison.Ordinal))
+                    {
+                        Log($"REPROCESS_NOME_FIX orig={nomeOrig} novo={nomeCorr}");
+                        item.Nome = nomeCorr;
+                    }
+                }
+
                 // Remove ramais with > 5 digits (IVR/queue IDs, concatenated ramais)
                 if (!string.IsNullOrWhiteSpace(item.RamalOrigem)  && !EhRamal(item.RamalOrigem))  item.RamalOrigem  = string.Empty;
                 if (!string.IsNullOrWhiteSpace(item.RamalDestino) && !EhRamal(item.RamalDestino)) item.RamalDestino = string.Empty;
                 if (!string.IsNullOrWhiteSpace(item.RamalAtendeu) && !EhRamal(item.RamalAtendeu)) item.RamalAtendeu = string.Empty;
+
+                // Fix CDR entries for ramal-to-ramal calls where Numero was incorrectly set
+                // from the caller's SIP CLID (external mobile/WhatsApp number) instead of cdr.Src.
+                // RamalOrigem and RamalDestino are the ground truth for internal calls.
+                if (item.FonteCdr &&
+                    !string.IsNullOrWhiteSpace(item.RamalOrigem) &&
+                    !string.IsNullOrWhiteSpace(item.RamalDestino) &&
+                    EhRamal(item.RamalOrigem) &&
+                    EhRamal(item.RamalDestino) &&
+                    !string.Equals(item.RamalOrigem, item.RamalDestino, StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(item.OrigemSaida, "Queue", StringComparison.OrdinalIgnoreCase) &&
+                    (item.OrigemSaida ?? string.Empty).IndexOf("WhatsApp", StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    if (!string.Equals(item.OrigemSaida, "Ramal interno", StringComparison.OrdinalIgnoreCase))
+                    {
+                        Log($"REPROCESS_RAMAL_ORIGEM_FIX origemSaida={item.OrigemSaida} -> Ramal interno uid={item.UniqueId}");
+                        item.OrigemSaida = "Ramal interno";
+                    }
+
+                    var numNorm = DialPlanService.RemoverDuplicacaoSequencial(item.Numero ?? string.Empty);
+                    if (!DialPlanService.EhRamalInterno(numNorm))
+                    {
+                        var sipRamal = SipConfig.CarregarSalva()?.Ramal?.Trim() ?? string.Empty;
+                        var outroRamal = !string.IsNullOrWhiteSpace(sipRamal) &&
+                                         string.Equals(item.RamalOrigem, sipRamal, StringComparison.OrdinalIgnoreCase)
+                            ? item.RamalDestino
+                            : item.RamalOrigem;
+                        Log($"REPROCESS_RAMAL_NUMERO_FIX numero={item.Numero} -> {outroRamal} uid={item.UniqueId}");
+                        item.Numero = outroRamal;
+                        numerosCorrigidos++;
+                    }
+                }
             }
 
             // Validate recording URLs in parallel and remove those that return 404
@@ -282,6 +330,19 @@ namespace WavenVoIP.Services
                     if (grupoPorRotaNaoHumana)
                         Log($"CDR_NON_HUMAN_ROUTE_DETECTED linkedids={linkedIds} src={cdr.Src} dst={cdr.Dst} dcontext={cdr.DContext}");
 
+                    // Skip pure queue delivery attempt groups: no external number, not answered,
+                    // and clearly a queue routing leg (from-queue dcontext / Local/ channel).
+                    // These are Asterisk ring-attempt CDR artifacts (src=queue, dst=agent ramal)
+                    // with their own linkedid — they must not appear as separate history entries.
+                    var temNumExterno = grupo.Any(r =>
+                        new string((r.Src ?? string.Empty).Where(char.IsDigit).ToArray()).Length >= 8 ||
+                        new string((r.Dst ?? string.Empty).Where(char.IsDigit).ToArray()).Length >= 8);
+                    if (!temNumExterno && !foiAtendidaGlobalmente && grupo.Any(EhRotaNaoHumana))
+                    {
+                        Log($"CDR_QUEUE_DELIVERY_ATTEMPT_SKIP linkedids={linkedIds} src={cdr.Src} dst={cdr.Dst} dcontext={cdr.DContext}");
+                        continue;
+                    }
+
                     // Fallbacks
                     var ramalGravacao = ExtrairRamalDeGravacao(cdr.RecordingFile);
                     if (string.IsNullOrWhiteSpace(srcRamal)  && !string.IsNullOrWhiteSpace(ramalGravacao)) srcRamal  = ramalGravacao;
@@ -362,6 +423,18 @@ namespace WavenVoIP.Services
                     }
 
                     var gravacaoUrl = ResolverUrlGravacao(recordingFile, config, recordingDate);
+
+                    // When no trunk origin was identified but the external number is a ramal,
+                    // store the channel explicitly so history displays correctly without dynamic fallback.
+                    if (string.IsNullOrWhiteSpace(origemSaida))
+                    {
+                        var numExt = DialPlanService.RemoverDuplicacaoSequencial(numeroExterno ?? string.Empty);
+                        if (DialPlanService.EhRamalInterno(numExt))
+                        {
+                            origemSaida = "Ramal interno";
+                            Log($"CDR_RAMAL_INTERNO_DETECTED numero={numExt} tipo={tipo}");
+                        }
+                    }
 
                     var item = new HistoricoLigacaoItem
                     {
@@ -592,8 +665,9 @@ namespace WavenVoIP.Services
 
             if (dst.StartsWith("ivr-")   || dst.StartsWith("ura-"))   return true;
             if (dst.StartsWith("queue-") || dst.StartsWith("app-"))    return true;
-            if (ctx.Contains("ivr")      || ctx.Contains("ura"))       return true;
-            if (ctx.StartsWith("queue")  || ctx.Contains("macro"))     return true;
+            if (ctx.Contains("ivr")   || ctx.Contains("ura"))          return true;
+            // Contains("queue") catches both "queue-..." and "from-queue" (Asterisk delivery context)
+            if (ctx.Contains("queue") || ctx.Contains("macro"))         return true;
             // Local/ channels are pure Asterisk internal routing legs
             if (dstCh.StartsWith("local/"))                            return true;
             return false;
@@ -692,8 +766,16 @@ namespace WavenVoIP.Services
                 string.Equals(r.Disposition, "ANSWERED", StringComparison.OrdinalIgnoreCase) && EhVoicemail(r));
             if (ans != null) return ans;
 
-            // 5. Most recent NO ANSWER
+            // 5. NO ANSWER — prefer the real inbound leg (non-queue row) over ring attempts.
+            // Ring attempt rows (src=queue, dst=ramal) are usually more recent than the inbound
+            // leg, so the old "most recent" heuristic picked them first, causing the queue ring
+            // destination to become RamalDestino on the main history entry.
             var noAns = grupo
+                .Where(r => string.Equals(r.Disposition, "NO ANSWER", StringComparison.OrdinalIgnoreCase)
+                         && !EhRotaNaoHumana(r))
+                .OrderByDescending(r => r.CallDate)
+                .FirstOrDefault()
+                ?? grupo
                 .Where(r => string.Equals(r.Disposition, "NO ANSWER", StringComparison.OrdinalIgnoreCase))
                 .OrderByDescending(r => r.CallDate)
                 .FirstOrDefault();
@@ -849,6 +931,15 @@ namespace WavenVoIP.Services
             {
                 Log($"CDR_CALL_MAIN_NUMBER_SELECTED numero={cdr.Dst} via=ramal_src_match");
                 return cdr.Dst;
+            }
+
+            // Ramal-to-ramal: both src and dst are internal extensions.
+            // Use cdr.Src directly instead of CLID, which may contain the caller's
+            // external/mobile phone number registered in their SIP CLID configuration.
+            if (EhRamal(cdr.Src ?? string.Empty) && EhRamal(cdr.Dst ?? string.Empty))
+            {
+                Log($"CDR_CALL_MAIN_NUMBER_SELECTED numero={cdr.Src} via=ramal_to_ramal");
+                return cdr.Src ?? string.Empty;
             }
 
             // Extract ONLY the phone number from CLID — never the name part.

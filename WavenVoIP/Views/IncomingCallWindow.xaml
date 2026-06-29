@@ -5,7 +5,7 @@
         Height="500" Width="400" WindowStartupLocation="Manual" ResizeMode="NoResize"
         Topmost="True" ShowInTaskbar="False" WindowStyle="None" AllowsTransparency="True" Background="Transparent">
     <Window.Resources>
-        <DropShadowEffect x:Key="CardShadow" BlurRadius="24" ShadowDepth="5" Opacity="0.40"/>
+        <DropShadowEffect x:Key="CardShadow" BlurRadius="32" ShadowDepth="6" Opacity="0.55" Color="#3730A3"/>
         <Style x:Key="RoundActionButton" TargetType="Button">
             <Setter Property="Width" Value="64"/>
             <Setter Property="Height" Value="64"/>
@@ -40,14 +40,54 @@
         </Style>
     </Window.Resources>
 
-    <Border Margin="8" CornerRadius="24" BorderBrush="#3D2A6A" BorderThickness="1" Effect="{StaticResource CardShadow}">
+    <Border Margin="8" CornerRadius="24" BorderBrush="#5B4ADE" BorderThickness="1.5" Effect="{StaticResource CardShadow}">
         <Border.Background>
             <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                <GradientStop Color="#0C0B18" Offset="0"/>
-                <GradientStop Color="#130F27" Offset="0.50"/>
-                <GradientStop Color="#1E103A" Offset="1"/>
+                <GradientStop Color="#0E0B2E" Offset="0"/>
+                <GradientStop Color="#16124A" Offset="0.50"/>
+                <GradientStop Color="#201B62" Offset="1"/>
             </LinearGradientBrush>
         </Border.Background>
+
+        <Grid>
+            <!-- Glow ambiente no topo — efeito de profundidade, não bloqueia interação -->
+            <Rectangle VerticalAlignment="Top" Height="220" IsHitTestVisible="False" Opacity="0.14"
+                       RadiusX="24" RadiusY="24">
+                <Rectangle.Fill>
+                    <RadialGradientBrush Center="0.5,0" GradientOrigin="0.5,0" RadiusX="0.75" RadiusY="0.55">
+                        <GradientStop Color="#8B5CF6" Offset="0"/>
+                        <GradientStop Color="Transparent" Offset="1"/>
+                    </RadialGradientBrush>
+                </Rectangle.Fill>
+            </Rectangle>
+
+            <!-- Botão Fechar no canto superior direito -->
+            <Button HorizontalAlignment="Right" VerticalAlignment="Top"
+                    Margin="0,12,14,0" Width="30" Height="30"
+                    Click="BtnFechar_Click" ToolTip="Fechar" Cursor="Hand"
+                    Panel.ZIndex="10">
+                <Button.Template>
+                    <ControlTemplate TargetType="Button">
+                        <Grid>
+                            <Ellipse x:Name="circle" Fill="#EF4444">
+                                <Ellipse.Effect>
+                                    <DropShadowEffect BlurRadius="8" ShadowDepth="2" Opacity="0.45" Color="#DC2626"/>
+                                </Ellipse.Effect>
+                            </Ellipse>
+                            <TextBlock Text="✕" Foreground="White" FontSize="13" FontWeight="Bold"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="circle" Property="Fill" Value="#DC2626"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="circle" Property="Fill" Value="#B91C1C"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Button.Template>
+            </Button>
 
         <Grid Margin="18,14,18,16">
             <Grid.RowDefinitions>
@@ -59,10 +99,10 @@
 
             <!-- Logo -->
             <Border Grid.Row="0" HorizontalAlignment="Center" CornerRadius="16" Margin="0,6,0,10"
-                    Background="White" BorderBrush="#C4B5FD" BorderThickness="1.5"
+                    Background="White" BorderBrush="#818CF8" BorderThickness="1.5"
                     Width="180" Height="66" ClipToBounds="True">
                 <Border.Effect>
-                    <DropShadowEffect BlurRadius="20" ShadowDepth="0" Opacity="0.30" Color="#7C3AED"/>
+                    <DropShadowEffect BlurRadius="22" ShadowDepth="0" Opacity="0.35" Color="#6366F1"/>
                 </Border.Effect>
                 <Image Source="/Assets/Brand/waven_logo_dark.png" Stretch="Uniform"
                        RenderOptions.BitmapScalingMode="HighQuality"
@@ -97,7 +137,7 @@
                 </Ellipse>
                 <!-- Avatar circle -->
                 <Grid Width="64" Height="64">
-                    <Ellipse Fill="#2A1E50" Margin="0,4,0,-4" Opacity="0.5"/>
+                    <Ellipse Fill="#1E1B6E" Margin="0,4,0,-4" Opacity="0.5"/>
                     <Ellipse>
                         <Ellipse.Fill>
                             <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
@@ -114,7 +154,7 @@
 
             <!-- Informações do chamador -->
             <StackPanel Grid.Row="2" VerticalAlignment="Center">
-                <Border Background="#251C45" BorderBrush="#5B21B6" BorderThickness="1" CornerRadius="10"
+                <Border Background="#1E1B5E" BorderBrush="#7C3AED" BorderThickness="1" CornerRadius="10"
                         Padding="10,5" HorizontalAlignment="Center" Margin="0,0,0,8">
                     <StackPanel Orientation="Horizontal">
                         <Ellipse Width="6" Height="6" Fill="#22C55E" VerticalAlignment="Center" Margin="0,0,7,0">
@@ -125,9 +165,13 @@
                         <TextBlock Text="Chamada recebida" Foreground="#C4B5FD" FontSize="11" FontWeight="SemiBold"/>
                     </StackPanel>
                 </Border>
-                <Border Padding="14,10" Background="#1A1236" CornerRadius="14" BorderBrush="#2D2358" BorderThickness="1">
-                    <TextBlock x:Name="txtCaller" FontSize="15" FontWeight="Bold" Foreground="#F1F5F9"
-                               TextAlignment="Center" TextWrapping="Wrap" MaxWidth="290"/>
+                <Border Padding="14,12" Background="#18165A" CornerRadius="14" BorderBrush="#4338CA" BorderThickness="1">
+                    <StackPanel HorizontalAlignment="Center">
+                        <TextBlock x:Name="txtCallerName" FontSize="16" FontWeight="Bold" Foreground="#F1F5F9"
+                                   TextAlignment="Center" TextWrapping="Wrap" MaxWidth="290"/>
+                        <TextBlock x:Name="txtCallerNumDisplay" FontSize="12" Foreground="#A78BFA"
+                                   TextAlignment="Center" Margin="0,5,0,0" TextWrapping="Wrap" MaxWidth="290"/>
+                    </StackPanel>
                 </Border>
             </StackPanel>
 
@@ -187,6 +231,7 @@
                                HorizontalAlignment="Center" Margin="0,6,0,0"/>
                 </StackPanel>
             </Grid>
+        </Grid>
         </Grid>
     </Border>
 </Window>

@@ -107,10 +107,32 @@ namespace WavenVoIP.Services
 
         private static string ResolverRamal(HistoricoLigacaoItem item)
         {
-            if (!string.IsNullOrWhiteSpace(item.RamalOrigem))  return item.RamalOrigem;
-            if (!string.IsNullOrWhiteSpace(item.RamalDestino)) return item.RamalDestino;
-            if (!string.IsNullOrWhiteSpace(item.RamalAtendeu)) return item.RamalAtendeu;
-            return string.Empty;
+            switch (item.Tipo)
+            {
+                case TipoHistoricoLigacao.Realizada:
+                    // Saída: quem originou (RamalOrigem = ramal do operador).
+                    if (!string.IsNullOrWhiteSpace(item.RamalOrigem))  return item.RamalOrigem;
+                    if (!string.IsNullOrWhiteSpace(item.RamalDestino)) return item.RamalDestino;
+                    return string.Empty;
+
+                case TipoHistoricoLigacao.Recebida:
+                    // Entrada atendida: quem atendeu (RamalAtendeu = agente real, não fila/tronco).
+                    // RamalDestino pode ser a fila (600) — não usar como chave principal.
+                    if (!string.IsNullOrWhiteSpace(item.RamalAtendeu))  return item.RamalAtendeu;
+                    if (!string.IsNullOrWhiteSpace(item.RamalDestino))  return item.RamalDestino;
+                    if (!string.IsNullOrWhiteSpace(item.RamalOrigem))   return item.RamalOrigem;
+                    return string.Empty;
+
+                case TipoHistoricoLigacao.Perdida:
+                case TipoHistoricoLigacao.NaoAtendidaNesseRamal:
+                    // Abandonadas: sem prova de atendimento — não atribui à fila/tronco.
+                    // Conta apenas se houver ramal confirmado (caso raro de perdida com registro de atendimento).
+                    if (!string.IsNullOrWhiteSpace(item.RamalAtendeu)) return item.RamalAtendeu;
+                    return string.Empty;
+
+                default:
+                    return string.Empty;
+            }
         }
 
         private static string ResolverNome(string ramal)

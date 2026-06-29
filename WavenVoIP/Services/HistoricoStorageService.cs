@@ -140,20 +140,35 @@ namespace WavenVoIP.Services
             // Pré-normaliza os números do CDR em Dictionary<numero, List<DateTime>> para lookup O(1),
             // evitando O(n*m) do RemoveAll().Any() original.
             var cdrPorNumero = new Dictionary<string, List<DateTime>>(StringComparer.OrdinalIgnoreCase);
+            var cdrRamalPorNumero = new Dictionary<string, List<DateTime>>(StringComparer.OrdinalIgnoreCase);
             foreach (var c in itensCdr)
             {
                 if (string.IsNullOrWhiteSpace(c.Numero)) continue;
                 var numC = PhoneNumberNormalizer.NormalizeBrazilPhone(DialPlanService.RemoverPrefixoDeRota(c.Numero));
-                if (numC.Length < 8) continue;
-                if (!cdrPorNumero.TryGetValue(numC, out var datas))
-                    cdrPorNumero[numC] = datas = new List<DateTime>();
-                datas.Add(c.DataHora);
+                if (DialPlanService.EhRamalInterno(numC))
+                {
+                    if (!cdrRamalPorNumero.TryGetValue(numC, out var datasR))
+                        cdrRamalPorNumero[numC] = datasR = new List<DateTime>();
+                    datasR.Add(c.DataHora);
+                }
+                else
+                {
+                    if (numC.Length < 8) continue;
+                    if (!cdrPorNumero.TryGetValue(numC, out var datas))
+                        cdrPorNumero[numC] = datas = new List<DateTime>();
+                    datas.Add(c.DataHora);
+                }
             }
 
             existentes.RemoveAll(e =>
             {
                 if (e.FonteCdr || string.IsNullOrWhiteSpace(e.Numero)) return false;
                 var numE = PhoneNumberNormalizer.NormalizeBrazilPhone(DialPlanService.RemoverPrefixoDeRota(e.Numero));
+                if (DialPlanService.EhRamalInterno(numE))
+                {
+                    if (!cdrRamalPorNumero.TryGetValue(numE, out var datasR)) return false;
+                    return datasR.Any(d => Math.Abs((d - e.DataHora).TotalMinutes) <= 2);
+                }
                 if (numE.Length < 8) return false;
                 if (!cdrPorNumero.TryGetValue(numE, out var datas)) return false;
                 return datas.Any(d => Math.Abs((d - e.DataHora).TotalMinutes) <= 2);

@@ -11,8 +11,8 @@
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <!-- Assembly identity & version info (visible no Explorer / Properties) -->
     <AssemblyTitle>WavenVoIP</AssemblyTitle>
-    <AssemblyVersion>1.4.3.0</AssemblyVersion>
-    <FileVersion>1.4.3.0</FileVersion>
+    <AssemblyVersion>2.2.1.0</AssemblyVersion>
+    <FileVersion>2.2.1.0</FileVersion>
     <Company>Almeida Gás</Company>
     <Product>WavenVoIP</Product>
     <Copyright>Copyright © 2026 Almeida Gás</Copyright>

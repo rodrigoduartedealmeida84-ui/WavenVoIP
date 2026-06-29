@@ -4,15 +4,31 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "2.2.0";
+        public const string Versao  = "2.2.1";
         public const string NomeApp = "WavenVoIP";
 
-        public static readonly DateTime DataBuild = new DateTime(2026, 6, 24);
+        public static readonly DateTime DataBuild = new DateTime(2026, 6, 29);
 
         public static string VersaoCompleta => $"{NomeApp} v{Versao}";
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v2.2.1 — Ramais ao Vivo, discador, contatos globais, sincronizacao API, WhatsApp/Wavoip (29/06/2026)\n" +
+            "• [UI] Popup de chamada recebida: botao Fechar vermelho no canto superior direito\n" +
+            "• [UI] Popup de chamada perdida (MissedCallPopup) redesenhado com cabecalho colorido e botao Fechar vermelho\n" +
+            "• [UI] Notificacao de chamada perdida (MissedCallToast) modernizada com icone e botao Fechar vermelho\n" +
+            "• [UI] Campo de discagem: contorno interno removido — apenas borda roxa externa no foco\n" +
+            "• [UI] Ramais ao Vivo: chips de filtro substituidos por dropdown — fim da sobreposicao no botao Atualizar\n" +
+            "• [FIX] Performance por ramal: chamadas atribuidas ao agente que atendeu (RamalAtendeu), nao a fila/tronco\n" +
+            "• [FIX] WhatsApp/Wavoip: cancel antes do ring enviava BYE via Hangup() quando chamada ja estabelecida\n" +
+            "• [FIX] Historico: numero nao duplicado quando nao ha contato salvo\n" +
+            "• [FIX] MissedCallPopup: numero nao exibido duas vezes quando callerName == callerNumber\n" +
+            "• [FIX] MissedCallToast: timer parado corretamente ao fechar (sem memory leak)\n" +
+            "• [FIX] Contatos: novos contatos agora sincronizam com a Waven API para todos os ramais\n" +
+            "• [NEW] Favorito global 'Suporte Dlink Sistemas' (3832010900) propagado automaticamente via seed\n" +
+            "• [LOG] Logs de diagnostico adicionados: CONTACTS_LOAD_OK, CONTACT_SAVE_OK, FAVORITE_SAVE_OK e outros\n" +
+            "• [SAFE] Nenhuma mudanca em SIP, audio, codecs, registro de ramal ou configuracoes do usuario\n" +
+            "\n" +
             "v2.2.0 — Melhorias de desempenho, fluidez, inicializacao, pesquisa, timers, logs e reducao de travamentos (24/06/2026)\n" +
             "• [PERF] Logs gravados em fila assincrona por thread dedicada — chamadas a LogHelper (UI thread, cliques, eventos SIP) nao bloqueiam mais em I/O de disco\n" +
             "• [FIX] Corrigido memory/CPU leak: contador de duracao do CallWindow continuava rodando a cada 1s apos a janela ser fechada\n" +

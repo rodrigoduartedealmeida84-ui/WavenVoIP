@@ -108,7 +108,7 @@ namespace WavenVoIP.Services
             // Queue/URA channel: map to human-readable label based on call outcome
             if (string.Equals(canal.Trim(), "Queue", StringComparison.OrdinalIgnoreCase))
             {
-                if (tipo == TipoHistoricoLigacao.Perdida)               return "Chamada abandonada";
+                if (tipo == TipoHistoricoLigacao.Perdida)               return "Abandonada na fila";
                 if (tipo == TipoHistoricoLigacao.NaoAtendidaNesseRamal) return "Desligou antes da fila";
                 return "URA";
             }
@@ -116,6 +116,11 @@ namespace WavenVoIP.Services
             // Strip raw technical labels that should never appear in the UI
             if (_labelsRawProibidas.Contains(canal.Trim()))
                 canal = string.Empty;
+
+            // Ramal takes highest priority — overrides any previously-stored channel value
+            // (including stale "Operadora" entries where the number starts with '1').
+            var n = DialPlanService.RemoverDuplicacaoSequencial(numero ?? string.Empty);
+            if (DialPlanService.EhRamalInterno(n)) return "Ramal interno";
 
             var porValor = IdentificarPorValor(canal);
             if (!string.IsNullOrWhiteSpace(porValor)) return porValor;
@@ -125,14 +130,10 @@ namespace WavenVoIP.Services
             if (!string.IsNullOrWhiteSpace(numeroCanal)) return numeroCanal;
 
             if (!string.IsNullOrWhiteSpace(canal)) return canal;
+
             if (tipo == TipoHistoricoLigacao.Realizada) return "Saída não identificada";
 
-            // Fallback prático: quando o Issabel não encaminha DID/DDR no INVITE,
-            // a entrada fica sem identificação. Para o ambiente atual, entradas externas
-            // sem DID conhecido são marcadas como Operadora, enquanto ramais internos
-            // continuam identificados como internos.
-            var n = DialPlanService.RemoverDuplicacaoSequencial(numero ?? string.Empty);
-            if (DialPlanService.EhRamalInterno(n)) return "Ramal interno";
+            // Fallback: external calls without a known DID are shown as Operadora.
             if (!string.IsNullOrWhiteSpace(n)) return "Operadora";
             return "Entrada não identificada";
         }
@@ -146,6 +147,8 @@ namespace WavenVoIP.Services
                 return new SolidColorBrush(Color.FromRgb(2, 132, 199));
             if (canal.IndexOf("Operadora", StringComparison.OrdinalIgnoreCase) >= 0)
                 return new SolidColorBrush(Color.FromRgb(124, 58, 237));
+            if (canal.IndexOf("Ramal", StringComparison.OrdinalIgnoreCase) >= 0)
+                return new SolidColorBrush(Color.FromRgb(14, 116, 144));
             if (canal.IndexOf("URA", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 canal.IndexOf("abandonada", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 canal.IndexOf("fila", StringComparison.OrdinalIgnoreCase) >= 0)

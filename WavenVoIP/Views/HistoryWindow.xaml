@@ -98,7 +98,7 @@
                                     </Border>
                                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                         <TextBlock Text="{Binding NomeExibido}" FontSize="16" FontWeight="Bold"/>
-                                        <TextBlock Text="{Binding NumeroLimpoVisual}" Foreground="{StaticResource MutedBrush}" FontSize="13" Margin="0,3,0,0"/>
+                                        <TextBlock Text="{Binding NumeroSubtitulo}" Foreground="{StaticResource MutedBrush}" FontSize="13" Margin="0,3,0,0" Visibility="{Binding VisibilidadeNumero}"/>
                                     </StackPanel>
                                     <StackPanel Grid.Column="2" VerticalAlignment="Center">
                                         <TextBlock Text="{Binding TipoTexto}" Foreground="{Binding CorTipo}" FontWeight="Bold" FontSize="14"/>

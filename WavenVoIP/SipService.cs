@@ -547,10 +547,12 @@ namespace WavenVoIP
                 // não podemos considerar a chamada como ativa/atendida.
                 if (_cancelamentoSolicitado)
                 {
-                    RegistrarSinalSip($"CALL_CANCEL_REQUESTED | chamada ainda nao atendida destino={destination}");
-                    LogHelper.Sip($"CALL_CANCEL_REQUESTED | chamada ainda nao atendida destino={destination}");
+                    // ok=true indica corrida: 200 OK chegou no Asterisk antes de processar nosso CANCEL.
+                    // EncerrarSinalizacaoAtiva envia BYE quando IsCallActive=true (fix Cancel() no-op).
+                    // LimparEstadoChamada já foi chamada por Desligar() — não repete para evitar duplo CallEnded.
+                    RegistrarSinalSip($"CALL_OUT_CANCEL_POST_RETURN | ok={ok} destino={destination}");
+                    LogHelper.Sip($"CALL_OUT_CANCEL_POST_RETURN | ok={ok} destino={destination}" + (ok ? " [RACE: 200 OK before CANCEL — sending BYE]" : ""));
                     EncerrarSinalizacaoAtiva();
-                    LimparEstadoChamada("Chamada cancelada antes do atendimento.");
                     return false;
                 }
 
@@ -1179,7 +1181,9 @@ namespace WavenVoIP
                 // Durante chamada sainte ainda não atendida, alguns métodos Hangup não enviam CANCEL.
                 // Tentamos os nomes usados por versões diferentes do SIPSorcery e, por fim, Hangup.
                 bool cancelEnviado = TentarMetodoSemParametro(_userAgent, "Cancel", "CancelCall", "CancelInvite");
-                if (!cancelEnviado)
+                // Cancel() é void e nunca lança exceção para chamadas já estabelecidas — retorna silenciosamente.
+                // Se o diálogo já foi criado (200 OK chegou antes do CANCEL), é preciso enviar BYE via Hangup().
+                if (!cancelEnviado || (_userAgent?.IsCallActive == true))
                 {
                     try { _userAgent?.Hangup(); cancelEnviado = true; } catch { }
                 }

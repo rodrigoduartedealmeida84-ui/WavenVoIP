@@ -260,6 +260,100 @@ namespace WavenVoIP.Services
             catch (Exception ex) { Log($"API_AMI_CONNECT_ERROR | {ex.Message}"); return null; }
         }
 
+        /// Returns (peers, httpStatus, erro).
+        /// httpStatus == 0 means network/timeout exception.
+        /// peers is non-null only on HTTP 200.
+        public static async Task<(List<Models.ApiAmiPeer>? peers, int httpStatus, string erro)> GetAmiPeersSafeAsync()
+        {
+            var (url, token) = ObterConfig();
+            if (string.IsNullOrWhiteSpace(url))
+                return (null, 0, "URL da Waven API não configurada");
+            try
+            {
+                Log($"API_AMI_PEERS_REQUEST | url={url}/api/ami/peers");
+                using var req  = CriarRequest(HttpMethod.Get, $"{url}/api/ami/peers", token);
+                using var resp = await _http.SendAsync(req).ConfigureAwait(false);
+                int code = (int)resp.StatusCode;
+                Log($"API_AMI_PEERS_RESPONSE | httpStatus={code}");
+                if (!resp.IsSuccessStatusCode)
+                {
+                    string body = string.Empty;
+                    try { body = await resp.Content.ReadAsStringAsync().ConfigureAwait(false); } catch { }
+                    Log($"API_AMI_PEERS_ERROR | httpStatus={code} body={body}");
+                    return (null, code, $"HTTP {code}");
+                }
+                var json = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
+                var list = JsonSerializer.Deserialize<List<Models.ApiAmiPeer>>(json, _jsonOpts);
+                Log($"API_AMI_PEERS_OK | count={list?.Count ?? 0}");
+                return (list ?? new(), code, string.Empty);
+            }
+            catch (Exception ex)
+            {
+                Log($"API_AMI_PEERS_EXCEPTION | {ex.GetType().Name}: {ex.Message}");
+                return (null, 0, ex.Message);
+            }
+        }
+
+        /// Testa o endpoint de Ramais ao Vivo (/api/ami/peers).
+        /// Retorna (ok, mensagem) com contagem de ramais e status real.
+        public static async Task<(bool ok, string message)> TestarRamaisAoVivoAsync()
+        {
+            var (url, token) = ObterConfig();
+            if (string.IsNullOrWhiteSpace(url))
+                return (false, "URL da Waven API não configurada");
+            try
+            {
+                Log($"API_RAMAIS_TEST | url={url}/api/ami/peers");
+                using var req  = CriarRequest(HttpMethod.Get, $"{url}/api/ami/peers", token);
+                using var resp = await _http.SendAsync(req).ConfigureAwait(false);
+                int code = (int)resp.StatusCode;
+                Log($"API_RAMAIS_TEST_RESPONSE | httpStatus={code}");
+
+                if (code == 404)
+                    return (false, "Endpoint de Ramais ao Vivo não disponível na versão atual da Waven API.\n→ Implante waven-api-linux-x64.zip no servidor e reinicie o serviço.");
+                if (code == 401 || code == 403)
+                    return (false, $"Token da Waven API inválido (HTTP {code})");
+                if (code >= 500)
+                    return (false, $"AMI indisponível no servidor (HTTP {code})");
+                if (!resp.IsSuccessStatusCode)
+                    return (false, $"Waven API: HTTP {code}");
+
+                var json  = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
+                var peers = JsonSerializer.Deserialize<List<Models.ApiAmiPeer>>(json, _jsonOpts);
+                if (peers == null || peers.Count == 0)
+                    return (false, "API respondeu mas não retornou ramais");
+
+                int total = peers.Count;
+                int online = 0, offline = 0, emLig = 0, indisp = 0;
+                foreach (var p in peers)
+                {
+                    var s = p.Status?.ToLowerInvariant() ?? "";
+                    if      (s == "online")   online++;
+                    else if (s == "offline")  offline++;
+                    else if (s is "emligacao" or "tocando" or "chamando") emLig++;
+                    else    indisp++;
+                }
+                bool temReal = online > 0 || offline > 0 || emLig > 0;
+
+                Log($"API_RAMAIS_TEST_OK | total={total} online={online} offline={offline} emLig={emLig} indisp={indisp}");
+
+                if (!temReal)
+                    return (false, $"API respondeu mas sem status real — {total} ramais Indisponível.\n→ Implante a Waven API atualizada para obter status online/offline do AMI.");
+
+                var sb = new System.Text.StringBuilder();
+                sb.Append($"Ramais ao Vivo OK — {total} ramais");
+                sb.Append($" | {online} online | {offline} offline");
+                if (emLig  > 0) sb.Append($" | {emLig} em ligação");
+                if (indisp > 0) sb.Append($" | {indisp} indisponível");
+                return (true, sb.ToString());
+            }
+            catch (Exception ex)
+            {
+                Log($"API_RAMAIS_TEST_EXCEPTION | {ex.GetType().Name}: {ex.Message}");
+                return (false, "Waven API offline — " + ex.Message);
+            }
+        }
+
         public static async Task<(bool ok, string message)> TestarAmiAsync()
         {
             var (url, token) = ObterConfig();
@@ -274,6 +368,36 @@ namespace WavenVoIP.Services
             {
                 Log($"API_AMI_TEST_ERROR | {ex.GetType().Name}: {ex.Message}");
                 return (false, ex.Message);
+            }
+        }
+
+        // ── Fase 4: Filas em Tempo Real ──────────────────────────────────────────
+
+        /// Retorna lista de filas com status em tempo real via /api/ami/queues-live.
+        /// Retorna null em qualquer erro (rede, auth, server).
+        public static async Task<(List<Models.ApiAmiQueue>? filas, int httpStatus, string erro)> GetAmiQueuesAsync()
+        {
+            var (url, token) = ObterConfig();
+            if (string.IsNullOrWhiteSpace(url))
+                return (null, 0, "URL da Waven API não configurada");
+            try
+            {
+                Log($"API_AMI_QUEUES_REQUEST | url={url}/api/ami/queues-live");
+                using var req  = CriarRequest(HttpMethod.Get, $"{url}/api/ami/queues-live", token);
+                using var resp = await _http.SendAsync(req).ConfigureAwait(false);
+                int code = (int)resp.StatusCode;
+                Log($"API_AMI_QUEUES_RESPONSE | httpStatus={code}");
+                if (!resp.IsSuccessStatusCode)
+                    return (null, code, $"HTTP {code}");
+                var json = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
+                var list = JsonSerializer.Deserialize<List<Models.ApiAmiQueue>>(json, _jsonOpts);
+                Log($"API_AMI_QUEUES_OK | count={list?.Count ?? 0}");
+                return (list ?? new(), code, string.Empty);
+            }
+            catch (Exception ex)
+            {
+                Log($"API_AMI_QUEUES_EXCEPTION | {ex.GetType().Name}: {ex.Message}");
+                return (null, 0, ex.Message);
             }
         }
 

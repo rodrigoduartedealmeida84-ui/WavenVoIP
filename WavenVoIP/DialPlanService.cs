@@ -29,7 +29,7 @@ namespace WavenVoIP
         public static bool EhRamalInterno(string numero)
         {
             var numeroLimpo = NormalizarNumero(numero);
-            return numeroLimpo.Length == 3;
+            return numeroLimpo.Length >= 2 && numeroLimpo.Length <= 5;
         }
 
         // Returns true only for real external phone numbers that can receive WhatsApp messages.
