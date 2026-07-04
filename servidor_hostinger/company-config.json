@@ -1,8 +1,8 @@
 {
-  "versaoConfig": "1.0.3",
+  "versaoConfig": "1.0.4",
   "whatsapp": {
-    "apiUrl": "https://api.wavenchat.com.br/v2/api/external/9dc34814-f12c-4647-8722-03751ead7902",
-    "bearerToken": "15fdce0f8d4e5fa41a88147faa6b11a9cc94d757964e9cc5cf109b51973e12e9",
+    "apiUrl": "https://api.wavenchat.com.br/v2/api/external/c7fc6fed-42d0-4a9b-a92b-adc9e9be4a17",
+    "bearerToken": "ba83413219e0953ea82f71c66f9981a8363e8dba4ac2b501b9058e0956c48124",
     "ativo": true
   },
   "cdr": {
