@@ -171,6 +171,14 @@ namespace WavenVoIP.Services
                 }
             }
 
+            // Clean up stale duplicates from earlier syncs: a Perdida/NaoAtendidaNesseRamal
+            // entry left over for a call another ramal already answered. Must run BEFORE the
+            // number+time dedup below — that dedup has no Tipo awareness and, when a Perdida
+            // and a Recebida entry collide on the same number/window, can keep either one
+            // arbitrarily. Suppressing the Perdida sibling first guarantees the Recebida entry
+            // (the real outcome) is the one that survives.
+            itens = SuprimirPerdidasAtendidasPorOutroRamal(itens);
+
             // Deduplicate legacy entries: CDR+local-SIP pairs and multi-ring-attempt CDR duplicates
             // that survived previous syncs. Uses a number-only comparison (no tipo check) so that
             // a local SIP "Realizada" matches a CDR "Recebida" for the same outgoing trunk call.
@@ -190,6 +198,7 @@ namespace WavenVoIP.Services
             SipConfig config, int diasRetencao = 7)
         {
             Log("CDR_SYNC_START");
+            Log("HISTORY_REFRESH_START");
             var resultado = new List<HistoricoLigacaoItem>();
 
             try
@@ -233,6 +242,7 @@ namespace WavenVoIP.Services
                     linhas = await BuscarLinhasCdrAsync(config, diasRetencao);
                 }
                 Log($"CDR_ROWS_FOUND quantidade={linhas.Count}");
+                Log($"HISTORY_CDR_READ quantidade={linhas.Count} dias={diasRetencao}");
 
                 // Raw-row diagnostic for the target number
                 foreach (var r in linhas.Where(row => GrupoContemNumero(new List<CdrChamada> { row }, NumeroAlvoDiagnostico)))
@@ -252,10 +262,11 @@ namespace WavenVoIP.Services
                     .Select(g => g.ToList())
                     .ToList();
 
-                // ── Step 2: secondary merge — same external src within 90 s ───────
-                // Catches queue scenarios where Asterisk issues distinct linkedids for
-                // the inbound leg and each ramal ring attempt.
-                var grupos = MergeGruposPorSrcJanela(gruposPrimarios, janelaSeg: 90);
+                // ── Step 2: secondary merge — same external src within a wide window ──
+                // Catches queue/ring-group scenarios where Asterisk issues distinct linkedids
+                // for the inbound leg and each ramal ring attempt. 180s comfortably covers a
+                // full multi-cycle ring group (5 cycles x ~15-20s can add up to 90s+ already).
+                var grupos = MergeGruposPorSrcJanela(gruposPrimarios, janelaSeg: 180);
                 Log($"CDR_GROUPS primary={gruposPrimarios.Count} afterMerge={grupos.Count}");
 
                 var ramal          = config.Ramal?.Trim() ?? string.Empty;
@@ -364,6 +375,36 @@ namespace WavenVoIP.Services
                     var numeroExterno = ObterNumeroExterno(cdr, ramal);
                     var duracaoFmt    = FormatarDuracao(cdr.BillSec > 0 ? cdr.BillSec : cdr.Duration);
 
+                    // Um "Perdida"/"NaoAtendidaNesseRamal" no CDR só reflete que ESTA tentativa/
+                    // perna terminou — não que a chamada saiu da fila. Se o cliente ainda aparece
+                    // esperando numa fila ao vivo (AMI), o CDR desta tentativa é prematuro: a fila
+                    // pode oferecer a chamada de novo. Não importa esse resultado ainda; o próximo
+                    // sync vai reavaliar quando a fila realmente confirmar o desfecho final.
+                    //
+                    // Válvula de segurança: nunca suspende para sempre. Se o CDR desta chamada já é
+                    // mais antigo que _janelaMaximaSuspensaoPorFila (bem acima do maior tempo de
+                    // espera configurável de qualquer fila real), um "ainda na fila" persistente só
+                    // pode ser cruzamento de número desatualizado/incorreto — importa mesmo assim,
+                    // em vez de deixar a chamada pendente indefinidamente (bug relatado: "a proteção
+                    // ficou permanente").
+                    if (tipo == TipoHistoricoLigacao.Perdida || tipo == TipoHistoricoLigacao.NaoAtendidaNesseRamal)
+                    {
+                        var idadeCdr = DateTime.Now - cdr.CallDate;
+                        if (ExisteClienteNaFilaAoVivo(numeroExterno, out var filaAoVivo))
+                        {
+                            if (idadeCdr < _janelaMaximaSuspensaoPorFila)
+                            {
+                                Log($"QUEUE_CALL_STILL_WAITING linkedid={linkedIds} numero={MascararNumeroLog(numeroExterno)} " +
+                                    $"fila={filaAoVivo} idadeCdrSeg={idadeCdr.TotalSeconds:F0}");
+                                continue;
+                            }
+
+                            Log($"QUEUE_CALL_STILL_WAITING_TIMEOUT_OVERRIDE linkedid={linkedIds} " +
+                                $"numero={MascararNumeroLog(numeroExterno)} fila={filaAoVivo} idadeCdrSeg={idadeCdr.TotalSeconds:F0} " +
+                                $"motivo=cdr_antigo_demais_para_ainda_estar_na_fila_real");
+                        }
+                    }
+
                     // Recording — try all records in group
                     var recordingFile = cdr.RecordingFile;
                     var recordingDate = cdr.CallDate;
@@ -460,6 +501,12 @@ namespace WavenVoIP.Services
                         $"ramalAtendeu={ramalAtendeu} caixaPostal={foiParaCaixaPostal} gravacao={!string.IsNullOrWhiteSpace(gravacaoUrl)}");
                 }
 
+                // Safety net: a call answered by one ramal must not also appear as a separate
+                // Perdida/NaoAtendidaNesseRamal entry for another ramal that only rang. This
+                // catches queue ring-attempt legs Asterisk records under their own linkedid,
+                // which the grouping/merge steps above may not have folded into the answered call.
+                resultado = SuprimirPerdidasAtendidasPorOutroRamal(resultado);
+
                 // Deduplicate trunk-leg CDR entries: outgoing calls generate two CDR rows
                 // (one from the ramal, one from the PSTN/trunk). After ObterNumeroExterno fix,
                 // both show the same external number → merge recording into ramal entry.
@@ -473,6 +520,7 @@ namespace WavenVoIP.Services
 
                 var totalGravacoes = resultado.Count(i => !string.IsNullOrWhiteSpace(i.GravacaoUrl));
                 Log($"CDR_SYNC_DONE chamadas={resultado.Count} gravacoes={totalGravacoes}");
+                Log($"HISTORY_REFRESH_OK total={resultado.Count}");
             }
             catch (Exception ex)
             {
@@ -542,6 +590,142 @@ namespace WavenVoIP.Services
             return result;
         }
 
+        private static string NormalizarNumeroParaAgrupamento(string numero)
+            => PhoneNumberNormalizer.NormalizeBrazilPhone(
+                new string((numero ?? string.Empty).Where(char.IsDigit).ToArray()));
+
+        private static string MascararNumeroLog(string numero)
+        {
+            var n = new string((numero ?? string.Empty).Where(char.IsDigit).ToArray());
+            if (n.Length <= 4) return new string('*', n.Length);
+            return n.Substring(0, 2) + new string('*', n.Length - 4) + n.Substring(n.Length - 2);
+        }
+
+        // Nunca suspende a importação de uma "Perdida"/"Abandonada" por mais que isso, mesmo que
+        // ExisteClienteNaFilaAoVivo continue retornando true — é bem acima do maior "tempo máximo
+        // de espera" configurável de qualquer fila real do Issabel (ex.: 2min40s no caso reportado).
+        private static readonly TimeSpan _janelaMaximaSuspensaoPorFila = TimeSpan.FromMinutes(10);
+
+        // Consulta o snapshot ao vivo de "Filas em Tempo Real" (mesmo dado do endpoint
+        // /api/ami/queues-live já existente, via AmiMonitorService — nenhum endpoint novo) para
+        // saber se o cliente ainda está esperando em alguma fila. Isso é ESTADO real da fila
+        // (QueueEntry), não uma perna SIP de toque — a fonte de verdade certa para decidir se uma
+        // chamada realmente saiu da fila ou só terminou uma tentativa de oferta a um agente.
+        private static bool ExisteClienteNaFilaAoVivo(string numeroExterno, out string filaEncontrada)
+        {
+            filaEncontrada = string.Empty;
+            try
+            {
+                var svc = AmiMonitorService.Current;
+                if (svc == null) return false;
+
+                var numAlvo = NormalizarNumeroParaAgrupamento(numeroExterno);
+                if (numAlvo.Length < 7) return false;
+
+                foreach (var fila in svc.Filas)
+                {
+                    foreach (var cliente in fila.Clientes)
+                    {
+                        var numCliente = NormalizarNumeroParaAgrupamento(cliente.Numero);
+                        if (numCliente.Length >= 7 && string.Equals(numAlvo, numCliente, StringComparison.OrdinalIgnoreCase))
+                        {
+                            filaEncontrada = fila.Fila;
+                            return true;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"QUEUE_ENTRY_ACTIVE_CHECK_ERROR erro={ex.Message}", LogLevel.WARN);
+            }
+            return false;
+        }
+
+        // A call is Perdida only when nobody answered it anywhere. Ring-attempt CDR rows that
+        // escaped grouping/merge (e.g. no external number to key the merge on, or Asterisk gave
+        // each attempt its own linkedid) can otherwise surface as extra history rows for the
+        // SAME real call. Two passes clean this up:
+        //   1) A Perdida/NaoAtendidaNesseRamal row for a number another row shows as answered
+        //      (Recebida/Realizada) within a short window is not a real missed call — someone
+        //      already answered it.
+        //   2) Multiple Perdida/NaoAtendidaNesseRamal rows for the same number/window with no
+        //      answered sibling are ring-attempt duplicates of ONE real missed call — keep only
+        //      the most recent (closest to the call's real end).
+        // Together this guarantees History shows exactly one row per real call outcome, and
+        // MISSED-call notifications never fire more than once for it.
+        private static List<HistoricoLigacaoItem> SuprimirPerdidasAtendidasPorOutroRamal(
+            List<HistoricoLigacaoItem> itens, int janelaSeg = 180)
+        {
+            if (itens.Count < 2) return itens;
+
+            var removidos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            // Passo 1: Perdida/NaoAtendida cuja mesma chamada foi atendida em outro lugar.
+            var atendidas = itens.Where(i =>
+                i.Tipo == TipoHistoricoLigacao.Recebida || i.Tipo == TipoHistoricoLigacao.Realizada).ToList();
+
+            foreach (var atendida in atendidas)
+            {
+                var numAtendida = NormalizarNumeroParaAgrupamento(atendida.Numero);
+                if (numAtendida.Length < 7) continue;
+
+                foreach (var outro in itens)
+                {
+                    if (ReferenceEquals(outro, atendida) || removidos.Contains(outro.Id)) continue;
+                    if (outro.Tipo != TipoHistoricoLigacao.Perdida &&
+                        outro.Tipo != TipoHistoricoLigacao.NaoAtendidaNesseRamal) continue;
+
+                    var numOutro = NormalizarNumeroParaAgrupamento(outro.Numero);
+                    if (!string.Equals(numAtendida, numOutro, StringComparison.OrdinalIgnoreCase)) continue;
+
+                    var diffSec = Math.Abs((atendida.DataHora - outro.DataHora).TotalSeconds);
+                    if (diffSec > janelaSeg) continue;
+
+                    removidos.Add(outro.Id);
+                    Log($"HISTORY_MISSED_SUPPRESSED linkedid={outro.LinkedId} motivo=answered_by_other_extension " +
+                        $"numero={numOutro} atendidoPor={atendida.RamalAtendeu} diff_sec={diffSec:F0}");
+                }
+            }
+
+            // Passo 2: entre as Perdida/NaoAtendida restantes (sem nenhuma atendida por perto),
+            // colapsa duplicatas do mesmo número/janela em uma única entrada final — mantém a
+            // mais recente, que reflete melhor o desfecho real da chamada.
+            var restantesPerdidas = itens
+                .Where(i => !removidos.Contains(i.Id) &&
+                            (i.Tipo == TipoHistoricoLigacao.Perdida || i.Tipo == TipoHistoricoLigacao.NaoAtendidaNesseRamal))
+                .OrderByDescending(i => i.DataHora)
+                .ToList();
+
+            for (int i = 0; i < restantesPerdidas.Count; i++)
+            {
+                var a = restantesPerdidas[i];
+                if (removidos.Contains(a.Id)) continue;
+                var numA = NormalizarNumeroParaAgrupamento(a.Numero);
+                if (numA.Length < 7) continue;
+
+                for (int j = i + 1; j < restantesPerdidas.Count; j++)
+                {
+                    var b = restantesPerdidas[j];
+                    if (removidos.Contains(b.Id)) continue;
+                    var numB = NormalizarNumeroParaAgrupamento(b.Numero);
+                    if (!string.Equals(numA, numB, StringComparison.OrdinalIgnoreCase)) continue;
+
+                    var diffSec = Math.Abs((a.DataHora - b.DataHora).TotalSeconds);
+                    if (diffSec > janelaSeg) continue;
+
+                    removidos.Add(b.Id);
+                    Log($"HISTORY_DUPLICATE_MISSED_REMOVED linkedid={b.LinkedId} mantido_linkedid={a.LinkedId} " +
+                        $"numero={numB} diff_sec={diffSec:F0}");
+                }
+            }
+
+            if (removidos.Count == 0) return itens;
+            var result = itens.Where(i => !removidos.Contains(i.Id)).ToList();
+            Log($"HISTORY_MISSED_SUPPRESSED_DONE removidos={removidos.Count} total_antes={itens.Count} total_depois={result.Count}");
+            return result;
+        }
+
         // Deduplicates history entries by normalized number + time window only (no tipo check).
         // Used during local history reprocessing to clean up legacy duplicates such as CDR entries
         // that collide with local-SIP entries that were not removed by MesclarCdr due to number
@@ -596,7 +780,7 @@ namespace WavenVoIP.Services
         // Merges groups that share the same external src number within janelaSeg seconds.
         // This handles Issabel queue scenarios where each ramal ring attempt gets its own linkedid.
         private static List<List<CdrChamada>> MergeGruposPorSrcJanela(
-            List<List<CdrChamada>> grupos, int janelaSeg = 90)
+            List<List<CdrChamada>> grupos, int janelaSeg = 180)
         {
             var ordenados = grupos.OrderBy(g => g.Min(r => r.CallDate)).ToList();
             var resultado = new List<List<CdrChamada>>();

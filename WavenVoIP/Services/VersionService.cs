@@ -4,15 +4,30 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "2.2.2";
+        public const string Versao  = "2.2.3";
         public const string NomeApp = "WavenVoIP";
 
-        public static readonly DateTime DataBuild = new DateTime(2026, 6, 29);
+        public static readonly DateTime DataBuild = new DateTime(2026, 7, 11);
 
         public static string VersaoCompleta => $"{NomeApp} v{Versao}";
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v2.2.3 — Filas, Historico e chamada perdida (11/07/2026)\n" +
+            "• [FIX] Chamada em fila/ring group: ramal volta a tocar em todos os ciclos oferecidos pelo Issabel " +
+            "(deteccao por chamador, nao so por Call-ID) — antes so tocava no primeiro ciclo\n" +
+            "• [FIX] Chamada nao pode mais ser marcada Perdida/Abandonada enquanto o cliente ainda estiver " +
+            "esperando na fila (consulta o estado ao vivo de Filas em Tempo Real antes de decidir)\n" +
+            "• [FIX] Historico: chamada atendida por outro ramal nao aparece mais como \"Perdida\"/\"Abandonada na fila\" duplicada\n" +
+            "• [FIX] Notificacao de chamada perdida: so dispara depois do resultado final confirmado " +
+            "(nao mais so por ring/timeout local)\n" +
+            "• [FIX] NaoAtendidaNesseRamal (outro ramal atendeu) nunca mais gera popup/notificacao de chamada perdida\n" +
+            "• [FIX] Historico atualiza e remove duplicatas automaticamente, sem depender do botao \"Atualizar CDR\"\n" +
+            "• [SAFE] Nenhuma alteracao em SIP, audio, RTP, codecs, credenciais, Waven API/Chat, contatos ou dashboard\n" +
+            "• [NOTA] Comportamento de ciclos de toque validado em producao apos ajuste na fila 700 do Issabel " +
+            "(timeout do agente reduzido de 120s para 20s, configuracao no PBX). Alteracao pertence ao Issabel/Asterisk, " +
+            "nao ao Waven — registrada aqui apenas para referencia futura\n" +
+            "\n" +
             "v2.2.2 — Correcao visual do campo de discagem: numero nao cortado (29/06/2026)\n" +
             "• [FIX] Campo de discagem: numero digitado nao e mais cortado na parte inferior\n" +
             "• [FIX] Centralizacao vertical corrigida — TextBox auto-dimensiona a altura da linha e o layout centraliza no campo\n" +

@@ -27,7 +27,12 @@ namespace WavenVoIP.Services
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "WavenVoIP", "Logs");
 
-        private const long MaxBytes = 3 * 1024 * 1024; // 3 MB per file before rotation
+        // 3 MB era pequeno demais para diagnosticar chamadas em fila: um único ciclo de
+        // sincronização de CDR (a cada poucos segundos) já gera milhares de linhas de diagnóstico
+        // por grupo/linkedid, girando o arquivo em questão de segundos e apagando evidência de
+        // testes reais antes de dar tempo de analisar. 50 MB dá margem para uma sessão de teste
+        // completa (vários minutos) sobreviver até a leitura.
+        private const long MaxBytes = 50 * 1024 * 1024; // 50 MB per file before rotation
 
         // Escrita em disco roda numa thread dedicada — chamadas a Append() (feitas direto
         // na UI thread em vários pontos: handlers de clique, StatusChanged, etc.) so
@@ -108,6 +113,13 @@ namespace WavenVoIP.Services
 
         internal static void Google(string msg, LogLevel level = LogLevel.INFO, [CallerMemberName] string caller = "")
             => Append("google", level, caller, msg);
+
+        // Canal dedicado para o log de deduplicação de contatos (CONTACT_DUPLICATE_*/
+        // CONTACT_MATCH_*): esse processamento roda sobre milhares de contatos e podia gerar,
+        // sozinho, dezenas de milhares de linhas por sincronização — inundando "ui_flow" e
+        // apagando evidência de diagnóstico de chamadas/fila antes de dar tempo de analisar.
+        internal static void Contacts(string msg, LogLevel level = LogLevel.INFO, [CallerMemberName] string caller = "")
+            => Append("contacts_sync", level, caller, msg);
 
         internal static void WhatsApp(string msg, LogLevel level = LogLevel.INFO, [CallerMemberName] string caller = "")
             => Append("whatsapp", level, caller, msg);

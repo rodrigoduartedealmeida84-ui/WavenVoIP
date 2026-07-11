@@ -164,14 +164,25 @@ namespace WavenVoIP.Services
             {
                 if (e.FonteCdr || string.IsNullOrWhiteSpace(e.Numero)) return false;
                 var numE = PhoneNumberNormalizer.NormalizeBrazilPhone(DialPlanService.RemoverPrefixoDeRota(e.Numero));
+                bool substituida;
                 if (DialPlanService.EhRamalInterno(numE))
                 {
-                    if (!cdrRamalPorNumero.TryGetValue(numE, out var datasR)) return false;
-                    return datasR.Any(d => Math.Abs((d - e.DataHora).TotalMinutes) <= 2);
+                    substituida = cdrRamalPorNumero.TryGetValue(numE, out var datasR) &&
+                                  datasR.Any(d => Math.Abs((d - e.DataHora).TotalMinutes) <= 2);
                 }
-                if (numE.Length < 8) return false;
-                if (!cdrPorNumero.TryGetValue(numE, out var datas)) return false;
-                return datas.Any(d => Math.Abs((d - e.DataHora).TotalMinutes) <= 2);
+                else if (numE.Length < 8)
+                {
+                    substituida = false;
+                }
+                else
+                {
+                    substituida = cdrPorNumero.TryGetValue(numE, out var datas) &&
+                                  datas.Any(d => Math.Abs((d - e.DataHora).TotalMinutes) <= 2);
+                }
+
+                if (substituida)
+                    Log($"HISTORY_TEMP_ENTRY_REPLACED numero={numE} tipoTemporario={e.Tipo}");
+                return substituida;
             });
 
             // Deduplicate by UniqueId before saving. Prior buggy syncs accumulated multiple copies

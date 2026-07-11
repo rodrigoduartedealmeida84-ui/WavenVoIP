@@ -397,7 +397,7 @@ namespace WavenVoIP.Services
 
         private static void Log(string msg)
         {
-            try { LogHelper.Info(msg); }
+            try { LogHelper.Contacts(msg); }
             catch { }
         }
     }

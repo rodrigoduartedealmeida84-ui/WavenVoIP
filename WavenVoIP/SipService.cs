@@ -27,10 +27,70 @@ namespace WavenVoIP
         private VoIPMediaSession? _mediaSession;
         private SIPRequest? _pendingIncomingRequest;
         private string _pendingIncomingCallId = string.Empty;
+        // Via branch da transação pendente. RFC 3261: a branch identifica a TRANSAÇÃO, não a
+        // chamada — uma retransmissão UDP do mesmo INVITE reusa a MESMA branch; um novo ciclo de
+        // ring group/fila do Issabel pode reusar o Call-ID mas sempre abre uma transação nova
+        // (nova branch/CSeq). Por isso o Call-ID sozinho NUNCA é usado para decidir retransmissão.
+        private string _pendingIncomingBranch = string.Empty;
         private DateTime _ultimoInviteRecebido = DateTime.MinValue;
         private Timer? _monitorChamadaRecebidaTimer;
         private readonly object _incomingLock = new object();
-        private readonly HashSet<string> _ignoredIncomingCallIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Branch -> horário em que foi ignorada (INVITE recusado/cancelado localmente). Existe só
+        // para não reabrir o popup quando o MESMO INVITE (mesma transação) é retransmitido pelo
+        // transporte SIP — isso acontece em poucos segundos, por retransmissão UDP. Chaveado por
+        // branch (não Call-ID) para nunca bloquear um ciclo novo e legítimo que reuse o Call-ID.
+        private readonly Dictionary<string, DateTime> _ignoredBranches = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly TimeSpan _janelaIgnorarBranchRetransmissao = TimeSpan.FromSeconds(5);
+
+        private bool EhBranchIgnoradaRecente(string branch)
+        {
+            if (string.IsNullOrWhiteSpace(branch)) return false;
+            if (!_ignoredBranches.TryGetValue(branch, out var quando)) return false;
+            if (DateTime.Now - quando < _janelaIgnorarBranchRetransmissao) return true;
+            _ignoredBranches.Remove(branch);
+            return false;
+        }
+
+        private void MarcarBranchIgnorada(string branch)
+        {
+            if (string.IsNullOrWhiteSpace(branch)) return;
+            _ignoredBranches[branch] = DateTime.Now;
+        }
+
+        // Mascara Call-ID/branch/tags para log: mantém só os 4 primeiros e 4 últimos caracteres.
+        private static string MascararTextoSip(string valor)
+        {
+            if (string.IsNullOrWhiteSpace(valor)) return string.Empty;
+            if (valor.Length <= 10) return new string('*', valor.Length);
+            return valor.Substring(0, 4) + "..." + valor.Substring(valor.Length - 4);
+        }
+
+        private static string ObterBranch(SIPRequest? req)
+        {
+            try { return req?.Header?.Vias?.TopViaHeader?.Branch ?? string.Empty; }
+            catch { return string.Empty; }
+        }
+
+        private static int ObterCSeq(SIPRequest? req)
+        {
+            try { return req?.Header?.CSeq ?? 0; }
+            catch { return 0; }
+        }
+
+        private static string ObterFromTag(SIPRequest? req)
+        {
+            try { return req?.Header?.From?.FromTag ?? string.Empty; }
+            catch { return string.Empty; }
+        }
+
+        // Número do chamador (From URI user) — usado para reconhecer a MESMA chamada de fila
+        // sendo reofertada com um Call-ID novo (cada tentativa de agente pode originar um Dial()
+        // novo no Issabel, com Call-ID próprio, mas o chamador é sempre o mesmo).
+        private static string ObterFromUser(SIPRequest? req)
+        {
+            try { return req?.Header?.From?.FromURI?.User ?? string.Empty; }
+            catch { return string.Empty; }
+        }
         private bool _emEspera;
         private volatile bool _cancelamentoSolicitado;
         private volatile bool _chamadaSaindoEmAndamento;
@@ -58,6 +118,11 @@ namespace WavenVoIP
 
         public event Action<string>? StatusChanged;
         public event Action<string>? IncomingCallReceived;
+        // Disparado quando o Issabel reoferece a MESMA chamada (mesmo Call-ID, nova transação/
+        // branch) num novo ciclo de ring group/fila, enquanto o ciclo anterior ainda não tinha
+        // sido claramente encerrado no app. A UI deve atualizar/reabrir o popup, nunca tratar
+        // isso como uma chamada perdida.
+        public event Action<string>? IncomingCallCycleRenewed;
         public event Action? IncomingCallEnded;
         public event Action? CallEnded;
 
@@ -94,8 +159,12 @@ namespace WavenVoIP
                         var tsInvite = DateTime.Now;
                         var inviteFrom = sipRequest.Header?.From?.FromURI?.User ?? "Unknown";
                         var inviteCallId = ObterCallId(sipRequest);
+                        var inviteBranch = ObterBranch(sipRequest);
+                        var inviteCSeq = ObterCSeq(sipRequest);
                         RegistrarSinalSip($"INCOMING_INVITE_RECEIVED ts={tsInvite:HH:mm:ss.fff} Call-ID={inviteCallId} From={inviteFrom} To={sipRequest.Header?.To?.ToURI?.User ?? string.Empty}");
                         LogHelper.Sip($"INCOMING_INVITE_RECEIVED | Call-ID={inviteCallId} From={inviteFrom}");
+                        LogHelper.Sip($"SIP_INVITE_RECEIVED callId={MascararTextoSip(inviteCallId)} cseq={inviteCSeq} " +
+                            $"branch={MascararTextoSip(inviteBranch)} desdeUltimoCicloMs={(tsInvite - _ultimoInviteRecebido).TotalMilliseconds:0}");
                         _ultimoInviteRecebido = tsInvite;
 
                         // ESSENCIAL para funcionar igual MicroSIP/IP Phone:
@@ -104,6 +173,12 @@ namespace WavenVoIP
                         // para o fluxo do softphone.
                         await EnviarRespostaTentandoETocandoAsync(sipRequest);
                         RegistrarSinalSip($"SIP_INVITE_TO_ISSABEL_SENT elapsed={(DateTime.Now - tsInvite).TotalMilliseconds:0}ms Call-ID={inviteCallId}");
+
+                        // Processa aqui — no handler de transporte, que recebe TODO INVITE de forma
+                        // confiável — em vez de depender de SIPUserAgent.OnIncomingCall refirar para
+                        // ciclos de ring group/fila subsequentes (comportamento interno da lib que
+                        // não controlamos e que pode não repetir para o mesmo Call-ID).
+                        ProcessarInviteRecebido(sipRequest);
                     }
 
                     // Quando a chamada vem de fila/ring group e outro atendente atende,
@@ -113,18 +188,42 @@ namespace WavenVoIP
                     // de mantermos a referência em _pendingIncomingRequest.
                     if (sipRequest.Method == SIPMethodsEnum.CANCEL)
                     {
-                        RegistrarSinalSip($"RX CANCEL Call-ID={ObterCallId(sipRequest)}");
+                        var cancelCallId = ObterCallId(sipRequest);
+                        var cancelBranch = ObterBranch(sipRequest);
+                        RegistrarSinalSip($"RX CANCEL Call-ID={cancelCallId}");
+                        LogHelper.Sip($"SIP_CANCEL_RECEIVED callId={MascararTextoSip(cancelCallId)} branch={MascararTextoSip(cancelBranch)}");
+
                         var okCancel = SIPResponse.GetResponse(
                             sipRequest,
                             SIPResponseStatusCodesEnum.Ok,
                             null);
-
                         await _sipTransport.SendResponseAsync(okCancel);
 
-                        var cancelCallId = ObterCallId(sipRequest);
-                        if (!string.IsNullOrWhiteSpace(cancelCallId))
-                            _ignoredIncomingCallIds.Add(cancelCallId);
+                        // RFC 3261 §9.2: além do 200 OK ao CANCEL, o UAS deve responder 487 Request
+                        // Terminated ao INVITE original sendo cancelado, se ainda não respondeu com
+                        // uma resposta final. Isso fecha essa transação de forma limpa no lado do
+                        // Issabel, sem afetar o Call-ID (que pode ser reusado no próximo ciclo).
+                        try
+                        {
+                            if (_pendingIncomingRequest != null &&
+                                !string.IsNullOrWhiteSpace(cancelBranch) &&
+                                string.Equals(ObterBranch(_pendingIncomingRequest), cancelBranch, StringComparison.OrdinalIgnoreCase))
+                            {
+                                var terminated = SIPResponse.GetResponse(_pendingIncomingRequest, SIPResponseStatusCodesEnum.RequestTerminated, null);
+                                await _sipTransport.SendResponseAsync(terminated);
+                                LogHelper.Sip($"SIP_487_SENT callId={MascararTextoSip(cancelCallId)} branch={MascararTextoSip(cancelBranch)}");
+                            }
+                        }
+                        catch { }
 
+                        // Marca só ESTA transação (branch) como ignorada — nunca o Call-ID inteiro,
+                        // para não bloquear um novo ciclo legítimo que reuse o mesmo Call-ID.
+                        MarcarBranchIgnorada(cancelBranch);
+                        LogHelper.Sip($"RING_CYCLE_END callId={MascararTextoSip(cancelCallId)} branch={MascararTextoSip(cancelBranch)} motivo=cancel_recebido");
+
+                        // Encerra só esta perna — NÃO marca a chamada inteira como perdida aqui;
+                        // isso só acontece depois via CDR/AMI confirmando que ninguém atendeu em
+                        // lugar nenhum (ver DialerShellWindow.PodeNotificarChamadaPerdida).
                         LimparChamadaRecebidaPendente(false);
                         StatusChanged?.Invoke("Chamada cancelada pelo Issabel/remetente.");
                         IncomingCallEnded?.Invoke();
@@ -180,6 +279,25 @@ namespace WavenVoIP
 
         private void OnIncomingCall(SIPUserAgent ua, SIPRequest req)
         {
+            // A lógica principal já roda em ProcessarInviteRecebido, chamada pelo handler de
+            // transporte (SIPTransportRequestReceived) — que recebe todo INVITE de forma confiável,
+            // independente de o SIPUserAgent decidir refirar OnIncomingCall para um Call-ID repetido
+            // num novo ciclo de ring group/fila (comportamento interno da lib fora do nosso controle).
+            // Este callback fica só como rede de segurança, caso o SIPUserAgent chame antes do
+            // handler de transporte processar a mesma transação.
+            if (ReferenceEquals(_pendingIncomingRequest, req)) return;
+            ProcessarInviteRecebido(req);
+        }
+
+        // Ponto único de decisão para qualquer INVITE de entrada — chamado tanto pelo handler de
+        // transporte (via confiável) quanto por OnIncomingCall (rede de segurança). Diferencia:
+        //   • retransmissão UDP do MESMO INVITE (mesma branch Via) → ignora, sem reabrir popup;
+        //   • novo ciclo legítimo da MESMA chamada (mesmo Call-ID, branch NOVA) → supera o estado
+        //     anterior e dispara IncomingCallCycleRenewed para o popup atualizar/reabrir;
+        //   • chamada realmente nova (Call-ID novo, nada pendente) → dispara IncomingCallReceived;
+        //   • chamada simultânea diferente enquanto já existe uma pendente → ocupado (486).
+        private void ProcessarInviteRecebido(SIPRequest req)
+        {
             try
             {
                 if (ModoOffline)
@@ -194,36 +312,74 @@ namespace WavenVoIP
 
                 var sw = System.Diagnostics.Stopwatch.StartNew();
                 var callId = ObterCallId(req);
+                var branch = ObterBranch(req);
+                var cseq = ObterCSeq(req);
                 _ultimoInviteRecebido = DateTime.Now;
                 RegistrarSinalSip($"WHATSAPP_CALL_EVENT_RECEIVED Call-ID={callId}");
 
                 // 100 Trying + 180 Ringing already sent by transport handler — no duplicate.
 
-                // Evita reabrir o popup quando o usuário já recusou/fechou esta mesma chamada.
-                if (!string.IsNullOrWhiteSpace(callId) && _ignoredIncomingCallIds.Contains(callId))
+                // Evita reabrir o popup quando o usuário já recusou/cancelou ESTA transação —
+                // mas só durante a janela curta de retransmissão (ver EhBranchIgnoradaRecente).
+                // Chaveado por branch (não Call-ID): um novo ciclo sempre abre transação nova.
+                if (EhBranchIgnoradaRecente(branch))
                 {
+                    LogHelper.Sip($"SIP_INVITE_BLOCKED callId={MascararTextoSip(callId)} branch={MascararTextoSip(branch)} motivo=branch_ignorada_recente");
                     EnviarRespostaOcupado(req);
                     return;
                 }
 
+                bool novoCiclo;
                 lock (_incomingLock)
                 {
-                    // Retransmissão do mesmo INVITE: ignora sem reabrir popup.
                     if (_pendingIncomingRequest != null)
                     {
-                        if (string.Equals(_pendingIncomingCallId, callId, StringComparison.OrdinalIgnoreCase))
+                        var mesmaTransacao = !string.IsNullOrWhiteSpace(branch) &&
+                            string.Equals(_pendingIncomingBranch, branch, StringComparison.OrdinalIgnoreCase);
+                        if (mesmaTransacao)
                         {
                             RegistrarSinalSip($"WHATSAPP_DUPLICATE_EVENT_IGNORED Call-ID={callId}");
+                            LogHelper.Sip($"SIP_INVITE_RETRANSMISSION callId={MascararTextoSip(callId)} branch={MascararTextoSip(branch)} cseq={cseq}");
                             return;
                         }
 
-                        // Já existe outra chamada pendente: responde ocupado para a nova.
-                        EnviarRespostaOcupado(req);
-                        return;
+                        var mesmoCallId = string.Equals(_pendingIncomingCallId, callId, StringComparison.OrdinalIgnoreCase);
+
+                        // Filas do Issabel frequentemente originam CADA tentativa de agente como
+                        // um Dial() novo (canal/Local channel novo) — o que gera um Call-ID NOVO a
+                        // cada ciclo, não o mesmo Call-ID reaproveitado. Se o Call-ID mudou mas o
+                        // chamador (From URI/número) é o MESMO da chamada pendente, ainda é a MESMA
+                        // chamada de fila reofertada — nunca "chamada simultânea diferente".
+                        var chamadorAtual    = ObterFromUser(req);
+                        var chamadorPendente = ObterFromUser(_pendingIncomingRequest);
+                        var mesmoChamador = !mesmoCallId &&
+                            !string.IsNullOrWhiteSpace(chamadorAtual) &&
+                            string.Equals(chamadorAtual, chamadorPendente, StringComparison.OrdinalIgnoreCase);
+
+                        if (!mesmoCallId && !mesmoChamador)
+                        {
+                            LogHelper.Sip($"SIP_INVITE_BLOCKED callId={MascararTextoSip(callId)} branch={MascararTextoSip(branch)} " +
+                                $"motivo=ja_existe_pendente pendenteCallId={MascararTextoSip(_pendingIncomingCallId)}");
+                            EnviarRespostaOcupado(req);
+                            return;
+                        }
+
+                        // Mesmo Call-ID (branch/CSeq diferentes) OU Call-ID novo do MESMO chamador:
+                        // não é retransmissão — é um novo ciclo de fila/ring group reofertando a
+                        // MESMA chamada, possivelmente com um canal/Dial() novo no Issabel.
+                        LogHelper.Sip($"SIP_INVITE_NEW_CYCLE callId={MascararTextoSip(callId)} cseq={cseq} " +
+                            $"branchAnterior={MascararTextoSip(_pendingIncomingBranch)} branchNova={MascararTextoSip(branch)} " +
+                            $"motivo={(mesmoCallId ? "mesmo_call_id" : "mesmo_chamador_novo_call_id")}");
+                        novoCiclo = true;
+                    }
+                    else
+                    {
+                        novoCiclo = false;
                     }
 
                     _pendingIncomingRequest = req;
                     _pendingIncomingCallId = callId;
+                    _pendingIncomingBranch = branch;
                 }
 
                 IniciarMonitorChamadaRecebida();
@@ -237,7 +393,11 @@ namespace WavenVoIP
                 // Fire event IMMEDIATELY — popup must not wait for origin detection (reflection + disk I/O)
                 RegistrarSinalSip($"WHATSAPP_FORWARD_TO_ISSABEL_START elapsed={sw.ElapsedMilliseconds}ms Call-ID={callId}");
                 StatusChanged?.Invoke($"Chamada recebida de {caller}");
-                IncomingCallReceived?.Invoke(caller);
+
+                if (novoCiclo)
+                    IncomingCallCycleRenewed?.Invoke(caller);
+                else
+                    IncomingCallReceived?.Invoke(caller);
                 RegistrarSinalSip($"EXTENSION_RING_STARTED elapsed={sw.ElapsedMilliseconds}ms Call-ID={callId}");
 
                 // Origin detection runs async — has reflection + file I/O, must not block popup
@@ -257,8 +417,8 @@ namespace WavenVoIP
             catch (Exception ex)
             {
                 StatusChanged?.Invoke($"Erro ao tratar chamada recebida: {ex.Message}");
-                RegistrarSinalSip($"INCOMING_CALL_HANDLER_ERROR | OnIncomingCall excecao: {ex}");
-                LogHelper.Sip($"INCOMING_CALL_HANDLER_ERROR | OnIncomingCall: {ex.Message}", LogLevel.ERROR);
+                RegistrarSinalSip($"INCOMING_CALL_HANDLER_ERROR | ProcessarInviteRecebido excecao: {ex}");
+                LogHelper.Sip($"INCOMING_CALL_HANDLER_ERROR | ProcessarInviteRecebido: {ex.Message}", LogLevel.ERROR);
             }
         }
 
@@ -1878,8 +2038,10 @@ namespace WavenVoIP
                     LogHelper.Sip($"INCOMING_CALL_REJECTED | Call-ID={callId}");
                     RegistrarSinalSip($"INCOMING_CALL_REJECTED | Call-ID={callId}");
 
-                    if (!string.IsNullOrWhiteSpace(callId))
-                        _ignoredIncomingCallIds.Add(callId);
+                    // Só marca ESTA transação (branch) como ignorada — o Call-ID pode voltar
+                    // num próximo ciclo legítimo (outro ramal ainda tocando na fila/ring group).
+                    MarcarBranchIgnorada(_pendingIncomingBranch);
+                    LogHelper.Sip($"RING_CYCLE_END Call-ID={MascararTextoSip(callId)} branch={MascararTextoSip(_pendingIncomingBranch)} motivo=recusada_localmente");
 
                     EnviarRespostaOcupado(_pendingIncomingRequest);
                     LimparChamadaRecebidaPendente(false);
@@ -1902,8 +2064,8 @@ namespace WavenVoIP
             {
                 // Usado pelo X do popup: silencia/fecha neste computador e evita que a mesma
                 // chamada reabra a janela caso o Issabel retransmita o INVITE.
-                if (!string.IsNullOrWhiteSpace(_pendingIncomingCallId))
-                    _ignoredIncomingCallIds.Add(_pendingIncomingCallId);
+                MarcarBranchIgnorada(_pendingIncomingBranch);
+                LogHelper.Sip($"RING_CYCLE_END Call-ID={MascararTextoSip(_pendingIncomingCallId)} branch={MascararTextoSip(_pendingIncomingBranch)} motivo=ignorada_localmente");
 
                 LimparChamadaRecebidaPendente(false);
                 StatusChanged?.Invoke("Chamada ignorada neste computador.");
@@ -1997,19 +2159,27 @@ namespace WavenVoIP
 
         private void LimparChamadaRecebidaPendente(bool esquecerIgnorados)
         {
+            string callIdLimpo, branchLimpa;
             lock (_incomingLock)
             {
+                callIdLimpo = _pendingIncomingCallId;
+                branchLimpa = _pendingIncomingBranch;
                 _pendingIncomingRequest = null;
                 _pendingIncomingCallId = string.Empty;
+                _pendingIncomingBranch = string.Empty;
             }
+            LogHelper.Sip($"SIP_CALL_STATE_CLEARED callId={MascararTextoSip(callIdLimpo)} branch={MascararTextoSip(branchLimpa)}");
 
             try { _monitorChamadaRecebidaTimer?.Dispose(); _monitorChamadaRecebidaTimer = null; } catch { }
 
-            if (esquecerIgnorados && _ignoredIncomingCallIds.Count > 80)
+            if (esquecerIgnorados && _ignoredBranches.Count > 80)
             {
-                var recentes = _ignoredIncomingCallIds.Take(20).ToList();
-                _ignoredIncomingCallIds.Clear();
-                foreach (var id in recentes) _ignoredIncomingCallIds.Add(id);
+                var recentes = _ignoredBranches.OrderByDescending(kv => kv.Value).Take(20).ToList();
+                var removidas = _ignoredBranches.Count - recentes.Count;
+                _ignoredBranches.Clear();
+                foreach (var kv in recentes) _ignoredBranches[kv.Key] = kv.Value;
+                if (removidas > 0)
+                    LogHelper.Sip($"SIP_CALL_ID_CACHE_REMOVE quantidade={removidas}");
             }
         }
 

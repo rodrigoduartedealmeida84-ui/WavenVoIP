@@ -44,6 +44,10 @@ namespace WavenVoIP.Views
         private readonly DispatcherTimer _amiSyncTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(10) };
         private readonly DispatcherTimer _googleSyncTimer = new DispatcherTimer();
         private readonly DispatcherTimer _cdrSyncTimer = new DispatcherTimer();
+        // Refresh mais rápido enquanto a tela de Histórico está aberta — evita depender
+        // só do botão "Atualizar CDR" ou do intervalo configurado (que pode estar em minutos).
+        private readonly DispatcherTimer _historicoFastRefreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(6) };
+        private bool _cdrSyncEmAndamento = false;
         private readonly DispatcherTimer _companyConfigTimer  = new DispatcherTimer { Interval = TimeSpan.FromMinutes(30) };
         private readonly DispatcherTimer _contactsSyncTimer   = new DispatcherTimer { Interval = TimeSpan.FromMinutes(5) };
         // Debounce: evita refiltragem a cada tecla — executa só 300ms após parar de digitar
@@ -61,6 +65,29 @@ namespace WavenVoIP.Views
         // Dashboard / missed call state
         private int _badgePendentes = 0;
         private readonly System.Collections.Generic.HashSet<string> _perdidasJaMostradas = new(StringComparer.OrdinalIgnoreCase);
+        // UIDs já vistos pelo usuário (abriu o Histórico) — não contam mais no badge, mesmo
+        // que ainda estejam marcados como notificados em _perdidasJaMostradas.
+        private readonly System.Collections.Generic.HashSet<string> _perdidasVistas = new(StringComparer.OrdinalIgnoreCase);
+        // Candidatos a "Perdida" aguardando confirmação antes de notificar (uid -> horário da
+        // primeira detecção). O critério de "pode notificar" é o ESTADO real checado em
+        // PodeNotificarChamadaPerdida (popup, SIP local, ramal AMI ativo) — este pequeno atraso
+        // é só para deixar o próximo snapshot AMI/CDR propagar antes de confirmar em definitivo.
+        private readonly System.Collections.Generic.Dictionary<string, DateTime> _perdidasPendentesConfirmacao =
+            new(StringComparer.OrdinalIgnoreCase);
+        private static readonly TimeSpan _janelaConfirmacaoPerdida = TimeSpan.FromSeconds(6);
+        // Só chamadas Perdida dentro desta janela contam como candidatas "ao vivo" a notificar.
+        // Mais antigas que isso (ex.: histórico de dias atrás, recarregado a cada sync) só são
+        // marcadas como vistas — sem isso, todo restart do app renotificaria o histórico inteiro.
+        private static readonly TimeSpan _janelaDeteccaoPerdidaRecente = TimeSpan.FromMinutes(15);
+        // true desde que um INVITE de entrada começa a tocar até essa perna terminar (atendida,
+        // recusada, ignorada ou cancelada pelo Issabel).
+        private bool _chamadaEntradaAtivaOuTocando = false;
+        // Horário em que a última perna de entrada terminou. Usado SÓ como proteção residual
+        // contra race condition (ex.: o snapshot AMI ainda não atualizou no milissegundo exato
+        // em que o ring terminou) — NUNCA é o critério principal de decisão; o estado real
+        // (popup, SIP pendente, ramal AMI ativo) é checado primeiro em PodeNotificarChamadaPerdida.
+        private DateTime _ultimoFimChamadaEntrada = DateTime.MinValue;
+        private static readonly TimeSpan _janelaResfriamentoPosRing = TimeSpan.FromSeconds(6);
         private MissedCallPopup? _missedCallPopup;
 
         // ── System log panel ─────────────────────────────────────────────────────
@@ -109,86 +136,13 @@ namespace WavenVoIP.Views
             };
 
             _sipService.IncomingCallReceived += caller =>
-            {
-                Dispatcher.BeginInvoke(new Action(() =>
-                {
-                    try
-                    {
-                        if (_incomingPopup != null)
-                        {
-                            RegistrarUiDiagnostico($"INCOMING_CALL_HANDLER_ERROR | popup ja aberto caller={caller} — ignorando INVITE duplicado");
-                            return;
-                        }
-                        if (!_sipService.PossuiChamadaRecebidaPendente)
-                        {
-                            RegistrarUiDiagnostico($"INCOMING_CALL_HANDLER_ERROR | PossuiChamadaRecebidaPendente=false caller={caller} — popup nao aberto");
-                            return;
-                        }
+                Dispatcher.BeginInvoke(new Action(() => AbrirPopupChamadaRecebida(caller, ehNovoCiclo: false)));
 
-                        _ultimaOrigemEntradaPendente = _sipService.LastIncomingOrigin;
-                        var displayCaller = ResolverDisplayChamada(caller);
-                        var tela = new IncomingCallWindow(displayCaller);
-                        _incomingPopup = tela;
-                        bool acaoExecutada = false;
-
-                        RegistrarUiDiagnostico($"INCOMING_CALL_WINDOW_OPEN | caller={caller} display={displayCaller}");
-                        Services.LogHelper.Sip($"INCOMING_CALL_WINDOW_OPEN | caller={caller} display={displayCaller}");
-
-                        tela.AtenderSolicitado += async () =>
-                        {
-                            if (acaoExecutada) return;
-                            acaoExecutada = true;
-
-                            if (_sipService.PossuiChamadaRecebidaPendente)
-                            {
-                                bool atendeu = await _sipService.AtenderChamada();
-                                if (atendeu)
-                                {
-                                    var call = CriarTelaDeChamada(displayCaller, "Em chamada");
-                                    _activeCallWindow = call;
-                                    call.Closed += (_, __) => { if (ReferenceEquals(_activeCallWindow, call)) _activeCallWindow = null; };
-                                    call.IniciarContador();
-                                    call.Show();
-                                    IniciarControleHistoricoChamada(RegistrarHistorico(caller, TipoHistoricoLigacao.Recebida, "Em andamento", OrigemEntradaAtual(caller)));
-                                }
-                            }
-                        };
-
-                        tela.RecusarSolicitado += () =>
-                        {
-                            if (acaoExecutada) return;
-                            acaoExecutada = true;
-
-                            if (_sipService.PossuiChamadaRecebidaPendente)
-                            {
-                                _sipService.RecusarChamada();
-                                RegistrarHistorico(caller, TipoHistoricoLigacao.Perdida, "00:00", OrigemEntradaAtual(caller));
-                                MostrarNotificacaoChamadaPerdida(displayCaller);
-                            }
-                        };
-
-                        tela.Closed += (_, __) =>
-                        {
-                            if (ReferenceEquals(_incomingPopup, tela))
-                                _incomingPopup = null;
-
-                            if (!acaoExecutada && !tela.EncerradaPeloSistema && _sipService.PossuiChamadaRecebidaPendente)
-                            {
-                                _sipService.IgnorarChamadaLocal();
-                            }
-                        };
-
-                        tela.Show();
-                        RegistrarUiDiagnostico($"EXTENSION_RING_POPUP_SHOWN caller={caller}");
-                    }
-                    catch (Exception exIncoming)
-                    {
-                        RegistrarUiDiagnostico($"INCOMING_CALL_HANDLER_ERROR | excecao no handler: {exIncoming.Message}");
-                        Services.LogHelper.Sip($"INCOMING_CALL_HANDLER_ERROR | {exIncoming.Message}", Services.LogLevel.ERROR);
-                        _incomingPopup = null;
-                    }
-                }));
-            };
+            // Issabel reoferecendo a MESMA chamada num novo ciclo de ring group/fila (Call-ID
+            // reusado, transação nova) — nunca trata como chamada perdida; reabre/atualiza o popup
+            // e mantém o ramal apto a atender.
+            _sipService.IncomingCallCycleRenewed += caller =>
+                Dispatcher.BeginInvoke(new Action(() => AbrirPopupChamadaRecebida(caller, ehNovoCiclo: true)));
 
             _sipService.IncomingCallEnded += () =>
             {
@@ -196,6 +150,8 @@ namespace WavenVoIP.Views
                 {
                     try
                     {
+                        _chamadaEntradaAtivaOuTocando = false;
+                        _ultimoFimChamadaEntrada = DateTime.Now;
                         if (_incomingPopup != null)
                         {
                             _incomingPopup.FecharPorSistema();
@@ -212,6 +168,8 @@ namespace WavenVoIP.Views
                 {
                     try
                     {
+                        _chamadaEntradaAtivaOuTocando = false;
+                        _ultimoFimChamadaEntrada = DateTime.Now;
                         AtualizarDuracaoHistoricoChamadaAtiva();
                         if (_activeCallWindow != null)
                         {
@@ -251,6 +209,113 @@ namespace WavenVoIP.Views
             };
         }
 
+        // Abre o popup de chamada recebida. Chamado tanto para uma chamada nova quanto para um
+        // novo ciclo de ring group/fila reofertando a MESMA chamada (ehNovoCiclo=true) — nesse
+        // caso, se o popup do ciclo anterior ainda estiver aberto (ex.: CANCEL ainda não chegou
+        // limpo), fecha-o como "encerrado pelo sistema" (sem acionar IgnorarChamadaLocal) antes
+        // de abrir o novo, para nunca bloquear o atendimento por causa do estado do ciclo anterior.
+        private void AbrirPopupChamadaRecebida(string caller, bool ehNovoCiclo)
+        {
+            try
+            {
+                if (_incomingPopup != null)
+                {
+                    if (!ehNovoCiclo)
+                    {
+                        RegistrarUiDiagnostico($"INCOMING_CALL_HANDLER_ERROR | popup ja aberto caller={caller} — ignorando INVITE duplicado");
+                        return;
+                    }
+
+                    try { _incomingPopup.FecharPorSistema(); } catch { }
+                    _incomingPopup = null;
+                }
+
+                if (!_sipService.PossuiChamadaRecebidaPendente)
+                {
+                    RegistrarUiDiagnostico($"INCOMING_CALL_HANDLER_ERROR | PossuiChamadaRecebidaPendente=false caller={caller} — popup nao aberto");
+                    return;
+                }
+
+                _ultimaOrigemEntradaPendente = _sipService.LastIncomingOrigin;
+                var displayCaller = ResolverDisplayChamada(caller);
+                var tela = new IncomingCallWindow(displayCaller);
+                _incomingPopup = tela;
+                bool acaoExecutada = false;
+
+                // Marca a chamada como ativa/tocando — bloqueia qualquer notificação de
+                // "perdida" enquanto isso for true (ver ExisteChamadaAtivaRelacionada).
+                _chamadaEntradaAtivaOuTocando = true;
+
+                RegistrarUiDiagnostico($"INCOMING_CALL_WINDOW_OPEN | caller={caller} display={displayCaller}");
+                Services.LogHelper.Sip($"INCOMING_CALL_WINDOW_OPEN | caller={caller} display={displayCaller}");
+
+                tela.AtenderSolicitado += async () =>
+                {
+                    if (acaoExecutada) return;
+                    acaoExecutada = true;
+
+                    if (_sipService.PossuiChamadaRecebidaPendente)
+                    {
+                        bool atendeu = await _sipService.AtenderChamada();
+                        if (atendeu)
+                        {
+                            RegistrarUiDiagnostico($"INCOMING_CALL_ANSWERED caller={caller}");
+                            var call = CriarTelaDeChamada(displayCaller, "Em chamada");
+                            _activeCallWindow = call;
+                            call.Closed += (_, __) => { if (ReferenceEquals(_activeCallWindow, call)) _activeCallWindow = null; };
+                            call.IniciarContador();
+                            call.Show();
+                            IniciarControleHistoricoChamada(RegistrarHistorico(caller, TipoHistoricoLigacao.Recebida, "Em andamento", OrigemEntradaAtual(caller)));
+                        }
+                    }
+                };
+
+                tela.RecusarSolicitado += () =>
+                {
+                    if (acaoExecutada) return;
+                    acaoExecutada = true;
+
+                    if (_sipService.PossuiChamadaRecebidaPendente)
+                    {
+                        _sipService.RecusarChamada();
+                        // Não notifica aqui: recusar localmente não é o resultado final da
+                        // chamada — a fila pode seguir tocando outro ramal. A notificação de
+                        // chamada perdida só dispara depois da sincronização CDR confirmar que
+                        // ninguém atendeu (ver DetectarChamadasPerdidasNovas).
+                        RegistrarHistorico(caller, TipoHistoricoLigacao.Perdida, "00:00", OrigemEntradaAtual(caller));
+                    }
+                };
+
+                tela.Closed += (_, __) =>
+                {
+                    if (ReferenceEquals(_incomingPopup, tela))
+                        _incomingPopup = null;
+
+                    // A janela fechou por qualquer motivo (recusada, ignorada, sistema) —
+                    // nosso lado da chamada não está mais tocando. Se ninguém atendeu em
+                    // nenhum ramal, o CDR/AMI vai confirmar isso depois; só então notifica.
+                    // O cooldown em _ultimoFimChamadaEntrada cobre o intervalo até o
+                    // Issabel reenviar um novo INVITE para o próximo ramal da fila/ring group.
+                    _chamadaEntradaAtivaOuTocando = false;
+                    _ultimoFimChamadaEntrada = DateTime.Now;
+
+                    if (!acaoExecutada && !tela.EncerradaPeloSistema && _sipService.PossuiChamadaRecebidaPendente)
+                    {
+                        _sipService.IgnorarChamadaLocal();
+                    }
+                };
+
+                tela.Show();
+                RegistrarUiDiagnostico($"EXTENSION_RING_POPUP_SHOWN caller={caller}");
+            }
+            catch (Exception exIncoming)
+            {
+                RegistrarUiDiagnostico($"INCOMING_CALL_HANDLER_ERROR | excecao no handler: {exIncoming.Message}");
+                Services.LogHelper.Sip($"INCOMING_CALL_HANDLER_ERROR | {exIncoming.Message}", Services.LogLevel.ERROR);
+                _incomingPopup = null;
+            }
+        }
+
         private void DialerShellWindow_Loaded(object sender, RoutedEventArgs e)
         {
             try
@@ -282,6 +347,7 @@ namespace WavenVoIP.Views
                 _ = SincronizarContatosRemotosAsync();
                 _contactsSyncTimer.Tick += (_, __) => _ = SincronizarContatosRemotosAsync();
                 _contactsSyncTimer.Start();
+                _historicoFastRefreshTimer.Tick += (_, __) => _ = ExecutarSyncCdrAsync(silencioso: true);
                 _debounceContatos.Tick  += (_, __) => { _debounceContatos.Stop();  AtualizarContatosShell(); };
                 _debounceHistorico.Tick += (_, __) => { _debounceHistorico.Stop(); AtualizarHistoricoShell(); };
                 _ = SincronizarConfigEmpresaAsync(silencioso: true);
@@ -1425,6 +1491,14 @@ namespace WavenVoIP.Views
 
         private async Task ExecutarSyncCdrAsync(bool silencioso, int? diasOverride = null)
         {
+            // Evita sobrepor sincronizações (ex.: timer rápido da tela de Histórico disparando
+            // antes da sincronização anterior terminar) — não trava a UI, só ignora a chamada extra.
+            if (_cdrSyncEmAndamento)
+            {
+                RegistrarUiDiagnostico("CDR_SYNC_SKIPPED_BUSY");
+                return;
+            }
+            _cdrSyncEmAndamento = true;
             RegistrarUiDiagnostico("CDR_SYNC_START");
             try
             {
@@ -1457,7 +1531,16 @@ namespace WavenVoIP.Views
                 var gravacoes = itens.Count(i => !string.IsNullOrWhiteSpace(i.GravacaoUrl));
                 RegistrarUiDiagnostico($"CDR_SYNC_DONE chamadas={itens.Count} novas={novos} gravacoes={gravacoes}");
 
-                var itensCopia = itens.ToList();
+                // Aplica a MESMA limpeza local (unificação/deduplicação/supressão de Perdida) que
+                // antes só rodava quando o usuário clicava em "Atualizar CDR" — agora roda em todo
+                // refresh, manual ou automático (timer de 3s / timer rápido de 6s da tela aberta),
+                // sem validar URLs de gravação (rápido, sem HTTP) para não pesar o ciclo automático.
+                await Task.Run(() => IssabelCdrService.ReprocessarHistoricoCdrLocalAsync(false));
+
+                // Recarrega o estado local já unificado — reflete qualquer duplicata removida
+                // pela limpeza acima, não só o lote recém-buscado do CDR.
+                var itensAtualizados = HistoricoStorageService.CarregarComRetencao(config.HistoricoRetencaoDias);
+
                 Dispatcher.Invoke(() =>
                 {
                     AtualizarHistoricoShell();
@@ -1465,7 +1548,9 @@ namespace WavenVoIP.Views
                         txtStatusHistorico.Text = $"CDR atualizado • {itens.Count} chamadas • {novos} novas • {gravacoes} gravações";
                     if (txtStatusCdrConfig != null)
                         txtStatusCdrConfig.Text = $"Sincronizado • {itens.Count} chamadas • {novos} novas • {gravacoes} gravações";
-                    if (novos > 0) DetectarChamadasPerdidasNovas(itensCopia);
+                    // Roda sempre (não só quando novos>0): a limpeza acima pode ter removido
+                    // duplicatas mesmo sem nenhum item novo, e o badge precisa recalcular também.
+                    DetectarChamadasPerdidasNovas(itensAtualizados);
                     dashboardControl?.AtualizarDados();
                 });
 
@@ -1519,6 +1604,10 @@ namespace WavenVoIP.Views
                         });
                     }
                 }
+            }
+            finally
+            {
+                _cdrSyncEmAndamento = false;
             }
         }
 
@@ -2112,6 +2201,7 @@ namespace WavenVoIP.Views
                     _reconnectTimer.Stop();
                     _amiSyncTimer.Stop();
                     _cdrSyncTimer.Stop();
+                    _historicoFastRefreshTimer.Stop();
                     _googleSyncTimer.Stop();
                     _companyConfigTimer.Stop();
                     _contactsSyncTimer.Stop();
@@ -2208,7 +2298,7 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
 
         private void NavDiscagem_Click(object sender, RoutedEventArgs e) { MainTabs.SelectedIndex = 0; AtualizarNavSelecionada(); AnimarAbaAtual(); }
         private void NavContatos_Click(object sender, RoutedEventArgs e) { MainTabs.SelectedIndex = 1; AtualizarContatosShell(); AtualizarNavSelecionada(); AnimarAbaAtual(); }
-        private void NavHistorico_Click(object sender, RoutedEventArgs e) { MainTabs.SelectedIndex = 2; AtualizarHistoricoShell(); AtualizarNavSelecionada(); AnimarAbaAtual(); ResetarBadgePerdidas(); }
+        private void NavHistorico_Click(object sender, RoutedEventArgs e) { MainTabs.SelectedIndex = 2; AtualizarHistoricoShell(); AtualizarNavSelecionada(); AnimarAbaAtual(); ResetarBadgePerdidas(); AtualizarTimerFastRefreshHistorico(); }
         private void NavConfiguracoes_Click(object sender, RoutedEventArgs e)
         {
             // Highlight Configurações nav while popup is open
@@ -2236,6 +2326,32 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
             if (e.Source != MainTabs) return;
             AtualizarNavSelecionada();
             AnimarAbaAtual();
+            AtualizarTimerFastRefreshHistorico();
+        }
+
+        // Liga um refresh mais frequente do CDR enquanto a aba Histórico está aberta
+        // (tab index 2), para não depender só do intervalo configurado ou do botão manual.
+        // Desliga ao sair da aba para não gerar carga desnecessária em segundo plano.
+        private void AtualizarTimerFastRefreshHistorico()
+        {
+            try
+            {
+                var config = SipConfig.CarregarSalva() ?? new SipConfig();
+                if (MainTabs.SelectedIndex == 2 && config.CdrAtivo)
+                {
+                    if (!_historicoFastRefreshTimer.IsEnabled)
+                    {
+                        _historicoFastRefreshTimer.Start();
+                        RegistrarUiDiagnostico("HISTORY_FAST_REFRESH_START");
+                    }
+                }
+                else if (_historicoFastRefreshTimer.IsEnabled)
+                {
+                    _historicoFastRefreshTimer.Stop();
+                    RegistrarUiDiagnostico("HISTORY_FAST_REFRESH_STOP");
+                }
+            }
+            catch { }
         }
 
         private void AtualizarBadgePerdidas(int count)
@@ -2250,13 +2366,140 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
             catch { }
         }
 
-        private void ResetarBadgePerdidas() => AtualizarBadgePerdidas(0);
+        // Marca as perdidas atualmente contadas como "vistas" — o badge some, mas o histórico
+        // de notificação (_perdidasJaMostradas) continua intacto para não renotificar depois.
+        private void ResetarBadgePerdidas()
+        {
+            foreach (var uid in _perdidasJaMostradas) _perdidasVistas.Add(uid);
+            AtualizarBadgePerdidas(0);
+        }
+
+        // Mascara um número para log: mantém só os 2 primeiros e 2 últimos dígitos.
+        private static string MascararNumero(string numero)
+        {
+            var n = new string((numero ?? string.Empty).Where(char.IsDigit).ToArray());
+            if (n.Length <= 4) return new string('*', n.Length);
+            return n.Substring(0, 2) + new string('*', n.Length - 4) + n.Substring(n.Length - 2);
+        }
+
+        // Consulta o snapshot AMI ao vivo (o mesmo usado por "Ramais ao Vivo") para saber se
+        // ALGUM ramal ainda está tocando/chamando/em ligação com o mesmo número externo do
+        // candidato a perdida. Isso é ESTADO real do Issabel, não um temporizador: se o Issabel
+        // ainda está oferecendo a chamada em outro ramal, ela não pode ser considerada perdida.
+        private bool ExisteRamalAmiAtivoParaNumero(string numeroExterno, out string ramalAtivo)
+        {
+            ramalAtivo = string.Empty;
+            try
+            {
+                var svc = AmiMonitorService.Current;
+                if (svc == null) return false;
+
+                var numAlvo = PhoneNumberNormalizer.NormalizeBrazilPhone(
+                    new string((numeroExterno ?? string.Empty).Where(char.IsDigit).ToArray()));
+                if (numAlvo.Length < 7) return false;
+
+                foreach (var r in svc.Ramais)
+                {
+                    if (!r.EstaEmLigacao) continue;
+                    var numR = PhoneNumberNormalizer.NormalizeBrazilPhone(
+                        new string((r.NumeroRemoto ?? string.Empty).Where(char.IsDigit).ToArray()));
+                    if (string.Equals(numAlvo, numR, StringComparison.OrdinalIgnoreCase))
+                    {
+                        ramalAtivo = r.Ramal;
+                        return true;
+                    }
+                }
+            }
+            catch { }
+            return false;
+        }
+
+        // Consulta o mesmo snapshot de "Filas em Tempo Real" (/api/ami/queues-live via
+        // AmiMonitorService — nenhum endpoint novo) para saber se o cliente ainda está esperando
+        // em alguma fila (QueueEntry). Fim de uma tentativa de toque num agente NÃO é fim da
+        // chamada na fila — enquanto o número aparecer esperando, não é perdida/abandonada.
+        private bool ExisteClienteNaFilaAoVivo(string numeroExterno, out string filaEncontrada)
+        {
+            filaEncontrada = string.Empty;
+            try
+            {
+                var svc = AmiMonitorService.Current;
+                if (svc == null) return false;
+
+                var numAlvo = PhoneNumberNormalizer.NormalizeBrazilPhone(
+                    new string((numeroExterno ?? string.Empty).Where(char.IsDigit).ToArray()));
+                if (numAlvo.Length < 7) return false;
+
+                foreach (var fila in svc.Filas)
+                {
+                    foreach (var cliente in fila.Clientes)
+                    {
+                        var numCliente = PhoneNumberNormalizer.NormalizeBrazilPhone(
+                            new string((cliente.Numero ?? string.Empty).Where(char.IsDigit).ToArray()));
+                        if (numCliente.Length >= 7 && string.Equals(numAlvo, numCliente, StringComparison.OrdinalIgnoreCase))
+                        {
+                            filaEncontrada = fila.Fila;
+                            return true;
+                        }
+                    }
+                }
+            }
+            catch { }
+            return false;
+        }
+
+        // Sinais de ESTADO (não temporizador) de que a chamada de entrada ainda está tocando,
+        // em andamento, ou sendo oferecida a outro ramal agora mesmo (Tarefa 1/2).
+        private bool ExisteChamadaAtivaRelacionada(string numeroExterno, out string motivo)
+        {
+            if (_incomingPopup != null) { motivo = "popup_open"; return true; }
+            if (_chamadaEntradaAtivaOuTocando) { motivo = "sip_ringing_local"; return true; }
+            if (_activeCallWindow != null) { motivo = "call_window_open"; return true; }
+
+            bool sipPendente;
+            try { sipPendente = _sipService.PossuiChamadaRecebidaPendente; } catch { sipPendente = false; }
+            if (sipPendente) { motivo = "sip_pending_local"; return true; }
+
+            if (ExisteRamalAmiAtivoParaNumero(numeroExterno, out var ramalAtivo))
+            {
+                motivo = $"ami_ramal_ativo_{ramalAtivo}";
+                return true;
+            }
+
+            motivo = string.Empty;
+            return false;
+        }
+
+        // Ponto único de decisão antes de qualquer notificação de chamada perdida (Tarefa 2).
+        // O critério principal é ESTADO real (popup local, SIP pendente, ramal AMI ainda
+        // tocando/em ligação com o mesmo número) — o cooldown pós-ring só protege contra a
+        // janela de race condition entre o fim do toque local e o próximo snapshot AMI/CDR
+        // ainda não ter propagado; nunca é usado sozinho como critério.
+        private bool PodeNotificarChamadaPerdida(Models.HistoricoLigacaoItem item)
+        {
+            if (_incomingPopup != null) return false;
+
+            if (ExisteChamadaAtivaRelacionada(item.Numero, out _)) return false;
+
+            // Fim de uma tentativa de toque num agente não é fim da chamada na fila — só o
+            // estado real da fila (QueueEntry) decide isso.
+            if (ExisteClienteNaFilaAoVivo(item.Numero, out var filaEncontrada))
+            {
+                RegistrarUiDiagnostico($"MISSED_BLOCKED_STILL_IN_QUEUE numero={MascararNumero(item.Numero)} linkedid={item.LinkedId} fila={filaEncontrada}");
+                return false;
+            }
+
+            // Proteção residual contra race condition — não é o critério principal.
+            if ((DateTime.Now - _ultimoFimChamadaEntrada) < _janelaResfriamentoPosRing) return false;
+
+            return item.Tipo == Models.TipoHistoricoLigacao.Perdida;
+        }
 
         private void MostrarMissedCallPopup(Models.HistoricoLigacaoItem item)
         {
             try
             {
-                RegistrarUiDiagnostico($"MISSED_CALL_POPUP_OPENED numero={item.Numero}");
+                RegistrarUiDiagnostico($"MISSED_CALL_POPUP_OPENED numero={MascararNumero(item.Numero)} linkedid={item.LinkedId}");
                 _missedCallPopup?.Close();
 
                 var popup = new MissedCallPopup(item.NumeroLimpoVisual, item.NomeExibido);
@@ -2299,25 +2542,154 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
         {
             try
             {
-                var perdidas = itensCdr
-                    .Where(i => (i.Tipo == Models.TipoHistoricoLigacao.Perdida || i.Tipo == Models.TipoHistoricoLigacao.NaoAtendidaNesseRamal)
+                // NaoAtendidaNesseRamal = tocou aqui, mas outro ramal atendeu a mesma chamada.
+                // Não é uma chamada perdida para este usuário — não notifica, só marca como visto,
+                // e cancela qualquer confirmação atrasada pendente para o mesmo uid.
+                foreach (var naoAtendida in itensCdr.Where(i =>
+                             i.Tipo == Models.TipoHistoricoLigacao.NaoAtendidaNesseRamal &&
+                             !string.IsNullOrWhiteSpace(i.UniqueId)))
+                {
+                    if (_perdidasPendentesConfirmacao.Remove(naoAtendida.UniqueId))
+                        RegistrarUiDiagnostico($"MISSED_NOTIFY_SUPPRESSED_ANSWERED numero={MascararNumero(naoAtendida.Numero)} linkedid={naoAtendida.LinkedId}");
+
+                    if (!_perdidasJaMostradas.Contains(naoAtendida.UniqueId))
+                    {
+                        _perdidasJaMostradas.Add(naoAtendida.UniqueId);
+                        RegistrarUiDiagnostico($"MISSED_NOTIFY_SUPPRESSED_ANSWERED numero={MascararNumero(naoAtendida.Numero)} linkedid={naoAtendida.LinkedId} motivo=answered_by_other_extension");
+                    }
+                }
+
+                // Entradas Perdida antigas (fora da janela de detecção "ao vivo") não viram
+                // candidatas — só marca como vistas, sem notificar. Sem isso, todo restart do app
+                // reprocessaria o histórico inteiro (agora que este método recebe a lista completa,
+                // não só o lote novo do CDR) e disparia popups de chamadas perdidas de dias atrás.
+                foreach (var antiga in itensCdr.Where(i =>
+                             i.Tipo == Models.TipoHistoricoLigacao.Perdida &&
+                             !string.IsNullOrWhiteSpace(i.UniqueId) &&
+                             !_perdidasJaMostradas.Contains(i.UniqueId) &&
+                             i.DataHora < DateTime.Now - _janelaDeteccaoPerdidaRecente))
+                {
+                    _perdidasJaMostradas.Add(antiga.UniqueId);
+                    _perdidasVistas.Add(antiga.UniqueId);
+                }
+
+                // Candidatos a "Perdida" — ninguém atendeu, segundo o CDR atual. Nunca notifica
+                // de primeira: exige uma janela de confirmação atrasada (Tarefa 3), e nunca avança
+                // enquanto houver qualquer chamada de entrada ativa/tocando (Tarefa 2) — uma linha
+                // de CDR de uma perna que já encerrou pode aparecer antes do resultado final da
+                // chamada completa.
+                var candidatos = itensCdr
+                    .Where(i => i.Tipo == Models.TipoHistoricoLigacao.Perdida
                              && !string.IsNullOrWhiteSpace(i.UniqueId)
-                             && !_perdidasJaMostradas.Contains(i.UniqueId))
+                             && !_perdidasJaMostradas.Contains(i.UniqueId)
+                             && i.DataHora >= DateTime.Now - _janelaDeteccaoPerdidaRecente)
                     .OrderByDescending(i => i.DataHora)
                     .ToList();
 
-                if (perdidas.Count == 0) return;
+                var candidatosUids = new System.Collections.Generic.HashSet<string>(
+                    candidatos.Select(c => c.UniqueId), StringComparer.OrdinalIgnoreCase);
 
-                foreach (var p in perdidas)
-                    _perdidasJaMostradas.Add(p.UniqueId);
+                // Uid pendente que sumiu da lista de candidatos (foi suprimido/atualizado por outra
+                // sincronização antes de completar a janela de confirmação) — outro ramal atendeu.
+                foreach (var uidPendente in _perdidasPendentesConfirmacao.Keys.ToList())
+                {
+                    if (!candidatosUids.Contains(uidPendente))
+                    {
+                        _perdidasPendentesConfirmacao.Remove(uidPendente);
+                        RegistrarUiDiagnostico($"MISSED_NOTIFY_SUPPRESSED_ANSWERED linkedid={uidPendente} motivo=answered_by_extension");
+                    }
+                }
 
-                _badgePendentes += perdidas.Count;
-                AtualizarBadgePerdidas(_badgePendentes);
-                RegistrarUiDiagnostico($"MISSED_CALL_DETECTED count={perdidas.Count}");
+                var agora = DateTime.Now;
+                var confirmadas = new System.Collections.Generic.List<Models.HistoricoLigacaoItem>();
 
-                MostrarMissedCallPopup(perdidas[0]);
+                foreach (var cand in candidatos)
+                {
+                    if (!PodeNotificarChamadaPerdida(cand))
+                    {
+                        // PodeNotificarChamadaPerdida já logou o motivo específico do bloqueio.
+                        // Não inicia nem avança a confirmação enquanto o bloqueio persistir.
+                        continue;
+                    }
+
+                    if (!_perdidasPendentesConfirmacao.TryGetValue(cand.UniqueId, out var primeiraDeteccao))
+                    {
+                        _perdidasPendentesConfirmacao[cand.UniqueId] = agora;
+                        continue;
+                    }
+
+                    if (agora - primeiraDeteccao < _janelaConfirmacaoPerdida)
+                        continue; // ainda dentro da janela de confirmação
+
+                    _perdidasPendentesConfirmacao.Remove(cand.UniqueId);
+                    confirmadas.Add(cand);
+                }
+
+                if (confirmadas.Count > 0)
+                {
+                    // Checagem final imediatamente antes de notificar (reusa o mesmo portão
+                    // central) — proteção extra caso uma nova chamada tenha começado a tocar
+                    // entre a detecção e a confirmação. Também descarta duplicatas: duas
+                    // "confirmadas" para o mesmo número na mesma leva só notificam uma vez.
+                    var aNotificar = new System.Collections.Generic.List<Models.HistoricoLigacaoItem>();
+                    var numerosNotificados = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                    foreach (var c in confirmadas)
+                    {
+                        if (!PodeNotificarChamadaPerdida(c))
+                        {
+                            _perdidasPendentesConfirmacao[c.UniqueId] = agora;
+                            RegistrarUiDiagnostico($"MISSED_SUPPRESSED numero={MascararNumero(c.Numero)} linkedid={c.LinkedId} motivo=bloqueio_final");
+                            continue;
+                        }
+
+                        var numNorm = PhoneNumberNormalizer.NormalizeBrazilPhone(
+                            new string((c.Numero ?? string.Empty).Where(char.IsDigit).ToArray()));
+                        if (!numerosNotificados.Add(numNorm))
+                        {
+                            _perdidasJaMostradas.Add(c.UniqueId);
+                            RegistrarUiDiagnostico($"MISSED_SUPPRESSED numero={MascararNumero(c.Numero)} linkedid={c.LinkedId} motivo=duplicada");
+                            continue;
+                        }
+
+                        aNotificar.Add(c);
+                    }
+
+                    foreach (var p in aNotificar)
+                    {
+                        _perdidasJaMostradas.Add(p.UniqueId);
+                        RegistrarUiDiagnostico($"MISSED_NOTIFICATION_SENT numero={MascararNumero(p.Numero)} linkedid={p.LinkedId}");
+                    }
+
+                    if (aNotificar.Count > 0)
+                    {
+                        RegistrarUiDiagnostico($"MISSED_CALL_DETECTED count={aNotificar.Count}");
+                        MostrarMissedCallPopup(aNotificar[0]);
+                    }
+                }
+
+                RecalcularBadgePerdidas(itensCdr);
             }
             catch { }
+        }
+
+        // Badge = quantas chamadas perdidas já notificadas ainda existem como Perdida no CDR
+        // atual e ainda não foram vistas pelo usuário. Recalculado (não incrementado) a cada
+        // sincronização, para acompanhar automaticamente qualquer duplicata removida/unificada
+        // pelo refresh automático (Tarefa 8).
+        private void RecalcularBadgePerdidas(System.Collections.Generic.List<Models.HistoricoLigacaoItem> itensCdr)
+        {
+            var count = itensCdr.Count(i =>
+                i.Tipo == Models.TipoHistoricoLigacao.Perdida &&
+                !string.IsNullOrWhiteSpace(i.UniqueId) &&
+                _perdidasJaMostradas.Contains(i.UniqueId) &&
+                !_perdidasVistas.Contains(i.UniqueId));
+
+            if (count != _badgePendentes)
+            {
+                AtualizarBadgePerdidas(count);
+                RegistrarUiDiagnostico($"HISTORY_BADGE_RECALCULATED total={count}");
+            }
         }
 
         private void AtualizarNavSelecionada()
@@ -2649,19 +3021,6 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
         private void OpenConferenceParticipantsRequested()
         {
             MessageBox.Show("Use o botão Adicionar para chamar ramais ou números externos para a conferência.", "Waven VoIP");
-        }
-
-        private void MostrarNotificacaoChamadaPerdida(string caller)
-        {
-            try
-            {
-                var toast = new MissedCallToast(caller);
-                toast.Show();
-            }
-            catch
-            {
-                try { _trayIcon?.ShowBalloonTip(3500, "Chamada perdida", caller, WF.ToolTipIcon.Warning); } catch { }
-            }
         }
 
         // Resolves a raw SIP/dialed number to a clean human-readable display string.
