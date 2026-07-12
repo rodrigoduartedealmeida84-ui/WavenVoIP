@@ -4,7 +4,7 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "2.2.3";
+        public const string Versao  = "2.2.4";
         public const string NomeApp = "WavenVoIP";
 
         public static readonly DateTime DataBuild = new DateTime(2026, 7, 11);
@@ -13,6 +13,22 @@ namespace WavenVoIP.Services
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v2.2.4 — Abandono na fila, Historico e notificacao mais rapidos (11/07/2026)\n" +
+            "• [FIX] Chamada abandonada na fila que tocou no ramal do agente (em qualquer ciclo) agora " +
+            "e' sempre importada no Historico — antes, o registro CDR principal escolhido para chamadas " +
+            "de fila sem atendimento era a perna de entrada da fila (sem referencia ao ramal do agente), " +
+            "fazendo a chamada ser descartada como \"nao e' do meu ramal\" mesmo tendo tocado de verdade\n" +
+            "• [FIX] Deteccao de saida da fila (atendida ou abandonada) agora e' orientada por evento " +
+            "(snapshot de Filas em Tempo Real), disparando uma recheck acelerada do CDR em 3s/6s/10s " +
+            "apos a saida, em vez de esperar o proximo ciclo do timer normal\n" +
+            "• [PERF] Historico: refresh incremental de CDR a cada 2s com a aba aberta, 5s em segundo " +
+            "plano (antes: 6s aba aberta / intervalo configurado em segundo plano)\n" +
+            "• [PERF] Notificacao de chamada perdida/abandonada: chega em poucos segundos apos a saida " +
+            "real da fila, em vez de aguardar o proximo ciclo de sincronizacao normal\n" +
+            "• [SAFE] Nunca notifica nem registra abandono enquanto o cliente ainda estiver esperando na " +
+            "fila (Filas em Tempo Real continua sendo a fonte de verdade antes de decidir)\n" +
+            "• [SAFE] Nenhuma alteracao em SIP, audio, RTP, codecs, credenciais, Waven API/Chat, contatos ou dashboard\n" +
+            "\n" +
             "v2.2.3 — Filas, Historico e chamada perdida (11/07/2026)\n" +
             "• [FIX] Chamada em fila/ring group: ramal volta a tocar em todos os ciclos oferecidos pelo Issabel " +
             "(deteccao por chamador, nao so por Call-ID) — antes so tocava no primeiro ciclo\n" +

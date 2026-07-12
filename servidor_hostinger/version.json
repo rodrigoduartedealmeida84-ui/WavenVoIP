@@ -1,7 +1,7 @@
-﻿{
-    "versao":  "2.2.3",
-    "zip":  "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.2.3/WavenVoIP.zip",
-    "sha256":  "c48055ee1a3b0b16fa86b5a82e65fb7f9a33aa6a5dcd258e573d8a83a37707ab",
+{
+    "versao":  "2.2.4",
+    "zip":  "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.2.4/WavenVoIP.zip",
+    "sha256":  "95242f3ebd04ac2f7d1bd7913feb3055f782a2746ba81e6d0afb018f563942c2",
     "data":  "2026-07-11",
-    "notas":  "WavenVoIP 2.2.3 - Filas, Historico e chamada perdida\n[FIX] Chamada em fila/ring group volta a tocar em todos os ciclos oferecidos pelo Issabel\n[FIX] Chamada nao e mais marcada Perdida/Abandonada enquanto o cliente ainda espera na fila\n[FIX] Historico: chamada atendida por outro ramal nao aparece mais como Perdida/Abandonada duplicada\n[FIX] Notificacao de chamada perdida so dispara apos o resultado final confirmado\n[NOTA] Ciclos de toque validados em producao apos ajuste na fila 700 do Issabel (timeout 120s -> 20s no PBX)\n[SAFE] Nenhuma alteracao em SIP, audio, RTP, codecs, credenciais, Waven API/Chat, contatos ou dashboard"
+    "notas":  "WavenVoIP 2.2.4 - Abandono na fila, Historico e notificacao mais rapidos + correcao do icone da bandeja\n[FIX] Chamada abandonada na fila que tocou no ramal do agente agora e sempre importada no Historico (antes era descartada por engano como \"nao e do meu ramal\")\n[FIX] Deteccao de saida da fila orientada por evento, com recheck acelerada do CDR em 3s/6s/10s apos a saida\n[FIX] Icone da bandeja do sistema: corrigido decoder que exibia imagem corrompida em vez do logo oficial\n[PERF] Historico: refresh incremental de CDR a cada 2s com a aba aberta, 5s em segundo plano\n[SAFE] Nunca registra ou notifica abandono enquanto o cliente ainda estiver esperando na fila\n[SAFE] Nenhuma alteracao em SIP, audio, RTP, codecs, credenciais, Waven API/Chat, contatos ou dashboard"
 }

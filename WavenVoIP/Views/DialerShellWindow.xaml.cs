@@ -44,9 +44,10 @@ namespace WavenVoIP.Views
         private readonly DispatcherTimer _amiSyncTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(10) };
         private readonly DispatcherTimer _googleSyncTimer = new DispatcherTimer();
         private readonly DispatcherTimer _cdrSyncTimer = new DispatcherTimer();
-        // Refresh mais rápido enquanto a tela de Histórico está aberta — evita depender
-        // só do botão "Atualizar CDR" ou do intervalo configurado (que pode estar em minutos).
-        private readonly DispatcherTimer _historicoFastRefreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(6) };
+        // Refresh incremental de CDR sempre ativo — 2s com a aba Histórico aberta, 5s em segundo
+        // plano — evita depender só do botão "Atualizar CDR" ou do intervalo configurado em
+        // Configurações (que continua rodando em paralelo, sem conflito).
+        private readonly DispatcherTimer _historicoFastRefreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         private bool _cdrSyncEmAndamento = false;
         private readonly DispatcherTimer _companyConfigTimer  = new DispatcherTimer { Interval = TimeSpan.FromMinutes(30) };
         private readonly DispatcherTimer _contactsSyncTimer   = new DispatcherTimer { Interval = TimeSpan.FromMinutes(5) };
@@ -348,6 +349,7 @@ namespace WavenVoIP.Views
                 _contactsSyncTimer.Tick += (_, __) => _ = SincronizarContatosRemotosAsync();
                 _contactsSyncTimer.Start();
                 _historicoFastRefreshTimer.Tick += (_, __) => _ = ExecutarSyncCdrAsync(silencioso: true);
+                AtualizarTimerFastRefreshHistorico();
                 _debounceContatos.Tick  += (_, __) => { _debounceContatos.Stop();  AtualizarContatosShell(); };
                 _debounceHistorico.Tick += (_, __) => { _debounceHistorico.Stop(); AtualizarHistoricoShell(); };
                 _ = SincronizarConfigEmpresaAsync(silencioso: true);
@@ -363,6 +365,7 @@ namespace WavenVoIP.Views
                 _ = ExecutarReprocessarAsync(silencioso: true, validarUrls: false);
                 InicializarPainelLogs();
                 IniciarAmiMonitor();
+                ConfigurarRastreamentoFilaAoVivo();
                 IntegrationAutoReconnectService.ReconectarAgora += OnIntegracaoReconectarAgora;
                 Closed += (_, _) => IntegrationAutoReconnectService.ReconectarAgora -= OnIntegracaoReconectarAgora;
 
@@ -1551,6 +1554,7 @@ namespace WavenVoIP.Views
                     // Roda sempre (não só quando novos>0): a limpeza acima pode ter removido
                     // duplicatas mesmo sem nenhum item novo, e o badge precisa recalcular também.
                     DetectarChamadasPerdidasNovas(itensAtualizados);
+                    AtualizarPendentesFilaAposSync(itensAtualizados);
                     dashboardControl?.AtualizarDados();
                 });
 
@@ -2096,11 +2100,31 @@ namespace WavenVoIP.Views
 
         private static System.Drawing.Icon CarregarIconeBandeja()
         {
-            // 1ª tentativa: arquivo Assets\wavenvoip.ico no diretório do app (copiado pelo publish)
+            // 1ª tentativa: arquivo Assets\wavenvoip.ico no diretório do app (copiado pelo publish).
+            // NUNCA usar "new System.Drawing.Icon(caminho)" (GDI+) aqui — wavenvoip.ico comprime
+            // TODOS os tamanhos (16 a 256px) como PNG, e o decoder legado do GDI+ não suporta
+            // corretamente quadros PNG em tamanhos pequenos: ele retorna um Icon "válido" (sem
+            // lançar exceção, Width/Height corretos) mas com os pixels corrompidos — ruído colorido
+            // em vez do logo. Isso passava despercebido porque TRAY_ICON_CREATED logava "icon=ok"
+            // mesmo com a bandeja mostrando o ícone errado. WIC (BitmapDecoder/BitmapFrame, usado
+            // pela janela principal via IconHelper) decodifica PNG corretamente em qualquer tamanho.
             try
             {
                 var assetsIco = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets", "wavenvoip.ico");
-                if (File.Exists(assetsIco)) return new System.Drawing.Icon(assetsIco);
+                if (File.Exists(assetsIco))
+                {
+                    var decoder = System.Windows.Media.Imaging.BitmapDecoder.Create(
+                        new Uri(assetsIco, UriKind.Absolute),
+                        System.Windows.Media.Imaging.BitmapCreateOptions.None,
+                        System.Windows.Media.Imaging.BitmapCacheOption.OnLoad);
+                    var frame = decoder.Frames.FirstOrDefault(f => f.PixelWidth == 32)
+                             ?? decoder.Frames.OrderByDescending(f => f.PixelWidth).FirstOrDefault();
+                    if (frame != null)
+                    {
+                        var icone = ConverterBitmapSourceParaIcon(frame);
+                        if (icone != null) return icone;
+                    }
+                }
             }
             catch { }
 
@@ -2116,7 +2140,7 @@ namespace WavenVoIP.Views
             }
             catch { }
 
-            // 3ª tentativa: recurso embarcado no assembly
+            // 3ª tentativa: recurso embarcado no assembly (mesmo cuidado: decodifica via WIC, não GDI+)
             try
             {
                 var asm = System.Reflection.Assembly.GetExecutingAssembly();
@@ -2125,7 +2149,16 @@ namespace WavenVoIP.Views
                 if (icoResource != null)
                 {
                     using var stream = asm.GetManifestResourceStream(icoResource);
-                    if (stream != null) return new System.Drawing.Icon(stream);
+                    if (stream != null)
+                    {
+                        var decoder = System.Windows.Media.Imaging.BitmapDecoder.Create(
+                            stream, System.Windows.Media.Imaging.BitmapCreateOptions.None,
+                            System.Windows.Media.Imaging.BitmapCacheOption.OnLoad);
+                        var frame = decoder.Frames.FirstOrDefault(f => f.PixelWidth == 32)
+                                 ?? decoder.Frames.OrderByDescending(f => f.PixelWidth).FirstOrDefault();
+                        var icone = frame != null ? ConverterBitmapSourceParaIcon(frame) : null;
+                        if (icone != null) return icone;
+                    }
                 }
             }
             catch { }
@@ -2133,6 +2166,36 @@ namespace WavenVoIP.Views
             // Fallback: ícone padrão do sistema
             return System.Drawing.SystemIcons.Application;
         }
+
+        // Converte um BitmapSource (decodificado via WIC) para System.Drawing.Icon utilizável pelo
+        // WF.NotifyIcon, sem passar pelo decoder de ICO do GDI+ (ver comentário em CarregarIconeBandeja).
+        private static System.Drawing.Icon? ConverterBitmapSourceParaIcon(System.Windows.Media.Imaging.BitmapSource bitmap)
+        {
+            try
+            {
+                using var ms = new MemoryStream();
+                var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+                encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
+                encoder.Save(ms);
+                ms.Position = 0;
+
+                using var bmp = new System.Drawing.Bitmap(ms);
+                var hIcon = bmp.GetHicon();
+                try
+                {
+                    using var iconTemp = System.Drawing.Icon.FromHandle(hIcon);
+                    return (System.Drawing.Icon)iconTemp.Clone();
+                }
+                finally
+                {
+                    DestroyIcon(hIcon);
+                }
+            }
+            catch { return null; }
+        }
+
+        [DllImport("user32.dll")]
+        private static extern bool DestroyIcon(IntPtr handle);
 
         private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
         {
@@ -2329,26 +2392,35 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
             AtualizarTimerFastRefreshHistorico();
         }
 
-        // Liga um refresh mais frequente do CDR enquanto a aba Histórico está aberta
-        // (tab index 2), para não depender só do intervalo configurado ou do botão manual.
-        // Desliga ao sair da aba para não gerar carga desnecessária em segundo plano.
+        // Mantém um refresh incremental de CDR sempre ativo: 2s enquanto a aba Histórico está
+        // aberta (resposta rápida), 5s em segundo plano nos demais casos — nunca depende só do
+        // botão "Atualizar CDR" nem do intervalo configurável em Configurações (que continua
+        // rodando em paralelo; _cdrSyncEmAndamento evita sobreposição entre os dois timers).
         private void AtualizarTimerFastRefreshHistorico()
         {
             try
             {
                 var config = SipConfig.CarregarSalva() ?? new SipConfig();
-                if (MainTabs.SelectedIndex == 2 && config.CdrAtivo)
+                if (!config.CdrAtivo)
                 {
-                    if (!_historicoFastRefreshTimer.IsEnabled)
+                    if (_historicoFastRefreshTimer.IsEnabled)
                     {
-                        _historicoFastRefreshTimer.Start();
-                        RegistrarUiDiagnostico("HISTORY_FAST_REFRESH_START");
+                        _historicoFastRefreshTimer.Stop();
+                        RegistrarUiDiagnostico("HISTORY_FAST_REFRESH_STOP");
                     }
+                    return;
                 }
-                else if (_historicoFastRefreshTimer.IsEnabled)
+
+                var abaHistoricoAberta = MainTabs.SelectedIndex == 2;
+                var novoIntervalo = TimeSpan.FromSeconds(abaHistoricoAberta ? 2 : 5);
+
+                if (_historicoFastRefreshTimer.Interval != novoIntervalo)
+                    _historicoFastRefreshTimer.Interval = novoIntervalo;
+
+                if (!_historicoFastRefreshTimer.IsEnabled)
                 {
-                    _historicoFastRefreshTimer.Stop();
-                    RegistrarUiDiagnostico("HISTORY_FAST_REFRESH_STOP");
+                    _historicoFastRefreshTimer.Start();
+                    RegistrarUiDiagnostico($"HISTORY_FAST_REFRESH_START intervaloSeg={novoIntervalo.TotalSeconds:F0}");
                 }
             }
             catch { }
@@ -2485,7 +2557,7 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
             // estado real da fila (QueueEntry) decide isso.
             if (ExisteClienteNaFilaAoVivo(item.Numero, out var filaEncontrada))
             {
-                RegistrarUiDiagnostico($"MISSED_BLOCKED_STILL_IN_QUEUE numero={MascararNumero(item.Numero)} linkedid={item.LinkedId} fila={filaEncontrada}");
+                RegistrarUiDiagnostico($"MISSED_QUEUE_NOTIFICATION_SUPPRESSED numero={MascararNumero(item.Numero)} linkedid={item.LinkedId} fila={filaEncontrada}");
                 return false;
             }
 
@@ -2659,6 +2731,11 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
                     {
                         _perdidasJaMostradas.Add(p.UniqueId);
                         RegistrarUiDiagnostico($"MISSED_NOTIFICATION_SENT numero={MascararNumero(p.Numero)} linkedid={p.LinkedId}");
+
+                        var numNormFila = PhoneNumberNormalizer.NormalizeBrazilPhone(
+                            new string((p.Numero ?? string.Empty).Where(char.IsDigit).ToArray()));
+                        if (QueueAbandonoTrackerService.ObterPendente(numNormFila) != null)
+                            RegistrarUiDiagnostico($"MISSED_QUEUE_NOTIFICATION_SENT numero={MascararNumero(p.Numero)} linkedid={p.LinkedId}");
                     }
 
                     if (aNotificar.Count > 0)
@@ -2671,6 +2748,112 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
                 RecalcularBadgePerdidas(itensCdr);
             }
             catch { }
+        }
+
+        // Fecha o estado pendente de fila (QueueAbandonoTrackerService) assim que o CDR confirma
+        // o desfecho real de uma chamada que tinha saído da fila: atendida em algum ramal, ou
+        // perdida/abandonada (que já foi importada no Histórico pelo pipeline normal de CDR acima
+        // — isto só encerra o rastreamento local e evita reprocessar o mesmo número repetidamente).
+        private void AtualizarPendentesFilaAposSync(System.Collections.Generic.List<Models.HistoricoLigacaoItem> itensCdr)
+        {
+            try
+            {
+                foreach (var item in itensCdr)
+                {
+                    var numNorm = PhoneNumberNormalizer.NormalizeBrazilPhone(
+                        new string((item.Numero ?? string.Empty).Where(char.IsDigit).ToArray()));
+                    if (numNorm.Length < 7) continue;
+
+                    var pendente = QueueAbandonoTrackerService.ObterPendente(numNorm);
+                    if (pendente == null || pendente.Status != QueuePendingStatus.AguardandoCdrFinal) continue;
+
+                    // Só casa com um CDR dentro da janela plausível desta espera na fila — evita
+                    // confundir com uma chamada antiga não relacionada ao mesmo número.
+                    var janelaInicio = pendente.HorarioEntrada.AddSeconds(-60);
+                    var janelaFim    = (pendente.HorarioSaida ?? DateTime.Now).AddMinutes(5);
+                    if (item.DataHora < janelaInicio || item.DataHora > janelaFim) continue;
+
+                    if (item.Tipo == Models.TipoHistoricoLigacao.Recebida || item.Tipo == Models.TipoHistoricoLigacao.Realizada)
+                    {
+                        QueueAbandonoTrackerService.MarcarFinalizada(numNorm, abandonada: false);
+                        RegistrarUiDiagnostico($"QUEUE_FINAL_ANSWERED numero={MascararNumero(numNorm)} fila={pendente.Fila}");
+                    }
+                    else if (item.Tipo == Models.TipoHistoricoLigacao.Perdida || item.Tipo == Models.TipoHistoricoLigacao.NaoAtendidaNesseRamal)
+                    {
+                        QueueAbandonoTrackerService.MarcarFinalizada(numNorm, abandonada: true);
+                        RegistrarUiDiagnostico($"QUEUE_FINAL_ABANDONED numero={MascararNumero(numNorm)} fila={pendente.Fila}");
+                        RegistrarUiDiagnostico($"HISTORY_QUEUE_ABANDON_IMPORTED numero={MascararNumero(numNorm)} linkedid={item.LinkedId}");
+                    }
+                }
+            }
+            catch { }
+        }
+
+        // Chamado quando QueueAbandonoTrackerService detecta que um número antes esperando numa
+        // fila deixou de aparecer no snapshot ao vivo (atendido ou abandonado). Em vez de esperar
+        // o próximo tick do timer normal (2s/5s), dispara uma recheck acelerada do CDR em 3s, mais
+        // 3s (6s) e mais 4s (10s) — pára assim que o desfecho for confirmado.
+        private void OnClienteSaiuDaFila(QueuePendingCall call)
+        {
+            RegistrarUiDiagnostico($"QUEUE_FINAL_CHECK_START numero={MascararNumero(call.NumeroNormalizado)} fila={call.Fila}");
+            _ = ExecutarRecheckAceleradoFilaAsync(call.NumeroNormalizado);
+        }
+
+        private async Task ExecutarRecheckAceleradoFilaAsync(string numeroNormalizado)
+        {
+            int[] atrasosMs = { 3000, 3000, 4000 }; // 3s, +3s (=6s), +4s (=10s)
+            foreach (var atraso in atrasosMs)
+            {
+                try { await Task.Delay(atraso); } catch { return; }
+                if (!IsLoaded) return;
+
+                try { await ExecutarSyncCdrAsync(silencioso: true); } catch { }
+
+                if (QueueAbandonoTrackerService.EstaResolvida(numeroNormalizado))
+                    return;
+            }
+
+            RegistrarUiDiagnostico($"QUEUE_FINAL_CDR_NOT_READY numero={MascararNumero(numeroNormalizado)} motivo=sem_confirmacao_apos_recheck_acelerado");
+            // Segue o polling normal (timer de 2s/5s do Histórico) até a válvula de segurança de
+            // 10 min do IssabelCdrService — que é só o último recurso, não o fluxo normal.
+        }
+
+        // Recebe os snapshots de "Filas em Tempo Real" (mesmo dado usado por ExisteClienteNaFilaAoVivo)
+        // e repassa ao rastreador de estado pendente de fila, que detecta o momento exato em que
+        // cada número deixa de aparecer esperando (Tarefa: registrar abandono real assim que ocorre).
+        private void OnFilasChangedAtualizaTrackerFila()
+        {
+            try
+            {
+                var svc = AmiMonitorService.Current;
+                if (svc == null) return;
+
+                var snapshot = svc.Filas
+                    .SelectMany(f => f.Clientes.Select(c => (Numero: c.Numero, Fila: f.Fila)))
+                    .ToList();
+                QueueAbandonoTrackerService.ProcessarSnapshot(snapshot);
+            }
+            catch { }
+        }
+
+        private void ConfigurarRastreamentoFilaAoVivo()
+        {
+            try
+            {
+                var svc = AmiMonitorService.Current;
+                if (svc == null) return;
+                svc.FilasChanged -= OnFilasChangedAtualizaTrackerFila;
+                svc.FilasChanged += OnFilasChangedAtualizaTrackerFila;
+
+                QueueAbandonoTrackerService.SaiuDaFila -= OnClienteSaiuDaFilaDispatch;
+                QueueAbandonoTrackerService.SaiuDaFila += OnClienteSaiuDaFilaDispatch;
+            }
+            catch { }
+        }
+
+        private void OnClienteSaiuDaFilaDispatch(QueuePendingCall call)
+        {
+            Dispatcher.BeginInvoke(new Action(() => OnClienteSaiuDaFila(call)));
         }
 
         // Badge = quantas chamadas perdidas já notificadas ainda existem como Perdida no CDR

@@ -360,10 +360,33 @@ namespace WavenVoIP.Services
                     if (string.IsNullOrWhiteSpace(dstRamal)  && !string.IsNullOrWhiteSpace(ramalGravacao)) dstRamal  = ramalGravacao;
                     if (string.IsNullOrWhiteSpace(dstRamal)  && !string.IsNullOrWhiteSpace(ramalAtendeu))  dstRamal  = ramalAtendeu;
 
+                    // Chamada de fila/ring-group abandonada: EscolherCdrPrincipal (passo 5) evita
+                    // escolher a perna de tentativa de toque por agente como principal — de propósito,
+                    // para o main leg (entrada na fila) não virar RamalDestino. Isso significa que,
+                    // para uma chamada NO ANSWER de fila, srcRamal/dstRamal/chRamal/dstChRamal acima
+                    // (todos extraídos só do registro principal) nunca referenciam o ramal do agente,
+                    // mesmo que ele tenha tocado de verdade em vários ciclos — o toque fica só nas
+                    // OUTRAS linhas do grupo. Sem isso, a chamada nunca aparece no Histórico deste
+                    // ramal (bug relatado: abandono na fila não foi registrado).
+                    var ramaisNoGrupo = grupo
+                        .SelectMany(r => new[]
+                        {
+                            ExtrairRamalSrc(r.Src),
+                            ExtrairRamalDst(r.Dst, r.DstChannel, ramaisConhecidos),
+                            ExtrairRamalValidado(r.Channel, ramaisConhecidos),
+                            ExtrairRamalValidado(r.DstChannel, ramaisConhecidos)
+                        })
+                        .Where(x => !string.IsNullOrWhiteSpace(x))
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
                     var ehMeuRamal = !string.IsNullOrWhiteSpace(ramal) &&
                         (srcRamal == ramal || dstRamal == ramal ||
                          chRamal  == ramal || dstChRamal == ramal ||
-                         ramalAtendeu == ramal);
+                         ramalAtendeu == ramal ||
+                         ramaisNoGrupo.Contains(ramal));
+
+                    if (ehAlvo)
+                        Log($"  CDR_RAMAL_GRUPO_DEBUG ramaisNoGrupo={string.Join(",", ramaisNoGrupo)} meuRamal={ramal} ehMeuRamal={ehMeuRamal}");
 
                     if (!todosModoRamais && !string.IsNullOrWhiteSpace(ramal) && !ehMeuRamal)
                         continue;
@@ -394,12 +417,12 @@ namespace WavenVoIP.Services
                         {
                             if (idadeCdr < _janelaMaximaSuspensaoPorFila)
                             {
-                                Log($"QUEUE_CALL_STILL_WAITING linkedid={linkedIds} numero={MascararNumeroLog(numeroExterno)} " +
+                                Log($"QUEUE_STILL_ACTIVE linkedid={linkedIds} numero={MascararNumeroLog(numeroExterno)} " +
                                     $"fila={filaAoVivo} idadeCdrSeg={idadeCdr.TotalSeconds:F0}");
                                 continue;
                             }
 
-                            Log($"QUEUE_CALL_STILL_WAITING_TIMEOUT_OVERRIDE linkedid={linkedIds} " +
+                            Log($"QUEUE_STILL_ACTIVE_TIMEOUT_OVERRIDE linkedid={linkedIds} " +
                                 $"numero={MascararNumeroLog(numeroExterno)} fila={filaAoVivo} idadeCdrSeg={idadeCdr.TotalSeconds:F0} " +
                                 $"motivo=cdr_antigo_demais_para_ainda_estar_na_fila_real");
                         }
