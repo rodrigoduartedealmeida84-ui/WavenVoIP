@@ -3,7 +3,7 @@
 ; NUNCA toca em %APPDATA%\WavenVoIP\ (configs do usuário)
 
 #define AppName        "WavenVoIP"
-#define AppVersion     "2.2.4"
+#define AppVersion     "2.3.0"
 #define AppPublisher   "Almeida Gás"
 #define AppURL         "https://almeidagas.com/waven/"
 #define AppExeName     "WavenVoIP.exe"
@@ -68,7 +68,7 @@ Source: "{#PublishDir}\WavenUpdater.exe";   DestDir: "{app}"; Flags: ignoreversi
 
 ; DLLs e manifests (excluindo dados do usuário)
 Source: "{#PublishDir}\*.dll";              DestDir: "{app}"; Flags: ignoreversion
-Source: "{#PublishDir}\*.json";             DestDir: "{app}"; Flags: ignoreversion; Excludes: "sipconfig.json,sipconfig.backup.json,contatos.json,historico.json,audio-config.json,whatsapp_config.json,whatsapp_envios.json,google_contacts_cache.json,user.config,settings.json"
+Source: "{#PublishDir}\*.json";             DestDir: "{app}"; Flags: ignoreversion; Excludes: "sipconfig.json,sipconfig.backup.json,sipconfig.backup1.json,sipconfig.backup2.json,sipconfig.backup3.json,contatos.json,historico.json,audio-config.json,whatsapp_config.json,whatsapp_envios.json,google_contacts_cache.json,user.config,settings.json"
 Source: "{#PublishDir}\*.pdb";             DestDir: "{app}"; Flags: ignoreversion
 
 ; Assets (áudio + ícone root)

@@ -6,6 +6,7 @@ using System.Threading;
 using System.Windows;
 using System.Threading.Tasks;
 using System.Windows.Threading;
+using Microsoft.Win32;
 using WavenVoIP.Services;
 using WavenVoIP.Views;
 
@@ -44,6 +45,10 @@ public partial class App : Application
         // o WorkingDirectory do explorer.exe (ex: System32), não a pasta do executável.
         // Isso quebra qualquer caminho relativo (ícone, assets). Corrige sempre na raiz.
         try { Environment.CurrentDirectory = AppDomain.CurrentDomain.BaseDirectory; } catch { }
+
+        try { LogHelper.Info($"APP_WORKING_DIRECTORY | {Environment.CurrentDirectory}"); } catch { }
+        try { LogHelper.Info($"APP_EXECUTABLE_PATH | {Environment.ProcessPath ?? AppDomain.CurrentDomain.BaseDirectory}"); } catch { }
+        try { VerificarAutoStart(); } catch (Exception ex) { LogCrash("AUTOSTART_PATH_CHECK_ERROR", "Falha ao verificar entrada de autostart", ex); }
 
         const string mutexName = "WavenVoIP_SingleInstance_v79";
         const string eventName = "WavenVoIP_ActivateEvent_v79";
@@ -210,6 +215,47 @@ public partial class App : Application
         var setup = new SetupWindow();
         MainWindow = setup;
         setup.Show();
+    }
+
+    // Confere a entrada "WavenVoIP" no Run key do Windows: se apontar para um executável
+    // que não é mais o atual (versão antiga, pasta antiga) ou que não existe mais no disco,
+    // corrige silenciosamente para o caminho em execução agora. Também remove nomes de
+    // valor legados de versões anteriores, se existirem, evitando duas entradas de
+    // autostart concorrentes.
+    private static void VerificarAutoStart()
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true);
+        if (key == null) return;
+
+        var registrado = key.GetValue("WavenVoIP") as string;
+        LogHelper.Info($"AUTOSTART_PATH_CHECK | registrado={registrado ?? "(nenhum)"}");
+
+        if (string.IsNullOrWhiteSpace(registrado)) return; // autostart desligado — nada a corrigir
+
+        var exeAtual = Environment.ProcessPath
+                       ?? System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
+        if (string.IsNullOrWhiteSpace(exeAtual)) return;
+
+        var caminhoRegistrado = registrado.Trim('"').Split(new[] { " /autostart" }, StringSplitOptions.None)[0];
+
+        var apontaParaAtual = string.Equals(caminhoRegistrado, exeAtual, StringComparison.OrdinalIgnoreCase);
+        var arquivoRegistradoExiste = File.Exists(caminhoRegistrado);
+
+        if (!apontaParaAtual || !arquivoRegistradoExiste)
+        {
+            LogHelper.Warn($"AUTOSTART_OLD_VERSION_FOUND | registrado={caminhoRegistrado} existe={arquivoRegistradoExiste} atual={exeAtual}");
+            key.SetValue("WavenVoIP", $"\"{exeAtual}\" /autostart");
+            LogHelper.Info($"AUTOSTART_PATH_CORRECTED | novo={exeAtual}");
+        }
+
+        // Nomes de valor usados por builds bem antigas — remove se sobrarem, para não
+        // iniciar duas cópias do app junto com o Windows.
+        foreach (var nomeAntigo in new[] { "Waven VoIP", "WavenVoip", "Waven" })
+        {
+            if (key.GetValue(nomeAntigo) == null) continue;
+            LogHelper.Warn($"AUTOSTART_DUPLICATE_FOUND | valor_antigo={nomeAntigo}");
+            try { key.DeleteValue(nomeAntigo, false); } catch { }
+        }
     }
 
     private static void RestaurarJanelaPrincipal()

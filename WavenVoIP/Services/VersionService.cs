@@ -4,15 +4,34 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "2.2.4";
+        public const string Versao  = "2.3.0";
         public const string NomeApp = "WavenVoIP";
 
-        public static readonly DateTime DataBuild = new DateTime(2026, 7, 11);
+        public static readonly DateTime DataBuild = new DateTime(2026, 7, 17);
 
         public static string VersaoCompleta => $"{NomeApp} v{Versao}";
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v2.3.0 — Correcao definitiva da configuracao vazia no autostart (17/07/2026)\n" +
+            "• [FIX] Alguns operadores abriam o Waven na tela de Configuracao Inicial (ramal/login/senha vazios) " +
+            "ao iniciar o Windows — causa raiz: config do usuario ficava em %APPDATA% (roaming), que pode ser " +
+            "redirecionado para rede via GPO em maquinas de dominio; se o share nao estava disponivel no instante " +
+            "exato do autostart, o app tratava isso como instalacao nova\n" +
+            "• [FIX] Configuracao do usuario migrada automaticamente de %APPDATA% para %LOCALAPPDATA%\\WavenVoIP\\ " +
+            "(mesma pasta ja usada por contatos, historico, favoritos e logs) — local sempre disponivel, nunca redirecionado\n" +
+            "• [FIX] Migracao automatica e silenciosa do arquivo antigo para o novo caminho na primeira execucao, " +
+            "sem pedir ramal/senha novamente e sem apagar o arquivo original\n" +
+            "• [FIX] Carregamento resiliente: falha de leitura (arquivo corrompido, vazio ou bloqueado) agora tenta " +
+            "os ultimos backups automaticos antes de concluir que nao ha configuracao — nunca mais abre a tela de " +
+            "configuracao vazia por uma falha temporaria\n" +
+            "• [FIX] Backup rotativo (ultimas 3 versoes) e gravacao atomica (arquivo temporario + validacao + " +
+            "substituicao) — elimina o risco de um arquivo de configuracao zerado por um desligamento no meio da escrita\n" +
+            "• [FIX] Autostart: entrada do Windows Run key incorreta (apontando para executavel antigo/inexistente) " +
+            "e duplicatas de versoes anteriores agora sao detectadas e corrigidas automaticamente no proximo inicio\n" +
+            "• [PERF] Correcoes acumuladas das versoes 2.2.x: fila/historico/notificacao mais rapidos, sincronizacao AMI\n" +
+            "• [SAFE] Nenhuma alteracao em SIP, audio, RTP, codecs, chamadas, historico, contatos, dashboard, Waven API/Chat ou Issabel\n" +
+            "\n" +
             "v2.2.4 — Abandono na fila, Historico e notificacao mais rapidos (11/07/2026)\n" +
             "• [FIX] Chamada abandonada na fila que tocou no ramal do agente (em qualquer ciclo) agora " +
             "e' sempre importada no Historico — antes, o registro CDR principal escolhido para chamadas " +

@@ -1,12 +1,36 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Text.Json;
+using WavenVoIP.Services;
 
 namespace WavenVoIP
 {
     public class SipConfig
     {
-        public static string ConfigFilePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "WavenVoIP", "sipconfig.json");
+        // ── Caminhos ─────────────────────────────────────────────────────────────
+        // v2.2.5 — Movido de %APPDATA% (roaming) para %LOCALAPPDATA% (local), igual a
+        // todo o resto do app (Logs, contatos.json, historico.json, favoritos, flags de
+        // update/instalacao). O roaming profile pode ser redirecionado para um share de
+        // rede via GPO em maquinas de dominio; se esse share nao estiver disponivel no
+        // instante exato em que o Windows inicia o Waven via autostart, File.Exists()
+        // no caminho antigo podia retornar false mesmo com a config real existindo —
+        // fazendo o app tratar isso como instalacao nova. %LOCALAPPDATA% nunca e
+        // redirecionado por Folder Redirection do Windows, entao esse caminho e sempre
+        // local e imediatamente disponivel no logon.
+        public static string ConfigDir => Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WavenVoIP");
+
+        public static string ConfigFilePath => Path.Combine(ConfigDir, "sipconfig.json");
+
+        // Caminho antigo (roaming) — mantido apenas para migracao automatica de quem
+        // ja tinha configuracao salva la. Nunca escrito novamente.
+        private static string LegacyConfigFilePath => Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "WavenVoIP", "sipconfig.json");
+
+        private const int BackupCount = 3;
+        private static string BackupPath(int n) => Path.Combine(ConfigDir, $"sipconfig.backup{n}.json");
+
+        private static bool _legacyMigrationChecked;
 
         public bool EstaCompleta =>
             !string.IsNullOrWhiteSpace(Ramal) &&
@@ -15,21 +39,54 @@ namespace WavenVoIP
             !string.IsNullOrWhiteSpace(ServerIp) &&
             (!string.IsNullOrWhiteSpace(NomeUsuario) || !string.IsNullOrWhiteSpace(DisplayName));
 
+        // ── Gravação atômica com backup rotativo ────────────────────────────────
         public void Salvar()
         {
             AplicarPadroes();
-            var pasta = Path.GetDirectoryName(ConfigFilePath);
-            if (!string.IsNullOrWhiteSpace(pasta)) Directory.CreateDirectory(pasta);
-            CriarBackup();
-            File.WriteAllText(ConfigFilePath, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
+            Directory.CreateDirectory(ConfigDir);
+            LogHelper.Info($"CONFIG_SAVE_START | path={ConfigFilePath}");
+
+            try
+            {
+                CriarBackup();
+
+                var json = JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
+
+                // Valida o JSON antes de tocar no arquivo principal — nunca deixa um
+                // arquivo corrompido/zerado no lugar por causa de uma escrita interrompida.
+                JsonSerializer.Deserialize<SipConfig>(json);
+
+                var tempPath = ConfigFilePath + ".tmp";
+                File.WriteAllText(tempPath, json);
+
+                if (File.Exists(ConfigFilePath))
+                    File.Replace(tempPath, ConfigFilePath, null);
+                else
+                    File.Move(tempPath, ConfigFilePath);
+
+                LogHelper.Info("CONFIG_SAVE_OK");
+            }
+            catch (Exception ex)
+            {
+                LogHelper.Error("CONFIG_SAVE_FAILED", ex);
+                throw;
+            }
         }
 
+        // Mantem ate 3 gerações de backup (sipconfig.backup1.json = mais recente).
         public static void CriarBackup()
         {
             try
             {
                 if (!File.Exists(ConfigFilePath)) return;
-                File.Copy(ConfigFilePath, Path.ChangeExtension(ConfigFilePath, ".backup.json"), overwrite: true);
+                Directory.CreateDirectory(ConfigDir);
+
+                for (int i = BackupCount; i >= 2; i--)
+                {
+                    var src = BackupPath(i - 1);
+                    if (File.Exists(src)) File.Copy(src, BackupPath(i), overwrite: true);
+                }
+                File.Copy(ConfigFilePath, BackupPath(1), overwrite: true);
             }
             catch { }
         }
@@ -95,17 +152,129 @@ namespace WavenVoIP
             Senha        = string.Empty;
         }
 
+        // ── Carregamento resiliente ──────────────────────────────────────────────
+        // Nunca conclui "não existe configuração" por causa de uma falha transitória de
+        // leitura. Ordem de tentativa: arquivo principal -> backups (mais recente
+        // primeiro) -> caminho legado (roaming). Só retorna null quando nenhuma dessas
+        // fontes tem uma configuração válida.
         public static SipConfig? CarregarSalva()
         {
+            LogHelper.Info($"CONFIG_PATH_RESOLVED | path={ConfigFilePath}");
+            LogHelper.Info("CONFIG_LOAD_START");
+
+            MigrarConfigLegada();
+
+            var principal = TentarCarregarArquivo(ConfigFilePath, "principal");
+            if (principal != null)
+            {
+                LogHelper.Info("CONFIG_LOAD_OK | origem=principal");
+                principal.RepairDefaults();
+                return principal;
+            }
+
+            for (int i = 1; i <= BackupCount; i++)
+            {
+                var origem = $"backup{i}";
+                var recuperado = TentarCarregarArquivo(BackupPath(i), origem);
+                if (recuperado == null) continue;
+
+                LogHelper.Warn($"CONFIG_LOAD_BACKUP_RECOVERED | origem={origem}");
+                recuperado.RepairDefaults();
+
+                // Restaura o principal a partir do backup — próxima leitura já acha o arquivo certo.
+                try { recuperado.Salvar(); }
+                catch (Exception ex) { LogHelper.Error("CONFIG_BACKUP_RESTORE_SAVE_FAILED", ex); }
+
+                return recuperado;
+            }
+
+            LogHelper.Warn("CONFIG_LOAD_NOT_FOUND | nenhuma configuracao valida (principal, backups ou legado)");
+            return null;
+        }
+
+        // Tenta ler+desserializar um arquivo de config, com pequenas retentativas para
+        // sobreviver a um lock momentâneo (ex.: antivírus varrendo o arquivo). Nunca lança —
+        // qualquer falha vira log e retorno null, deixando a chamada seguir para o próximo
+        // candidato (backup/legado) em vez de decidir "instalação nova" na primeira falha.
+        private static SipConfig? TentarCarregarArquivo(string path, string origem)
+        {
+            for (int tentativa = 1; tentativa <= 3; tentativa++)
+            {
+                try
+                {
+                    if (!File.Exists(path)) return null;
+
+                    var texto = File.ReadAllText(path);
+                    if (string.IsNullOrWhiteSpace(texto))
+                    {
+                        LogHelper.Warn($"CONFIG_LOAD_INVALID | origem={origem} motivo=arquivo_vazio");
+                        return null;
+                    }
+
+                    var cfg = JsonSerializer.Deserialize<SipConfig>(texto);
+                    if (cfg == null)
+                    {
+                        LogHelper.Warn($"CONFIG_LOAD_INVALID | origem={origem} motivo=deserializacao_nula");
+                        return null;
+                    }
+
+                    return cfg;
+                }
+                catch (IOException) when (tentativa < 3)
+                {
+                    System.Threading.Thread.Sleep(150);
+                }
+                catch (Exception ex)
+                {
+                    LogHelper.Warn($"CONFIG_LOAD_INVALID | origem={origem} motivo={ex.GetType().Name}: {ex.Message}");
+                    return null;
+                }
+            }
+            return null;
+        }
+
+        // Migra config do caminho antigo (%APPDATA% roaming) para o novo (%LOCALAPPDATA%),
+        // uma única vez por processo. Não apaga o arquivo antigo — apenas copia. Idempotente:
+        // se o arquivo novo já existe, não faz nada (evita sobrescrever dado mais recente).
+        private static void MigrarConfigLegada()
+        {
+            if (_legacyMigrationChecked) return;
+            _legacyMigrationChecked = true;
+
             try
             {
-                if (!File.Exists(ConfigFilePath)) return null;
-                var config = JsonSerializer.Deserialize<SipConfig>(File.ReadAllText(ConfigFilePath));
-                config?.RepairDefaults();
-                return config;
+                if (File.Exists(ConfigFilePath)) return;
+
+                var legado = LegacyConfigFilePath;
+                if (!File.Exists(legado)) return;
+
+                LogHelper.Info($"CONFIG_LEGACY_FOUND | path={legado}");
+
+                var texto = File.ReadAllText(legado);
+                var legacyCfg = JsonSerializer.Deserialize<SipConfig>(texto);
+                if (legacyCfg == null)
+                {
+                    LogHelper.Warn("CONFIG_LEGACY_FOUND_BUT_INVALID | migracao ignorada");
+                    return;
+                }
+
+                Directory.CreateDirectory(ConfigDir);
+                File.Copy(legado, ConfigFilePath, overwrite: false);
+
+                var legadoBackup = Path.ChangeExtension(legado, ".backup.json");
+                if (File.Exists(legadoBackup))
+                {
+                    try { File.Copy(legadoBackup, BackupPath(1), overwrite: true); } catch { }
+                }
+
+                LogHelper.Info($"CONFIG_LEGACY_MIGRATED | de={legado} para={ConfigFilePath}");
             }
-            catch { return null; }
+            catch (Exception ex)
+            {
+                LogHelper.Error("CONFIG_LEGACY_MIGRATION_FAILED", ex);
+            }
         }
+
         public string ServerIp { get; set; } = "191.252.202.208";
         public int Port { get; set; } = 5061;
         public string Transport { get; set; } = "udp";

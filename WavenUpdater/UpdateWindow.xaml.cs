@@ -387,6 +387,9 @@ public partial class UpdateWindow : Window
     {
         "sipconfig.json",
         "sipconfig.backup.json",
+        "sipconfig.backup1.json",
+        "sipconfig.backup2.json",
+        "sipconfig.backup3.json",
         "contatos.json",
         "historico.json",
         "audio-config.json",

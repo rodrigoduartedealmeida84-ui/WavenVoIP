@@ -1,7 +1,7 @@
-{
-    "versao":  "2.2.4",
-    "zip":  "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.2.4/WavenVoIP.zip",
-    "sha256":  "95242f3ebd04ac2f7d1bd7913feb3055f782a2746ba81e6d0afb018f563942c2",
-    "data":  "2026-07-11",
-    "notas":  "WavenVoIP 2.2.4 - Abandono na fila, Historico e notificacao mais rapidos + correcao do icone da bandeja\n[FIX] Chamada abandonada na fila que tocou no ramal do agente agora e sempre importada no Historico (antes era descartada por engano como \"nao e do meu ramal\")\n[FIX] Deteccao de saida da fila orientada por evento, com recheck acelerada do CDR em 3s/6s/10s apos a saida\n[FIX] Icone da bandeja do sistema: corrigido decoder que exibia imagem corrompida em vez do logo oficial\n[PERF] Historico: refresh incremental de CDR a cada 2s com a aba aberta, 5s em segundo plano\n[SAFE] Nunca registra ou notifica abandono enquanto o cliente ainda estiver esperando na fila\n[SAFE] Nenhuma alteracao em SIP, audio, RTP, codecs, credenciais, Waven API/Chat, contatos ou dashboard"
+﻿{
+    "versao":  "2.3.0",
+    "zip":  "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.3.0/WavenVoIP.zip",
+    "sha256":  "7637f6fe705a045e3e538259266f002d9aaf5f48a43eb6a0aad197ec3467f224",
+    "data":  "2026-07-17",
+    "notas":  "WavenVoIP 2.3.0 - Correcao definitiva da configuracao vazia no autostart\n[FIX] Alguns operadores abriam o Waven na tela de Configuracao Inicial (ramal/login/senha vazios) ao iniciar o Windows — causa raiz: config ficava em %APPDATA% (roaming), redirecionavel para rede via GPO em maquinas de dominio\n[FIX] Configuracao migrada automaticamente para %LOCALAPPDATA%\\WavenVoIP\\ (local, nunca redirecionado) — sem apagar o arquivo antigo\n[FIX] Carregamento resiliente: falha de leitura tenta os ultimos backups antes de concluir que nao ha configuracao\n[FIX] Backup rotativo (3 versoes) e gravacao atomica do arquivo de configuracao\n[FIX] Autostart: entrada do Windows Run key antiga/duplicada e corrigida automaticamente\n[PERF] Correcoes acumuladas das versoes 2.2.x: fila, historico e notificacao mais rapidos\n[SAFE] Nenhuma alteracao em SIP, audio, RTP, codecs, chamadas, historico, contatos, dashboard, Waven API/Chat ou Issabel"
 }

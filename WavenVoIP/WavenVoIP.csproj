@@ -11,9 +11,9 @@
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <!-- Assembly identity & version info (visible no Explorer / Properties) -->
     <AssemblyTitle>WavenVoIP</AssemblyTitle>
-    <Version>2.2.4</Version>
-    <AssemblyVersion>2.2.4.0</AssemblyVersion>
-    <FileVersion>2.2.4.0</FileVersion>
+    <Version>2.3.0</Version>
+    <AssemblyVersion>2.3.0.0</AssemblyVersion>
+    <FileVersion>2.3.0.0</FileVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Company>Almeida Gás</Company>
     <Product>WavenVoIP</Product>
@@ -24,8 +24,8 @@
 
   <!-- Explicit guard: never allow user-data files to enter the build/publish output -->
   <ItemGroup>
-    <None   Remove="sipconfig.json;sipconfig.backup.json;contatos.json;historico.json;audio-config.json;whatsapp_config.json;whatsapp_envios.json;google_contacts_cache.json;user.config;settings.json" />
-    <Content Remove="sipconfig.json;sipconfig.backup.json;contatos.json;historico.json;audio-config.json;whatsapp_config.json;whatsapp_envios.json;google_contacts_cache.json;user.config;settings.json" />
+    <None   Remove="sipconfig.json;sipconfig.backup.json;sipconfig.backup1.json;sipconfig.backup2.json;sipconfig.backup3.json;contatos.json;historico.json;audio-config.json;whatsapp_config.json;whatsapp_envios.json;google_contacts_cache.json;user.config;settings.json" />
+    <Content Remove="sipconfig.json;sipconfig.backup.json;sipconfig.backup1.json;sipconfig.backup2.json;sipconfig.backup3.json;contatos.json;historico.json;audio-config.json;whatsapp_config.json;whatsapp_envios.json;google_contacts_cache.json;user.config;settings.json" />
   </ItemGroup>
 
   <ItemGroup>
