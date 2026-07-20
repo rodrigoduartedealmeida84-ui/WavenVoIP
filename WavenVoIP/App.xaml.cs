@@ -26,6 +26,14 @@ public partial class App : Application
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "WavenVoIP", "fresh_install.flag");
 
+    // v2.3.2 — migracao unica: forca "Iniciar com o Windows" habilitado para todos os
+    // usuarios (inclusive quem nunca ativou), uma unica vez. So e criada depois que a
+    // entrada oficial no Run key eh confirmada valida; se a gravacao falhar, a flag nao
+    // eh criada e a migracao e' tentada de novo no proximo inicio.
+    private static readonly string AutoStart232MigrationFlagPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "WavenVoIP", "autostart_forcado_2.3.2.flag");
+
     public static void LogCrash(string tag, string context, Exception? ex)
     {
         try
@@ -241,12 +249,32 @@ public partial class App : Application
                 return;
             }
 
+            var exeAtual = Environment.ProcessPath
+                           ?? System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
+
+            // v2.3.2 — migracao unica: se ainda nao rodou nesta maquina, forca a entrada
+            // oficial mesmo para quem nunca ativou "Iniciar com o Windows". So roda uma vez;
+            // depois disso a escolha do usuario (inclusive desativar) volta a ser respeitada.
+            LogHelper.Info("AUTOSTART_232_MIGRATION_CHECK");
+            var migracao232Pendente = !File.Exists(AutoStart232MigrationFlagPath);
+            if (migracao232Pendente)
+            {
+                LogHelper.Info("AUTOSTART_232_MIGRATION_REQUIRED");
+                ForcarHabilitacaoAutoStart232(key, exeAtual);
+            }
+            else
+            {
+                LogHelper.Info("AUTOSTART_232_MIGRATION_ALREADY_DONE");
+            }
+
             var registrado = key.GetValue("WavenVoIP") as string;
 
             if (string.IsNullOrWhiteSpace(registrado))
             {
                 // Sem entrada = usuário nunca ativou ou desativou conscientemente em
-                // Configurações. Respeita a escolha: não recria sozinho.
+                // Configurações (ou a migração 2.3.2 acima falhou — nesse caso a flag não
+                // foi criada e a próxima execução tenta de novo). Respeita a escolha: não
+                // recria sozinho.
                 LogHelper.Info("AUTOSTART_DISABLED_BY_USER | nenhuma entrada 'WavenVoIP' no Run key");
                 LogHelper.Info("AUTOSTART_FINAL_STATE | ativo=false valor=(nenhum)");
                 return;
@@ -254,8 +282,6 @@ public partial class App : Application
 
             LogHelper.Info($"AUTOSTART_REGISTRY_ENTRY_FOUND | nome=WavenVoIP valor={registrado}");
 
-            var exeAtual = Environment.ProcessPath
-                           ?? System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
             if (string.IsNullOrWhiteSpace(exeAtual))
             {
                 LogHelper.Warn("AUTOSTART_ERROR | nao foi possivel determinar o executavel atual");
@@ -302,11 +328,58 @@ public partial class App : Application
 
             // Confirma o estado final antes de encerrar — a entrada oficial precisa existir.
             var confirmado = key.GetValue("WavenVoIP") as string;
-            LogHelper.Info($"AUTOSTART_FINAL_STATE | ativo={!string.IsNullOrWhiteSpace(confirmado)} valor={confirmado ?? "(nenhum)"}");
+            var ativo = !string.IsNullOrWhiteSpace(confirmado);
+            LogHelper.Info($"AUTOSTART_FINAL_STATE | ativo={ativo} valor={confirmado ?? "(nenhum)"}");
+
+            // Só marca a migração 2.3.2 como concluída depois de confirmar que a entrada
+            // oficial ficou presente e válida — se algo falhou acima, tenta de novo depois.
+            if (migracao232Pendente && ativo)
+            {
+                CriarFlagMigracao232();
+            }
         }
         catch (Exception ex)
         {
             LogCrash("AUTOSTART_ERROR", "Falha ao verificar/corrigir entrada de autostart", ex);
+        }
+    }
+
+    // v2.3.2 — resolve o caminho absoluto do executável instalado, valida que ele existe
+    // e grava a entrada oficial no Run key, mesmo que não houvesse nenhuma entrada antes
+    // (usuário nunca ativou "Iniciar com o Windows"). Não cria a flag de migração — isso
+    // só acontece depois que o fluxo normal de validação confirma o estado final.
+    private static void ForcarHabilitacaoAutoStart232(RegistryKey key, string? exeAtual)
+    {
+        LogHelper.Info("AUTOSTART_232_FORCE_ENABLE_START");
+        try
+        {
+            if (string.IsNullOrWhiteSpace(exeAtual) || !File.Exists(exeAtual))
+            {
+                LogHelper.Warn($"AUTOSTART_232_FORCE_ENABLE_FAILED | motivo=executavel_nao_encontrado caminho={exeAtual ?? "(nulo)"}");
+                return;
+            }
+
+            key.SetValue("WavenVoIP", $"\"{exeAtual}\" /autostart");
+            LogHelper.Info($"AUTOSTART_232_FORCE_ENABLE_SUCCESS | caminho={exeAtual}");
+        }
+        catch (Exception ex)
+        {
+            LogHelper.Warn($"AUTOSTART_232_FORCE_ENABLE_FAILED | erro={ex.Message}");
+        }
+    }
+
+    private static void CriarFlagMigracao232()
+    {
+        try
+        {
+            var pasta = Path.GetDirectoryName(AutoStart232MigrationFlagPath);
+            if (!string.IsNullOrWhiteSpace(pasta)) Directory.CreateDirectory(pasta);
+            File.WriteAllText(AutoStart232MigrationFlagPath, DateTime.Now.ToString("O"));
+            LogHelper.Info("AUTOSTART_232_FLAG_CREATED");
+        }
+        catch (Exception ex)
+        {
+            LogHelper.Warn($"AUTOSTART_ERROR | falha ao criar flag de migracao 2.3.2: {ex.Message}");
         }
     }
 

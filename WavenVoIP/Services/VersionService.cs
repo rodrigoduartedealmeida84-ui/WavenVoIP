@@ -4,7 +4,7 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "2.3.1";
+        public const string Versao  = "2.3.2";
         public const string NomeApp = "WavenVoIP";
 
         public static readonly DateTime DataBuild = new DateTime(2026, 7, 20);
@@ -13,6 +13,20 @@ namespace WavenVoIP.Services
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v2.3.2 — Reativacao unica do inicio com o Windows para todos os usuarios (20/07/2026)\n" +
+            "• [FEATURE] Na primeira execucao apos atualizar para a 2.3.2, o Waven habilita 'Iniciar " +
+            "com o Windows' automaticamente para todos os usuarios — inclusive quem nunca tinha " +
+            "ativado a opcao — evitando a necessidade de configurar manualmente cada computador\n" +
+            "• [SAFE] Essa reativacao acontece uma UNICA vez por maquina (flag local dedicada). Depois " +
+            "da migracao, a escolha do usuario volta a ser respeitada normalmente: quem desativar " +
+            "'Iniciar com o Windows' depois da migracao nao tem a opcao reativada sozinha\n" +
+            "• [FIX] Preservada integralmente a correcao da v2.3.1: a entrada oficial 'WavenVoIP' " +
+            "nunca e' confundida com duplicatas antigas por diferenca de maiusculas/minusculas\n" +
+            "• [LOG] Novo rastro de log da migracao: AUTOSTART_232_MIGRATION_CHECK/REQUIRED/ALREADY_DONE, " +
+            "AUTOSTART_232_FORCE_ENABLE_START/SUCCESS/FAILED, AUTOSTART_232_FLAG_CREATED\n" +
+            "• [SAFE] Nenhuma alteracao em SIP, audio, RTP, codecs, chamadas, historico, contatos, " +
+            "favoritos, dashboard, Waven API/Chat, Issabel ou regras de filas\n" +
+            "\n" +
             "v2.3.1 — Correcao critica: autostart parou de funcionar na v2.3.0 (20/07/2026)\n" +
             "• [FIX] A rotina de autocorrecao do Auto Start (nova na v2.3.0) apagava a propria " +
             "entrada 'WavenVoIP' a cada inicio do app — a lista de nomes legados a limpar incluia " +
