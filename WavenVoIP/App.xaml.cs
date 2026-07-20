@@ -222,40 +222,110 @@ public partial class App : Application
     // corrige silenciosamente para o caminho em execução agora. Também remove nomes de
     // valor legados de versões anteriores, se existirem, evitando duas entradas de
     // autostart concorrentes.
+    //
+    // v2.3.1 — a v2.3.0 apagava a própria entrada a cada início: o Run key do Windows
+    // compara nomes de valor sem diferenciar maiúsculas/minúsculas, então a lista de nomes
+    // legados continha "WavenVoip", que é o MESMO valor que "WavenVoIP" para o Windows.
+    // A rotina validava/criava a entrada oficial e, no passo seguinte, apagava esse mesmo
+    // valor por achar que era uma duplicata antiga — resultado: nunca sobrava entrada
+    // nenhuma no registro após o primeiro início, e o autostart nunca mais funcionava.
     private static void VerificarAutoStart()
     {
-        using var key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true);
-        if (key == null) return;
-
-        var registrado = key.GetValue("WavenVoIP") as string;
-        LogHelper.Info($"AUTOSTART_PATH_CHECK | registrado={registrado ?? "(nenhum)"}");
-
-        if (string.IsNullOrWhiteSpace(registrado)) return; // autostart desligado — nada a corrigir
-
-        var exeAtual = Environment.ProcessPath
-                       ?? System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
-        if (string.IsNullOrWhiteSpace(exeAtual)) return;
-
-        var caminhoRegistrado = registrado.Trim('"').Split(new[] { " /autostart" }, StringSplitOptions.None)[0];
-
-        var apontaParaAtual = string.Equals(caminhoRegistrado, exeAtual, StringComparison.OrdinalIgnoreCase);
-        var arquivoRegistradoExiste = File.Exists(caminhoRegistrado);
-
-        if (!apontaParaAtual || !arquivoRegistradoExiste)
+        LogHelper.Info("AUTOSTART_CHECK_START");
+        try
         {
-            LogHelper.Warn($"AUTOSTART_OLD_VERSION_FOUND | registrado={caminhoRegistrado} existe={arquivoRegistradoExiste} atual={exeAtual}");
-            key.SetValue("WavenVoIP", $"\"{exeAtual}\" /autostart");
-            LogHelper.Info($"AUTOSTART_PATH_CORRECTED | novo={exeAtual}");
+            using var key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true);
+            if (key == null)
+            {
+                LogHelper.Warn("AUTOSTART_ERROR | nao foi possivel abrir HKCU\\...\\Run");
+                return;
+            }
+
+            var registrado = key.GetValue("WavenVoIP") as string;
+
+            if (string.IsNullOrWhiteSpace(registrado))
+            {
+                // Sem entrada = usuário nunca ativou ou desativou conscientemente em
+                // Configurações. Respeita a escolha: não recria sozinho.
+                LogHelper.Info("AUTOSTART_DISABLED_BY_USER | nenhuma entrada 'WavenVoIP' no Run key");
+                LogHelper.Info("AUTOSTART_FINAL_STATE | ativo=false valor=(nenhum)");
+                return;
+            }
+
+            LogHelper.Info($"AUTOSTART_REGISTRY_ENTRY_FOUND | nome=WavenVoIP valor={registrado}");
+
+            var exeAtual = Environment.ProcessPath
+                           ?? System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
+            if (string.IsNullOrWhiteSpace(exeAtual))
+            {
+                LogHelper.Warn("AUTOSTART_ERROR | nao foi possivel determinar o executavel atual");
+                return;
+            }
+
+            var caminhoRegistrado = ExtrairCaminhoAutoStart(registrado);
+            var apontaParaAtual = string.Equals(caminhoRegistrado, exeAtual, StringComparison.OrdinalIgnoreCase);
+            var arquivoRegistradoExiste = !string.IsNullOrWhiteSpace(caminhoRegistrado) && File.Exists(caminhoRegistrado);
+
+            if (apontaParaAtual && arquivoRegistradoExiste)
+            {
+                LogHelper.Info($"AUTOSTART_REGISTRY_ENTRY_VALID | caminho={caminhoRegistrado}");
+            }
+            else
+            {
+                LogHelper.Warn($"AUTOSTART_REGISTRY_ENTRY_INVALID | registrado={caminhoRegistrado} existe={arquivoRegistradoExiste} atual={exeAtual}");
+                key.SetValue("WavenVoIP", $"\"{exeAtual}\" /autostart");
+                LogHelper.Info($"AUTOSTART_ENTRY_UPDATED | novo={exeAtual}");
+            }
+
+            // Nomes de valor usados por builds bem antigas — remove se sobrarem, para não
+            // iniciar duas cópias do app junto com o Windows. IMPORTANTE: o Run key do
+            // Windows não diferencia maiúsculas/minúsculas em nomes de valor, então qualquer
+            // variação de caixa de "WavenVoIP" (ex.: "WavenVoip") É a própria entrada oficial,
+            // nunca uma duplicata — por isso não entra nesta lista, e o guard abaixo garante
+            // que nunca vamos apagar a entrada que acabamos de validar/criar.
+            foreach (var nomeAntigo in new[] { "Waven VoIP", "Waven" })
+            {
+                if (string.Equals(nomeAntigo, "WavenVoIP", StringComparison.OrdinalIgnoreCase)) continue;
+                if (key.GetValue(nomeAntigo) == null) continue;
+
+                LogHelper.Warn($"AUTOSTART_DUPLICATE_FOUND | valor_antigo={nomeAntigo}");
+                try
+                {
+                    key.DeleteValue(nomeAntigo, false);
+                    LogHelper.Info($"AUTOSTART_DUPLICATE_REMOVED | valor_antigo={nomeAntigo}");
+                }
+                catch (Exception ex)
+                {
+                    LogHelper.Warn($"AUTOSTART_ERROR | falha ao remover valor_antigo={nomeAntigo}: {ex.Message}");
+                }
+            }
+
+            // Confirma o estado final antes de encerrar — a entrada oficial precisa existir.
+            var confirmado = key.GetValue("WavenVoIP") as string;
+            LogHelper.Info($"AUTOSTART_FINAL_STATE | ativo={!string.IsNullOrWhiteSpace(confirmado)} valor={confirmado ?? "(nenhum)"}");
+        }
+        catch (Exception ex)
+        {
+            LogCrash("AUTOSTART_ERROR", "Falha ao verificar/corrigir entrada de autostart", ex);
+        }
+    }
+
+    // Extrai o caminho do executável de um valor gravado no Run key, que pode estar em um
+    // dos formatos: "caminho com espaços" /autostart | "caminho sem espacos" | caminho /autostart | caminho.
+    // Faz o parse pelo par de aspas em vez de Trim+Split, que corrompia o caminho (deixava
+    // uma aspa colada no final) sempre que o valor tinha aspas E o sufixo " /autostart".
+    private static string ExtrairCaminhoAutoStart(string valorRegistrado)
+    {
+        var v = valorRegistrado.Trim();
+        if (v.Length > 0 && v[0] == '"')
+        {
+            var fechamento = v.IndexOf('"', 1);
+            if (fechamento > 0) return v.Substring(1, fechamento - 1);
         }
 
-        // Nomes de valor usados por builds bem antigas — remove se sobrarem, para não
-        // iniciar duas cópias do app junto com o Windows.
-        foreach (var nomeAntigo in new[] { "Waven VoIP", "WavenVoip", "Waven" })
-        {
-            if (key.GetValue(nomeAntigo) == null) continue;
-            LogHelper.Warn($"AUTOSTART_DUPLICATE_FOUND | valor_antigo={nomeAntigo}");
-            try { key.DeleteValue(nomeAntigo, false); } catch { }
-        }
+        const string sufixo = " /autostart";
+        var idx = v.IndexOf(sufixo, StringComparison.OrdinalIgnoreCase);
+        return idx >= 0 ? v[..idx] : v;
     }
 
     private static void RestaurarJanelaPrincipal()

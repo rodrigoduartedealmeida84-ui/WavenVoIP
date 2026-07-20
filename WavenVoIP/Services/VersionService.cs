@@ -4,15 +4,32 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "2.3.0";
+        public const string Versao  = "2.3.1";
         public const string NomeApp = "WavenVoIP";
 
-        public static readonly DateTime DataBuild = new DateTime(2026, 7, 17);
+        public static readonly DateTime DataBuild = new DateTime(2026, 7, 20);
 
         public static string VersaoCompleta => $"{NomeApp} v{Versao}";
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v2.3.1 — Correcao critica: autostart parou de funcionar na v2.3.0 (20/07/2026)\n" +
+            "• [FIX] A rotina de autocorrecao do Auto Start (nova na v2.3.0) apagava a propria " +
+            "entrada 'WavenVoIP' a cada inicio do app — a lista de nomes legados a limpar incluia " +
+            "'WavenVoip', que o Windows trata como o MESMO valor que 'WavenVoIP' (Run key nao " +
+            "diferencia maiusculas/minusculas). A rotina validava/criava a entrada oficial e, " +
+            "no passo seguinte, apagava esse mesmo valor por engano — resultado: nenhuma entrada " +
+            "sobrava no registro apos o primeiro inicio, e o Waven nunca mais abria sozinho com o Windows\n" +
+            "• [FIX] Corrigido parse do caminho gravado no Run key: quando o valor tinha aspas e o " +
+            "sufixo ' /autostart', o codigo antigo (Trim+Split) deixava uma aspa colada no final do " +
+            "caminho extraido, fazendo File.Exists() falhar mesmo com a entrada correta\n" +
+            "• [LOG] Novo rastro de log no autostart: AUTOSTART_CHECK_START, AUTOSTART_REGISTRY_ENTRY_FOUND, " +
+            "AUTOSTART_REGISTRY_ENTRY_VALID/INVALID, AUTOSTART_ENTRY_UPDATED, AUTOSTART_DUPLICATE_REMOVED, " +
+            "AUTOSTART_DISABLED_BY_USER, AUTOSTART_FINAL_STATE, AUTOSTART_ERROR\n" +
+            "• [SAFE] Mantido: migracao de config para LocalAppData, backups rotativos, gravacao atomica " +
+            "e correcao de entradas antigas/invalidas — nenhuma mudanca em SIP, audio, RTP, codecs, " +
+            "chamadas, historico, contatos, dashboard, Waven API/Chat ou Issabel\n" +
+            "\n" +
             "v2.3.0 — Correcao definitiva da configuracao vazia no autostart (17/07/2026)\n" +
             "• [FIX] Alguns operadores abriam o Waven na tela de Configuracao Inicial (ramal/login/senha vazios) " +
             "ao iniciar o Windows — causa raiz: config do usuario ficava em %APPDATA% (roaming), que pode ser " +
