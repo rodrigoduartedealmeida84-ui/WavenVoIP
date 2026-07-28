@@ -4,15 +4,24 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "2.3.2";
+        public const string Versao  = "2.3.3";
         public const string NomeApp = "WavenVoIP";
 
-        public static readonly DateTime DataBuild = new DateTime(2026, 7, 20);
+        public static readonly DateTime DataBuild = new DateTime(2026, 7, 28);
 
         public static string VersaoCompleta => $"{NomeApp} v{Versao}";
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v2.3.3 — WhatsApp em Favoritos + novo template iniciar_conversa (28/07/2026)\n" +
+            "• [UI] WhatsApp adicionado a lista de Favoritos — mesmo icone, cor e acao ja usados em Contatos\n" +
+            "• [UI] Favoritos agora possuem a mesma experiencia da lista de Contatos\n" +
+            "• [NEW] Novo template padrao WABA 'iniciar_conversa' (MARKETING, pt_BR, botao QUICK_REPLY 'Iniciar Conversa')\n" +
+            "• [UI] Interface do preview do template modernizada, com previa da mensagem estilo celular\n" +
+            "• [UI] Melhorias visuais e pequenos ajustes de interface\n" +
+            "• [SAFE] Nenhuma alteracao em SIP, audio, RTP, codecs, chamadas, historico, contatos, dashboard, " +
+            "Auto Start, login, atualizador, Waven API, AMI, Issabel ou regras de filas\n" +
+            "\n" +
             "v2.3.2 — Reativacao unica do inicio com o Windows para todos os usuarios (20/07/2026)\n" +
             "• [FEATURE] Na primeira execucao apos atualizar para a 2.3.2, o Waven habilita 'Iniciar " +
             "com o Windows' automaticamente para todos os usuarios — inclusive quem nunca tinha " +

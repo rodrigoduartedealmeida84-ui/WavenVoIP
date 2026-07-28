@@ -1,7 +1,7 @@
 {
-    "versao":  "2.3.2",
-    "zip":  "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.3.2/WavenVoIP.zip",
-    "sha256":  "0fa26011d803f096516dd2f4e991b561fcc56b97aefac76e4698f7e023bb9d1c",
-    "data":  "2026-07-20",
-    "notas":  "WavenVoIP 2.3.2 - Reativacao unica do inicio com o Windows para todos os usuarios\n[FEATURE] Na primeira execucao apos atualizar para a 2.3.2, o Waven habilita 'Iniciar com o Windows' automaticamente para todos os usuarios — inclusive quem nunca tinha ativado a opcao — evitando a necessidade de configurar manualmente cada computador\n[SAFE] Essa reativacao acontece uma UNICA vez por maquina (flag local dedicada). Depois da migracao, a escolha do usuario volta a ser respeitada normalmente: quem desativar 'Iniciar com o Windows' depois da migracao nao tem a opcao reativada sozinha\n[FIX] Preservada integralmente a correcao da 2.3.1: a entrada oficial 'WavenVoIP' nunca e' confundida com duplicatas antigas por diferenca de maiusculas/minusculas\n[LOG] Novo rastro de log da migracao: AUTOSTART_232_MIGRATION_CHECK/REQUIRED/ALREADY_DONE, AUTOSTART_232_FORCE_ENABLE_START/SUCCESS/FAILED, AUTOSTART_232_FLAG_CREATED\n[SAFE] Nenhuma alteracao em SIP, audio, RTP, codecs, chamadas, historico, contatos, favoritos, dashboard, Waven API/Chat, Issabel ou regras de filas"
+    "versao": "2.3.3",
+    "zip": "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.3.3/WavenVoIP.zip",
+    "sha256": "9502a18fc4766ad719d24ad7517986bc0ef0ca55bb020475c5e9abc838da47aa",
+    "data": "2026-07-28",
+    "notas": "WavenVoIP 2.3.3 - WhatsApp em Favoritos + novo template iniciar_conversa\n[UI] WhatsApp adicionado a lista de Favoritos — mesmo icone, cor e acao ja usados em Contatos\n[UI] Favoritos agora possuem a mesma experiencia da lista de Contatos\n[NEW] Novo template padrao WABA 'iniciar_conversa' (MARKETING, pt_BR, botao QUICK_REPLY 'Iniciar Conversa')\n[UI] Interface do preview do template modernizada, com previa da mensagem estilo celular\n[UI] Melhorias visuais e pequenos ajustes de interface\n[SAFE] Nenhuma alteracao em SIP, audio, RTP, codecs, chamadas, historico, contatos, dashboard, Auto Start, login, atualizador, Waven API, AMI, Issabel ou regras de filas"
 }

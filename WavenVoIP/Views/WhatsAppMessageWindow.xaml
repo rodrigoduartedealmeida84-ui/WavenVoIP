@@ -97,15 +97,67 @@
                                            HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#16A34A"/>
                             </Border>
                             <StackPanel Grid.Column="1">
-                                <TextBlock Text="novo_atendimento" FontSize="15" FontWeight="Bold" Foreground="#1E293B"/>
-                                <TextBlock Text="Idioma: pt_BR  •  Status: APROVADO" FontSize="12"
+                                <TextBlock Text="iniciar_conversa" FontSize="15" FontWeight="Bold" Foreground="#1E293B"/>
+                                <TextBlock Text="Categoria: MARKETING  •  Idioma: pt_BR  •  Status: APROVADO" FontSize="12"
                                            Foreground="#16A34A" FontWeight="SemiBold" Margin="0,4,0,0"/>
-                                <TextBlock Text="Botão: Continuar Conversa (QUICK_REPLY)" FontSize="12"
+                                <TextBlock Text="Botão: Iniciar Conversa (QUICK_REPLY)" FontSize="12"
                                            Foreground="#0369A1" FontWeight="SemiBold" Margin="0,4,0,0"/>
                                 <TextBlock FontSize="12" Foreground="#64748B" Margin="0,6,0,0" TextWrapping="Wrap"
-                                           Text="O cliente receberá um convite de atendimento com o botão 'Continuar Conversa'. Aguarde a resposta para continuar o atendimento."/>
+                                           Text="O cliente receberá as boas-vindas da Almeida Gás com o botão 'Iniciar Conversa'. Aguarde a resposta para continuar o atendimento."/>
                             </StackPanel>
                         </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- Prévia da mensagem (simulação do celular do cliente) -->
+                <Border Background="White" CornerRadius="14" BorderBrush="{StaticResource BorderSoftBrush}" BorderThickness="1" Padding="18,14" Margin="0,0,0,14">
+                    <StackPanel>
+                        <TextBlock Text="PRÉVIA DA MENSAGEM" FontSize="10" FontWeight="Bold" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,12"/>
+
+                        <!-- "Tela do celular" -->
+                        <Border CornerRadius="16" Padding="0" ClipToBounds="True">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                    <GradientStop Color="#E5DDD5" Offset="0"/>
+                                    <GradientStop Color="#D9D0C7" Offset="1"/>
+                                </LinearGradientBrush>
+                            </Border.Background>
+                            <StackPanel Margin="14">
+                                <!-- Balão da mensagem recebida -->
+                                <Border Background="White" CornerRadius="8,8,8,0" Padding="12,10"
+                                        HorizontalAlignment="Left" MaxWidth="320">
+                                    <Border.Effect>
+                                        <DropShadowEffect Color="#000000" Opacity="0.12" BlurRadius="6" ShadowDepth="1"/>
+                                    </Border.Effect>
+                                    <StackPanel>
+                                        <TextBlock TextWrapping="Wrap" FontSize="13" Foreground="#111B21" LineHeight="19">
+                                            <Run Text="👋 "/><Bold>Olá! Seja bem-vindo(a) à Almeida Gás!</Bold><Run Text=" 💙"/>
+                                            <LineBreak/><LineBreak/>
+                                            <Run Text="Seu atendimento foi iniciado com a nossa equipe."/>
+                                            <LineBreak/><LineBreak/>
+                                            <Run Text="👇 Para continuarmos, basta clicar no botão "/><Bold>"Iniciar Conversa"</Bold><Run Text=" logo abaixo."/>
+                                            <LineBreak/><LineBreak/>
+                                            <Run Text="💬 Será um prazer atender você! 😊"/>
+                                        </TextBlock>
+                                        <TextBlock Text="12:00" FontSize="10" Foreground="#8696A0" HorizontalAlignment="Right" Margin="0,6,0,0"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Botão de resposta rápida (QUICK_REPLY) -->
+                                <Border Background="White" CornerRadius="0,0,8,8" Padding="0" Margin="0,2,0,0"
+                                        HorizontalAlignment="Left" MinWidth="150" MaxWidth="320">
+                                    <Border.Effect>
+                                        <DropShadowEffect Color="#000000" Opacity="0.10" BlurRadius="6" ShadowDepth="1"/>
+                                    </Border.Effect>
+                                    <Border BorderBrush="#E9EDEF" BorderThickness="0,1,0,0" Padding="12,9">
+                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                            <TextBlock Text="↩" FontSize="13" Foreground="#00A5F4" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                            <TextBlock Text="Iniciar Conversa" FontSize="13" FontWeight="SemiBold" Foreground="#00A5F4"/>
+                                        </StackPanel>
+                                    </Border>
+                                </Border>
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
                 </Border>
 
