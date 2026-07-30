@@ -369,6 +369,11 @@ namespace WavenVoIP.Views
                 IntegrationAutoReconnectService.ReconectarAgora += OnIntegracaoReconectarAgora;
                 Closed += (_, _) => IntegrationAutoReconnectService.ReconectarAgora -= OnIntegracaoReconectarAgora;
 
+                // Favoritos: qualquer alteração persistida (edição de contato, sync com a API,
+                // add/remove) atualiza a lista exibida automaticamente, sem precisar reabrir a janela.
+                Services.FavoritesStorageService.FavoritosAlterados += OnFavoritosAlterados;
+                Closed += (_, _) => Services.FavoritesStorageService.FavoritosAlterados -= OnFavoritosAlterados;
+
                 // Hook WndProc para detectar reinicialização do Explorer e recuperar ícone da bandeja
                 try
                 {
@@ -1081,7 +1086,14 @@ namespace WavenVoIP.Views
         {
             try
             {
-                var lista = await Task.Run(() => Services.FavoritesStorageService.Carregar());
+                var lista = await Task.Run(() =>
+                {
+                    // Resolve/atualiza o nome exibido a partir do contato atual antes de exibir
+                    // (cobre edição local e migra favoritos antigos sem ContactId).
+                    var contatos = ContatoStorageService.Carregar();
+                    Services.FavoritesStorageService.AtualizarNomesPorContatos(contatos);
+                    return Services.FavoritesStorageService.Carregar();
+                });
                 Dispatcher.Invoke(() =>
                 {
                     _favoritos.Clear();
@@ -1089,8 +1101,17 @@ namespace WavenVoIP.Views
                     if (listFavoritos != null) listFavoritos.ItemsSource = _favoritos;
                     AtualizarVisibilidadeFavoritosVazio();
                     Services.LogHelper.Info($"FAVORITES_LOADED | count={_favoritos.Count}");
+                    Services.LogHelper.Info($"FAVORITES_UI_REFRESHED | count={_favoritos.Count}");
                 });
             }
+            catch { }
+        }
+
+        // Disparado quando FavoritesStorageService persiste qualquer alteração
+        // (edição de contato, sync periódico com a API, add/remove manual).
+        private void OnFavoritosAlterados()
+        {
+            try { Dispatcher.BeginInvoke(new Action(() => { _ = CarregarFavoritosAsync(); })); }
             catch { }
         }
 
@@ -1159,9 +1180,10 @@ namespace WavenVoIP.Views
                 {
                     Services.FavoritesStorageService.Adicionar(new Models.FavoriteItem
                     {
-                        Nome    = contato.Nome,
-                        Numero  = contato.Numero,
-                        Favorito = true
+                        Nome      = contato.Nome,
+                        Numero    = contato.Numero,
+                        Favorito  = true,
+                        ContactId = contato.WavenApiId
                     });
                     EnviarFavoritoApiAsync(contato.WavenApiId, contato.Numero, adicionar: true);
                 }

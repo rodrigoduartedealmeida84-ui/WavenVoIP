@@ -369,6 +369,7 @@ namespace WavenVoIP.Services
             // Monta set de números normalizados que devem ser favoritos
             var favNums = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var favNomes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var favContactIds = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var id in favoritosIds)
             {
@@ -378,6 +379,7 @@ namespace WavenVoIP.Services
                     new string(c.Numero.Where(char.IsDigit).ToArray()));
                 favNums.Add(num);
                 favNomes[num] = c.Nome;
+                favContactIds[num] = c.WavenApiId;
             }
 
             // Adiciona favoritos que faltam localmente
@@ -387,13 +389,18 @@ namespace WavenVoIP.Services
                 {
                     FavoritesStorageService.Adicionar(new FavoriteItem
                     {
-                        Nome     = favNomes.TryGetValue(num, out var n) ? n : num,
-                        Numero   = num,
-                        Favorito = true
+                        Nome      = favNomes.TryGetValue(num, out var n) ? n : num,
+                        Numero    = num,
+                        Favorito  = true,
+                        ContactId = favContactIds.TryGetValue(num, out var cid) ? cid : null
                     });
                     Log($"API_CONTACT_FAVORITE_UPDATED | numero={num} favorito=true");
                 }
             }
+
+            // Atualiza o nome exibido dos favoritos já existentes a partir do contato atual
+            // (cobre o caso do nome do contato ter sido alterado por outro usuário).
+            FavoritesStorageService.AtualizarNomesPorContatos(contatos);
 
             // Remove favoritos locais que não estão mais na lista da API
             // (apenas para contatos que vieram da API, identificados por WavenApiId)

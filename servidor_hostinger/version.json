@@ -1,7 +1,7 @@
 {
-    "versao": "2.3.3",
-    "zip": "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.3.3/WavenVoIP.zip",
-    "sha256": "9502a18fc4766ad719d24ad7517986bc0ef0ca55bb020475c5e9abc838da47aa",
-    "data": "2026-07-28",
-    "notas": "WavenVoIP 2.3.3 - WhatsApp em Favoritos + novo template iniciar_conversa\n[UI] WhatsApp adicionado a lista de Favoritos — mesmo icone, cor e acao ja usados em Contatos\n[UI] Favoritos agora possuem a mesma experiencia da lista de Contatos\n[NEW] Novo template padrao WABA 'iniciar_conversa' (MARKETING, pt_BR, botao QUICK_REPLY 'Iniciar Conversa')\n[UI] Interface do preview do template modernizada, com previa da mensagem estilo celular\n[UI] Melhorias visuais e pequenos ajustes de interface\n[SAFE] Nenhuma alteracao em SIP, audio, RTP, codecs, chamadas, historico, contatos, dashboard, Auto Start, login, atualizador, Waven API, AMI, Issabel ou regras de filas"
+    "versao":  "2.3.4",
+    "zip":  "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.3.4/WavenVoIP.zip",
+    "sha256":  "a09083c745d94d72f6381564884cf6a8f2a4dce4b1500dc97b3090dcd555dc15",
+    "data":  "2026-07-30",
+    "notas":  "WavenVoIP 2.3.4 - Layout dos Favoritos + nome sincronizado com Contatos\n[FIX] Favoritos: coluna de nome recebeu mais espaço — nomes longos não são mais cortados após a inclusão do botão WhatsApp na v2.3.3\n[FIX] Nome do favorito agora é resolvido a partir do contato atual (vínculo por ContactId, com fallback por telefone normalizado) — editar o nome de um contato atualiza automaticamente todos os favoritos correspondentes\n[FIX] Atualização do nome chega a todos os ramais no próximo ciclo de sincronização com a Waven API (a cada 60s)\n[NEW] Migração automática e segura de favoritos antigos (sem vínculo) por telefone normalizado\n[FIX] Publish-Clean.ps1: corrigido round-trip do version.json que podia corromper acentos, cedilha e travessões (mojibake)\n[SAFE] Nenhuma alteração em SIP, áudio, RTP, codecs, chamadas, histórico, filas, AMI, Issabel, Auto Start, login, atualizador, template iniciar_conversa ou botão WhatsApp"
 }

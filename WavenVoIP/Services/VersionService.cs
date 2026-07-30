@@ -4,15 +4,24 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "2.3.3";
+        public const string Versao  = "2.3.4";
         public const string NomeApp = "WavenVoIP";
 
-        public static readonly DateTime DataBuild = new DateTime(2026, 7, 28);
+        public static readonly DateTime DataBuild = new DateTime(2026, 7, 30);
 
         public static string VersaoCompleta => $"{NomeApp} v{Versao}";
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v2.3.4 — Layout dos Favoritos + nome sincronizado com Contatos (30/07/2026)\n" +
+            "• [FIX] Favoritos: coluna de nome recebeu mais espaco — nomes longos nao sao mais cortados apos a inclusao do botao WhatsApp na v2.3.3\n" +
+            "• [FIX] Nome do favorito agora e resolvido a partir do contato atual (vinculo por ContactId, com fallback por telefone normalizado) — editar o nome de um contato atualiza automaticamente todos os favoritos correspondentes\n" +
+            "• [FIX] Atualizacao do nome chega a todos os ramais no proximo ciclo de sincronizacao com a Waven API (a cada 60s), sem precisar remover e favoritar novamente\n" +
+            "• [NEW] Migracao automatica e segura de favoritos antigos (sem vinculo) por telefone normalizado, na primeira execucao desta versao\n" +
+            "• [FIX] Publish-Clean.ps1: corrigido round-trip do version.json que podia corromper acentos, cedilha e travessoes (mojibake) — leitura/escrita agora usam UTF-8 sem BOM de forma explicita\n" +
+            "• [LOG] FAVORITE_CONTACT_LINK_BY_ID / FAVORITE_CONTACT_LINK_BY_PHONE / FAVORITE_CONTACT_NAME_UPDATED / FAVORITE_CONTACT_NOT_FOUND / FAVORITES_UI_REFRESHED\n" +
+            "• [SAFE] Nenhuma alteracao em SIP, audio, RTP, codecs, chamadas, historico, filas, AMI, Issabel, Auto Start, login, atualizador, template iniciar_conversa ou botao WhatsApp\n" +
+            "\n" +
             "v2.3.3 — WhatsApp em Favoritos + novo template iniciar_conversa (28/07/2026)\n" +
             "• [UI] WhatsApp adicionado a lista de Favoritos — mesmo icone, cor e acao ja usados em Contatos\n" +
             "• [UI] Favoritos agora possuem a mesma experiencia da lista de Contatos\n" +

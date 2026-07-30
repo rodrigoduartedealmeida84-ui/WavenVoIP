@@ -77,13 +77,23 @@ if ($versionLine) {
 }
 
 $versionFile = "servidor_hostinger\version.json"
-$vJson = Get-Content $versionFile -Raw | ConvertFrom-Json
+# Le explicitamente como UTF-8: sem isso, o PowerShell 5.1 pode nao detectar
+# corretamente um arquivo UTF-8 sem BOM e decodificar com o codepage ANSI do
+# sistema, corrompendo acentos/ç/travessoes (mojibake) logo na leitura.
+$vJson = Get-Content $versionFile -Raw -Encoding UTF8 | ConvertFrom-Json
 $githubZipUrl = "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v$currentVersion/WavenVoIP.zip"
 $vJson.versao = $currentVersion
 $vJson.zip    = $githubZipUrl
 $vJson.sha256 = $sha256
 $vJson.data   = (Get-Date -Format "yyyy-MM-dd")
-$vJson | ConvertTo-Json -Depth 5 | Out-File $versionFile -Encoding utf8
+
+# Grava como UTF-8 SEM BOM. "Out-File -Encoding utf8" no PowerShell 5.1 sempre
+# adiciona BOM e "Set-Content" usa o codepage ANSI por padrao — ambos causam
+# problemas de compatibilidade/corrupcao. Escrever via .NET com UTF8Encoding($false)
+# evita os dois problemas.
+$vJsonText = $vJson | ConvertTo-Json -Depth 5
+$utf8NoBom = New-Object System.Text.UTF8Encoding $false
+[System.IO.File]::WriteAllText((Join-Path $PSScriptRoot $versionFile), $vJsonText, $utf8NoBom)
 
 Write-Host ""
 Write-Host "=== Publish concluido com sucesso ===" -ForegroundColor Green

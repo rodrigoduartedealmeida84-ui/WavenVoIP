@@ -116,6 +116,7 @@ namespace WavenVoIP.Views
                     }
 
                     ContatoStorageService.Salvar(contatos);
+                    FavoritesStorageService.AtualizarNomesPorContatos(contatos);
 
                     // Se API ativa, criar na Waven API para distribuir para todos os ramais
                     var cfgGoogle = SipConfig.CarregarSalva();
@@ -136,9 +137,11 @@ namespace WavenVoIP.Views
                             {
                                 localCopy.WavenApiId = apiContact.Id;
                                 ContatoStorageService.Salvar(todosAtual);
+                                FavoritesStorageService.AtualizarNomesPorContatos(todosAtual);
                             }
                             LogHelper.Info($"GOOGLE_CONTACT_CONVERTED_TO_SHARED | googleId={_contatoOriginal.GoogleContactId} wavenId={apiContact.Id} nome={nome}");
                             LogHelper.Info($"CONTACT_UPDATE_API_OK | id={apiContact.Id} nome={nome}");
+                            LogHelper.Info($"FAVORITE_CONTACT_SYNC_BROADCAST | id={apiContact.Id} nome={nome}");
                         }
                         else if (apiOk)
                         {
@@ -214,6 +217,7 @@ namespace WavenVoIP.Views
                     }
 
                     ContatoStorageService.Salvar(contatos);
+                    FavoritesStorageService.AtualizarNomesPorContatos(contatos);
 
                     // Push para API se for contato compartilhado
                     if (!string.IsNullOrWhiteSpace(_contatoOriginal.WavenApiId))
@@ -231,6 +235,7 @@ namespace WavenVoIP.Views
                             if (ok)
                             {
                                 LogHelper.Info($"CONTACT_UPDATE_API_OK | id={_contatoOriginal.WavenApiId} nome={nome}");
+                                LogHelper.Info($"FAVORITE_CONTACT_SYNC_BROADCAST | id={_contatoOriginal.WavenApiId} nome={nome}");
                             }
                             else
                             {
@@ -281,11 +286,12 @@ namespace WavenVoIP.Views
                     if (!string.IsNullOrWhiteSpace(obs)) existenteNorm.Observacao = obs;
                     existenteNorm.AtualizadoEm = DateTime.UtcNow;
                     ContatoStorageService.Salvar(contatos);
+                    FavoritesStorageService.AtualizarNomesPorContatos(contatos);
 
                     if (chkFavoritos?.IsChecked == true)
                     {
                         var adicionado = FavoritesStorageService.Adicionar(new Models.FavoriteItem
-                            { Nome = nome, Numero = numeroNorm, Favorito = true });
+                            { Nome = nome, Numero = numeroNorm, Favorito = true, ContactId = existenteNorm.WavenApiId });
                         AdicionadoAosFavoritos = adicionado;
                     }
 
@@ -310,6 +316,7 @@ namespace WavenVoIP.Views
             LogHelper.Info($"CONTACT_SAVE_OK | nome={nome} numero={numeroNorm}");
 
             // Sincroniza novo contato com Waven API para que todos os ramais o vejam
+            string? novoContactId = null;
             var cfgNovo = SipConfig.CarregarSalva();
             if (cfgNovo?.UsarWavenApi == true && !string.IsNullOrWhiteSpace(cfgNovo.WavenApiToken))
             {
@@ -320,6 +327,8 @@ namespace WavenVoIP.Views
 
                 if (apiOk && apiContact != null)
                 {
+                    novoContactId = apiContact.Id;
+
                     // Vincula WavenApiId para que edições futuras sejam propagadas
                     var todosAtual = ContatoStorageService.Carregar();
                     var localCopy = todosAtual.FirstOrDefault(c =>
@@ -350,9 +359,10 @@ namespace WavenVoIP.Views
                 LogHelper.Info($"FAVORITE_SAVE_START | nome={nome} numero={numeroNorm}");
                 var adicionado = FavoritesStorageService.Adicionar(new Models.FavoriteItem
                 {
-                    Nome     = nome,
-                    Numero   = numeroNorm,
-                    Favorito = true
+                    Nome      = nome,
+                    Numero    = numeroNorm,
+                    Favorito  = true,
+                    ContactId = novoContactId
                 });
                 AdicionadoAosFavoritos = adicionado;
                 if (adicionado) LogHelper.Info($"FAVORITE_SAVE_OK | nome={nome} numero={numeroNorm}");
