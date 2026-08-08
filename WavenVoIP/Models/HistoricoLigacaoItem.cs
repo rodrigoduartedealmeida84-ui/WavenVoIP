@@ -13,7 +13,13 @@ namespace WavenVoIP.Models
         Recebida = 1,
         Perdida = 2,
         NaoAtendidaNesseRamal = 3,
-        CaixaPostal = 4
+        CaixaPostal = 4,
+        // v2.3.5 — chamadas REALIZADAS (operador ligou) que não completaram nunca usam
+        // Perdida (exclusivo de chamadas recebidas — ver ClassificarChamada). Recusada = o
+        // cliente rejeitou/estava ocupado (CDR disposition BUSY); NaoAtendida = tocou até
+        // acabar sem resposta (NO ANSWER/FAILED/CONGESTION).
+        Recusada = 5,
+        NaoAtendida = 6
     }
 
     public class HistoricoLigacaoItem
@@ -134,7 +140,7 @@ namespace WavenVoIP.Models
                 // When both ramal fields confirm an internal call, override any stored channel.
                 if (EhChamadaRamalInterno()) return "Ramal interno";
                 var canal = CanalIdentificacaoService.NormalizarCanal(OrigemSaida, Tipo, Numero);
-                if (canal == "Saída não identificada" && Tipo == TipoHistoricoLigacao.Realizada)
+                if (canal == "Saída não identificada" && EhChamadaRealizadaOuFalhaDeSaida())
                     return DetectarSaidaPeloPrefixo(Numero);
                 return canal;
             }
@@ -153,8 +159,16 @@ namespace WavenVoIP.Models
         private string RamalDaConversaInterna()
         {
             if (!EhChamadaRamalInterno()) return string.Empty;
-            return Tipo == TipoHistoricoLigacao.Realizada ? RamalDestino : RamalOrigem;
+            return EhChamadaRealizadaOuFalhaDeSaida() ? RamalDestino : RamalOrigem;
         }
+
+        // Realizada, Recusada e NaoAtendida são todas chamadas que ESTE ramal originou
+        // (RamalOrigem = quem discou) — só o desfecho final muda. Usado para decidir, em vários
+        // pontos, se o "lado do operador" é RamalOrigem (saída) ou RamalDestino/RamalAtendeu (entrada).
+        private bool EhChamadaRealizadaOuFalhaDeSaida() =>
+            Tipo == TipoHistoricoLigacao.Realizada ||
+            Tipo == TipoHistoricoLigacao.Recusada ||
+            Tipo == TipoHistoricoLigacao.NaoAtendida;
 
         [JsonIgnore]
         public Brush CorCanal => CanalIdentificacaoService.BrushCanal(OrigemSaidaVisual);
@@ -166,6 +180,8 @@ namespace WavenVoIP.Models
             TipoHistoricoLigacao.Perdida => "↘",
             TipoHistoricoLigacao.NaoAtendidaNesseRamal => "↩",
             TipoHistoricoLigacao.CaixaPostal => "✉",
+            TipoHistoricoLigacao.Recusada => "⊘",
+            TipoHistoricoLigacao.NaoAtendida => "↛",
             _ => "•"
         };
 
@@ -174,8 +190,13 @@ namespace WavenVoIP.Models
             TipoHistoricoLigacao.Realizada => "Realizada",
             TipoHistoricoLigacao.Recebida => "Recebida",
             TipoHistoricoLigacao.Perdida => "Perdida",
-            TipoHistoricoLigacao.NaoAtendidaNesseRamal => "Não atendida",
+            // Renomeado de "Não atendida" (v2.3.5): esse status é para chamada RECEBIDA que
+            // tocou neste ramal mas foi atendida por outro — texto antigo colidia com o novo
+            // TipoHistoricoLigacao.NaoAtendida (chamada REALIZADA sem resposta).
+            TipoHistoricoLigacao.NaoAtendidaNesseRamal => "Atendida em outro ramal",
             TipoHistoricoLigacao.CaixaPostal => "Caixa postal",
+            TipoHistoricoLigacao.Recusada => "Recusada",
+            TipoHistoricoLigacao.NaoAtendida => "Não atendida",
             _ => Tipo.ToString()
         };
 
@@ -187,6 +208,8 @@ namespace WavenVoIP.Models
             TipoHistoricoLigacao.Perdida => new SolidColorBrush(Color.FromRgb(220, 38, 38)),
             TipoHistoricoLigacao.NaoAtendidaNesseRamal => new SolidColorBrush(Color.FromRgb(234, 88, 12)),
             TipoHistoricoLigacao.CaixaPostal => new SolidColorBrush(Color.FromRgb(161, 98, 7)),
+            TipoHistoricoLigacao.Recusada => new SolidColorBrush(Color.FromRgb(185, 28, 28)),
+            TipoHistoricoLigacao.NaoAtendida => new SolidColorBrush(Color.FromRgb(217, 119, 6)),
             _ => Brushes.Gray
         };
 
@@ -198,6 +221,8 @@ namespace WavenVoIP.Models
             TipoHistoricoLigacao.Perdida => new SolidColorBrush(Color.FromRgb(254, 242, 242)),
             TipoHistoricoLigacao.NaoAtendidaNesseRamal => new SolidColorBrush(Color.FromRgb(255, 247, 237)),
             TipoHistoricoLigacao.CaixaPostal => new SolidColorBrush(Color.FromRgb(254, 249, 195)),
+            TipoHistoricoLigacao.Recusada => new SolidColorBrush(Color.FromRgb(254, 226, 226)),
+            TipoHistoricoLigacao.NaoAtendida => new SolidColorBrush(Color.FromRgb(255, 251, 235)),
             _ => new SolidColorBrush(Color.FromRgb(241, 245, 249))
         };
 
@@ -206,7 +231,7 @@ namespace WavenVoIP.Models
         {
             get
             {
-                if (Tipo == TipoHistoricoLigacao.Realizada)
+                if (EhChamadaRealizadaOuFalhaDeSaida())
                 {
                     if (!string.IsNullOrWhiteSpace(RamalOrigem) && EhRamalString(RamalOrigem))
                         return NomeOuRamal(RamalOrigem);

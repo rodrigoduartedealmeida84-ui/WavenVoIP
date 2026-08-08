@@ -131,7 +131,10 @@ namespace WavenVoIP.Services
 
             if (!string.IsNullOrWhiteSpace(canal)) return canal;
 
-            if (tipo == TipoHistoricoLigacao.Realizada) return "Saída não identificada";
+            if (tipo == TipoHistoricoLigacao.Realizada ||
+                tipo == TipoHistoricoLigacao.Recusada ||
+                tipo == TipoHistoricoLigacao.NaoAtendida)
+                return "Saída não identificada";
 
             // Fallback: external calls without a known DID are shown as Operadora.
             if (!string.IsNullOrWhiteSpace(n)) return "Operadora";

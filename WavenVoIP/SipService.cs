@@ -13,6 +13,7 @@ using SIPSorcery.Net;
 using SIPSorcery.SIP;
 using SIPSorcery.SIP.App;
 using SIPSorceryMedia.Windows;
+using WavenVoIP.Models;
 using WavenVoIP.Services;
 
 namespace WavenVoIP
@@ -130,6 +131,58 @@ namespace WavenVoIP
         public string LastCallError { get; private set; } = string.Empty;
         public string LastConferenceError { get; private set; } = string.Empty;
         public string LastDialedDestination { get; private set; } = string.Empty;
+
+        // v2.3.5 — motivo real (código SIP) da última falha de chamada REALIZADA, capturado ao
+        // vivo via SIPUserAgent.ClientCallFailed (não depende do CDR, que só chega minutos depois
+        // via sync). Usado para diferenciar Recusada de NaoAtendida imediatamente na interface —
+        // ver Ligar() e ClassificarResultadoLigacao().
+        public SIPResponseStatusCodesEnum? LastOutboundFailureStatus { get; private set; }
+        public string LastOutboundFailureReason { get; private set; } = string.Empty;
+        public TipoHistoricoLigacao LastOutboundResultado { get; private set; } = TipoHistoricoLigacao.NaoAtendida;
+        public double? LastOutboundRingDurationSeconds { get; private set; }
+
+        // Momento do último 180 Ringing confirmado para a chamada de saída em andamento — usado
+        // para medir o tempo de toque até BusyHere/Decline (heurística de Recusada vs NaoAtendida).
+        // Resetado no início de cada Ligar().
+        private DateTime? _ultimoRingingRecebidoEm;
+
+        // Investigação real (08/08/2026, duas chamadas de teste na mesma rota/operadora):
+        //   Teste 1 — cliente recusou no aparelho: Ringing → BusyHere em ~11s.
+        //   Teste 2 — cliente deixou tocar até a operadora encerrar: Ringing → BusyHere em ~60s
+        //             (tempo redondo — timeout de rede do lado da operadora/WAVOIP, não uma ação
+        //             do cliente). Confirmado que SIP (486 Busy Here) e CDR (disposition BUSY) são
+        //             IDÊNTICOS nos dois casos — não existe código que diferencie recusa real de
+        //             timeout nesta rota. O único sinal disponível é o tempo entre Ringing e a
+        //             falha. Limiar conservador escolhido com o usuário após ver essa evidência;
+        //             ajustável conforme mais testes reais.
+        public const int OutboundDeclineThresholdSeconds = 30;
+
+        // BusyHere (486) e Decline (603) são os únicos códigos SIP que indicam alguma resposta do
+        // lado chamado — mas a operadora/gateway usa o MESMO BusyHere tanto para rejeição real
+        // quanto para timeout de toque (ver investigação acima), então o código sozinho não basta.
+        // A heurística de tempo SÓ vale quando: (1) houve Ringing confirmado — sem isso não há como
+        // medir, e uma falha rápida pode ser erro de rota/rede, não recusa; (2) o status é
+        // BusyHere/Decline. Qualquer outro caso (sem Ringing, ou status diferente — 404, 480, 5xx,
+        // timeout de conexão) é sempre NaoAtendida, nunca presume recusa.
+        private TipoHistoricoLigacao ClassificarResultadoLigacao(SIPResponseStatusCodesEnum? status, double? ringDurationSeg)
+        {
+            var ehBusyOuDecline = status == SIPResponseStatusCodesEnum.BusyHere || status == SIPResponseStatusCodesEnum.Decline;
+            if (!ehBusyOuDecline || !ringDurationSeg.HasValue)
+            {
+                LogHelper.Sip($"OUTBOUND_CLASSIFIED_NO_ANSWER status={status} ringDurationSeg={ringDurationSeg} motivo=sem_busy_ou_sem_ringing_confirmado");
+                return TipoHistoricoLigacao.NaoAtendida;
+            }
+
+            var resultado = ringDurationSeg.Value < OutboundDeclineThresholdSeconds
+                ? TipoHistoricoLigacao.Recusada
+                : TipoHistoricoLigacao.NaoAtendida;
+
+            LogHelper.Sip($"OUTBOUND_BUSY_CLASSIFICATION ringDurationSeg={ringDurationSeg:F1} threshold={OutboundDeclineThresholdSeconds} result={resultado}");
+            LogHelper.Sip(resultado == TipoHistoricoLigacao.Recusada
+                ? $"OUTBOUND_CLASSIFIED_DECLINED ringDurationSeg={ringDurationSeg:F1}"
+                : $"OUTBOUND_CLASSIFIED_NO_ANSWER ringDurationSeg={ringDurationSeg:F1} motivo=proximo_do_timeout");
+            return resultado;
+        }
 
         public void Inicializar(SipConfig config)
         {
@@ -264,7 +317,28 @@ namespace WavenVoIP
 
             _userAgent = new SIPUserAgent(_sipTransport, null);
             _userAgent.OnIncomingCall += OnIncomingCall;
-            _userAgent.ClientCallRinging += (_, __) => LogHelper.Sip("CALL_RINGING | 180 Ringing recebido do servidor SIP");
+            _userAgent.ClientCallRinging += (_, __) =>
+            {
+                // Só registra o PRIMEIRO Ringing da tentativa — retransmissões de 180 não devem
+                // reiniciar a contagem do tempo de toque.
+                if (_ultimoRingingRecebidoEm == null)
+                {
+                    _ultimoRingingRecebidoEm = DateTime.Now;
+                    LogHelper.Sip("OUTBOUND_RINGING_STARTED | 180 Ringing recebido do servidor SIP");
+                }
+                LogHelper.Sip("CALL_RINGING | 180 Ringing recebido do servidor SIP");
+            };
+            _userAgent.ClientCallFailed += (uac, errorMessage, sipResponse) =>
+            {
+                LastOutboundFailureStatus = sipResponse?.Status;
+                LastOutboundFailureReason = errorMessage;
+                LastOutboundRingDurationSeconds = _ultimoRingingRecebidoEm.HasValue
+                    ? (DateTime.Now - _ultimoRingingRecebidoEm.Value).TotalSeconds
+                    : (double?)null;
+                LogHelper.Sip($"OUTBOUND_RING_DURATION ringDurationSeg={LastOutboundRingDurationSeconds:F1}");
+                LogHelper.Sip($"OUTBOUND_CALL_FAILED status={sipResponse?.Status} motivo={errorMessage}");
+                RegistrarSinalSip($"OUTBOUND_CALL_FAILED status={sipResponse?.Status} motivo={errorMessage}");
+            };
             _userAgent.OnCallHungup += _ =>
             {
                 _emEspera = false;
@@ -680,6 +754,10 @@ namespace WavenVoIP
             string destination = $"sip:{numeroNorm}@{_config.ServerIp}:{_config.Port}";
             LastCallError = string.Empty;
             LastDialedDestination = destination;
+            LastOutboundFailureStatus = null;
+            LastOutboundFailureReason = string.Empty;
+            LastOutboundRingDurationSeconds = null;
+            _ultimoRingingRecebidoEm = null;
             LogHelper.Sip($"CALL_START_CLICK | destino={numeroNorm} raw={numeroRaw}");
             LogHelper.Sip($"CALL_DIAL_NUMBER_RAW | numero={numeroRaw}");
             LogHelper.Sip($"CALL_DIAL_NUMBER_NORMALIZED | numero={numeroNorm}");
@@ -728,10 +806,12 @@ namespace WavenVoIP
                 }
                 else
                 {
+                    LastOutboundResultado = ClassificarResultadoLigacao(LastOutboundFailureStatus, LastOutboundRingDurationSeconds);
                     LastCallError = $"Issabel/SIP recusou ou não completou o INVITE para {numeroFinal}. Destino enviado: {destination}.";
                     StatusChanged?.Invoke($"Falha ao chamar {numeroFinal}. Veja log SIP.");
                     RegistrarSinalSip($"TX CALL FALHA destino={destination}");
-                    LogHelper.Sip($"CALL_ENDED_REASON | motivo=SIP_REJECTED destino={destination}", LogLevel.WARN);
+                    LogHelper.Sip($"CALL_ENDED_REASON | motivo=SIP_REJECTED destino={destination} " +
+                        $"status={LastOutboundFailureStatus} resultado={LastOutboundResultado}", LogLevel.WARN);
                     LimparEstadoChamada("Falha na chamada.");
                 }
 

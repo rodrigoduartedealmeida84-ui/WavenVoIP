@@ -214,7 +214,8 @@ namespace WavenVoIP.Views
                 PararPulse(Color.FromRgb(107, 114, 128));
             else if (s.Contains("transfer"))
                 IniciarPulse(Color.FromRgb(99, 102, 241));
-            else if (s.Contains("encerr") || s.Contains("falha") || s.Contains("ocup"))
+            else if (s.Contains("encerr") || s.Contains("falha") || s.Contains("ocup") ||
+                     s.Contains("recusada") || s.Contains("não atendida"))
                 PararPulse(Color.FromRgb(239, 68, 68));
             else
                 PararPulse(Color.FromRgb(107, 114, 128));

@@ -90,6 +90,7 @@ namespace WavenVoIP.Views
         private DateTime _ultimoFimChamadaEntrada = DateTime.MinValue;
         private static readonly TimeSpan _janelaResfriamentoPosRing = TimeSpan.FromSeconds(6);
         private MissedCallPopup? _missedCallPopup;
+        private OutboundDeclinedToast? _outboundDeclinedToast;
 
         // ── System log panel ─────────────────────────────────────────────────────
         private readonly List<LogEntry>                     _allLogs  = new(2001);
@@ -888,10 +889,12 @@ namespace WavenVoIP.Views
                     {
                         lista = tipoFiltro switch
                         {
-                            "Recebidas"     => lista.Where(i => i.Tipo == Models.TipoHistoricoLigacao.Recebida).ToList(),
-                            "Realizadas"    => lista.Where(i => i.Tipo == Models.TipoHistoricoLigacao.Realizada).ToList(),
-                            "Perdidas"      => lista.Where(i => i.Tipo == Models.TipoHistoricoLigacao.Perdida).ToList(),
-                            "Não atendidas" => lista.Where(i => i.Tipo == Models.TipoHistoricoLigacao.NaoAtendidaNesseRamal).ToList(),
+                            "Recebidas"               => lista.Where(i => i.Tipo == Models.TipoHistoricoLigacao.Recebida).ToList(),
+                            "Realizadas"              => lista.Where(i => i.Tipo == Models.TipoHistoricoLigacao.Realizada).ToList(),
+                            "Perdidas"                => lista.Where(i => i.Tipo == Models.TipoHistoricoLigacao.Perdida).ToList(),
+                            "Recusadas"               => lista.Where(i => i.Tipo == Models.TipoHistoricoLigacao.Recusada).ToList(),
+                            "Não atendidas"           => lista.Where(i => i.Tipo == Models.TipoHistoricoLigacao.NaoAtendida).ToList(),
+                            "Atendida em outro ramal" => lista.Where(i => i.Tipo == Models.TipoHistoricoLigacao.NaoAtendidaNesseRamal).ToList(),
                             _ => lista
                         };
                     }
@@ -2354,6 +2357,8 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
                 call.Closed += (_, __) => { if (ReferenceEquals(_activeCallWindow, call)) _activeCallWindow = null; };
                 call.Show();
 
+                var ramalAtual = SipConfig.CarregarSalva()?.Ramal?.Trim() ?? string.Empty;
+
                 RegistrarUiDiagnostico($"CHAMANDO SIP Ligar numeroFinal={numeroFinal}");
                 bool ok = await _sipService.Ligar(numeroFinal);
                 RegistrarUiDiagnostico($"RETORNO SIP Ligar numeroFinal={numeroFinal} ok={ok} erro={_sipService.LastCallError}");
@@ -2361,16 +2366,37 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
                 {
                     call.DefinirStatus($"Em chamada via {origemSaida}");
                     call.IniciarContador();
-                    IniciarControleHistoricoChamada(RegistrarHistorico(numeroFinal, TipoHistoricoLigacao.Realizada, "Em andamento", origemSaida));
+                    IniciarControleHistoricoChamada(RegistrarHistorico(numeroFinal, TipoHistoricoLigacao.Realizada, "Em andamento", origemSaida, ramalAtual));
                 }
                 else
                 {
                     // Mantém a tela aberta para o usuário ver que a tentativa foi feita.
                     // Antes ela fechava imediatamente quando o SIP/Issabel recusava ou falhava,
                     // dando a impressão de que a tela de chamada nem abriu.
+                    //
+                    // Resultado classificado ao vivo pelo SipService (via evento SIP ClientCallFailed
+                    // — não espera a sincronização de CDR, que só chega minutos depois). Nunca usa o
+                    // popup de "Chamada perdida", que é exclusivo de chamadas RECEBIDAS não atendidas.
+                    var resultado = _sipService.LastOutboundResultado;
+                    var mensagemToast = resultado == TipoHistoricoLigacao.Recusada
+                        ? "Chamada recusada"
+                        : "Chamada não atendida";
+                    call.DefinirStatus(mensagemToast);
+                    // Sem IniciarControleHistoricoChamada aqui: a chamada nunca conectou (sem duração
+                    // a rastrear) e não dispara CallEnded (nenhuma sessão ativa para o Asterisk
+                    // encerrar) — chamar isso deixaria _historicoChamadaAtivaId "preso" apontando
+                    // para este registro até a PRÓXIMA chamada terminar, corrompendo a duração dela.
+                    RegistrarHistorico(numeroFinal, resultado, "00:00", origemSaida, ramalAtual);
+
+                    // Toast dedicado só dispara quando o resultado FINAL é Recusada — nunca para
+                    // Não atendida, timeout ou qualquer outra falha (ver item 9 da investigação).
+                    if (resultado == TipoHistoricoLigacao.Recusada)
+                        MostrarChamadaRecusadaToast(numeroFinal);
+
                     var erro = string.IsNullOrWhiteSpace(_sipService.LastCallError) ? "Issabel/SIP não completou a chamada." : _sipService.LastCallError;
-                    call.DefinirStatus("Falhou: " + erro);
-                    try { Clipboard.SetText($"Número enviado: {numeroFinal}\nSaída: {origemSaida}\nDestino SIP: {_sipService.LastDialedDestination}\nErro: {erro}"); } catch { }
+                    RegistrarUiDiagnostico($"OUTBOUND_RESULT_UI resultado={resultado} status_sip={_sipService.LastOutboundFailureStatus} " +
+                        $"ringDurationSeg={_sipService.LastOutboundRingDurationSeconds:F1}");
+                    try { Clipboard.SetText($"Número enviado: {numeroFinal}\nSaída: {origemSaida}\nDestino SIP: {_sipService.LastDialedDestination}\nResultado: {mensagemToast}\nErro: {erro}"); } catch { }
                 }
             }
             catch (Exception ex)
@@ -2587,6 +2613,30 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
             if ((DateTime.Now - _ultimoFimChamadaEntrada) < _janelaResfriamentoPosRing) return false;
 
             return item.Tipo == Models.TipoHistoricoLigacao.Perdida;
+        }
+
+        // Toast de "Chamada recusada" para chamadas REALIZADAS (nós ligamos) — nunca reutiliza
+        // MostrarMissedCallPopup, que é exclusivo de chamadas RECEBIDAS não atendidas (Perdida).
+        // Chamado só quando o resultado final já foi classificado como Recusada (ver
+        // IniciarLigacaoAsync) — nunca para Não atendida, timeout ou falha técnica.
+        private void MostrarChamadaRecusadaToast(string numeroDiscado)
+        {
+            try
+            {
+                var semRota    = DialPlanService.RemoverPrefixoDeRota(DialPlanService.RemoverDuplicacaoSequencial(numeroDiscado ?? string.Empty));
+                var numDisplay = PhoneNumberNormalizer.NormalizeForDisplay(semRota);
+                var nomeContato = ContatoStorageService.ResolverNomePorNumero(numDisplay);
+                var nome = string.Equals(nomeContato, numDisplay, StringComparison.OrdinalIgnoreCase) ? string.Empty : nomeContato;
+
+                RegistrarUiDiagnostico($"OUTBOUND_DECLINED_TOAST_SHOW numero={MascararNumero(numDisplay)}");
+
+                _outboundDeclinedToast?.Close();
+                var toast = new OutboundDeclinedToast(nome, numDisplay);
+                _outboundDeclinedToast = toast;
+                toast.Closed += (_, __) => { if (ReferenceEquals(_outboundDeclinedToast, toast)) _outboundDeclinedToast = null; };
+                toast.Show();
+            }
+            catch { }
         }
 
         private void MostrarMissedCallPopup(Models.HistoricoLigacaoItem item)
@@ -3255,7 +3305,11 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
             catch { return numero ?? string.Empty; }
         }
 
-        private string RegistrarHistorico(string numero, TipoHistoricoLigacao tipo, string duracao, string origemSaida = "")
+        // ramalOrigem: só relevante para chamadas REALIZADAS/Recusada/NaoAtendida (registro local
+        // criado ao vivo pelo SipService) — usado pela reconciliação SIP↔CDR em IssabelCdrService
+        // como critério extra de desambiguação quando há múltiplas discagens recentes pro mesmo
+        // número (ver item 5/9 da investigação v2.3.5).
+        private string RegistrarHistorico(string numero, TipoHistoricoLigacao tipo, string duracao, string origemSaida = "", string ramalOrigem = "")
         {
             var itens = HistoricoStorageService.Carregar();
             var numeroTratado = DialPlanService.RemoverDuplicacaoSequencial(numero);
@@ -3272,7 +3326,8 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
                 Nome = nome,
                 Tipo = tipo,
                 Duracao = duracao,
-                OrigemSaida = origemSaida
+                OrigemSaida = origemSaida,
+                RamalOrigem = ramalOrigem ?? string.Empty
             };
             itens.Insert(0, item);
             HistoricoStorageService.Salvar(itens);

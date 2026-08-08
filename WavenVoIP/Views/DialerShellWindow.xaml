@@ -822,7 +822,9 @@
                                         <ComboBoxItem Content="Recebidas"/>
                                         <ComboBoxItem Content="Realizadas"/>
                                         <ComboBoxItem Content="Perdidas"/>
+                                        <ComboBoxItem Content="Recusadas"/>
                                         <ComboBoxItem Content="Não atendidas"/>
+                                        <ComboBoxItem Content="Atendida em outro ramal"/>
                                     </ComboBox>
                                     <ComboBox x:Name="cmbFiltroCanalHistorico"
                                               DockPanel.Dock="Right" Width="160" Height="34"

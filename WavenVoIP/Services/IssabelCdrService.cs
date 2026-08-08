@@ -255,6 +255,15 @@ namespace WavenVoIP.Services
                 var ramaisConhecidos = CarregarRamaisConhecidos();
                 Log($"CDR_RAMAIS_CONHECIDOS total={ramaisConhecidos.Count}");
 
+                // Entradas locais (FonteCdr=false) já classificadas ao vivo pelo SipService com o
+                // tempo real de Ringing→BusyHere — carregadas UMA vez aqui para o CDR (que só tem
+                // disposition/duration, sem o timestamp exato do Ringing) poder respeitar esse
+                // resultado em vez de reclassificar com informação mais pobre. Ver uso abaixo.
+                var locaisComResultadoSip = HistoricoStorageService.Carregar()
+                    .Where(i => !i.FonteCdr &&
+                                (i.Tipo == TipoHistoricoLigacao.Recusada || i.Tipo == TipoHistoricoLigacao.NaoAtendida))
+                    .ToList();
+
                 // ── Step 1: primary group by linkedid ─────────────────────────────
                 var gruposPrimarios = linhas
                     .GroupBy(r => string.IsNullOrWhiteSpace(r.LinkedId) ? r.UniqueId : r.LinkedId,
@@ -277,6 +286,12 @@ namespace WavenVoIP.Services
                 {
                     var linkedIds   = string.Join(",", grupo.Select(r => r.LinkedId).Distinct());
                     var ehAlvo      = GrupoContemNumero(grupo, NumeroAlvoDiagnostico);
+
+                    Log($"CALL_CLASSIFY_START linkedids={linkedIds} registros={grupo.Count}");
+                    Log($"CALL_CLASSIFY_GROUP linkedids={linkedIds} " +
+                        string.Join(" | ", grupo.OrderBy(x => x.CallDate).Select(r =>
+                            $"[uid={r.UniqueId} src={MascararNumeroLog(r.Src)} dst={MascararNumeroLog(r.Dst)} " +
+                            $"ch={r.Channel} dstch={r.DstChannel} disp={r.Disposition}]")));
 
                     // ── Diagnostic verbose log ─────────────────────────────────────
                     if (ehAlvo)
@@ -316,6 +331,8 @@ namespace WavenVoIP.Services
 
                     // ── Pick one principal CDR record ──────────────────────────────
                     var principal = EscolherCdrPrincipal(grupo, ramaisConhecidos);
+                    Log($"CDR_MAIN_LEG_SELECTED linkedids={linkedIds} uid={principal.UniqueId} " +
+                        $"disp={principal.Disposition} billsec={principal.BillSec} src={principal.Src} dst={principal.Dst}");
 
                     foreach (var sup in grupo.Where(r => !ReferenceEquals(r, principal)))
                         Log($"CDR_QUEUE_ATTEMPT_SUPPRESSED linkedid={sup.LinkedId} uid={sup.UniqueId} disp={sup.Disposition} dst={sup.Dst}");
@@ -326,8 +343,19 @@ namespace WavenVoIP.Services
                     var chRamal    = ExtrairRamalValidado(cdr.Channel, ramaisConhecidos);
                     var dstChRamal = ExtrairRamalValidado(cdr.DstChannel, ramaisConhecidos);
 
+                    // Este ramal ORIGINOU a chamada? cdr.Src nem sempre é o número do ramal —
+                    // troncos de saída (Operadora/WhatsApp TIM/Vivo) substituem o Caller-ID pelo
+                    // DID/identidade do próprio tronco (prática padrão de telefonia), então cdr.Src
+                    // pode vir como "+556696308630" (nosso próprio DID) em vez de "104". O canal
+                    // (cdr.Channel = "SIP/104-...") continua confiável nesses casos — por isso
+                    // checa os dois, igual ao ehMeuRamal mais abaixo.
+                    var ehOrigemPrincipal = !string.IsNullOrWhiteSpace(ramal) &&
+                        (srcRamal == ramal || chRamal == ramal);
+
                     Log($"RAMAL_PARSE_DEBUG src={cdr.Src}→{srcRamal} dst={cdr.Dst}→{dstRamal} " +
                         $"ch={cdr.Channel}→{chRamal} dstch={cdr.DstChannel}→{dstChRamal}");
+                    Log($"CALL_CLASSIFY_DIRECTION linkedids={linkedIds} ramal={ramal} ehOrigemPrincipal={ehOrigemPrincipal} " +
+                        $"srcRamal={srcRamal} chRamal={chRamal}");
 
                     Log($"CDR_DIAG_CALL linkedids={linkedIds} src={cdr.Src} dst={cdr.Dst} " +
                         $"ch={cdr.Channel} dstch={cdr.DstChannel} disp={cdr.Disposition} " +
@@ -394,9 +422,26 @@ namespace WavenVoIP.Services
                     if (!todosModoRamais && EhRamal(cdr.Src) && EhRamal(cdr.Dst) && !ehMeuRamal)
                         continue;
 
-                    var tipo          = ClassificarChamada(cdr, ramal, foiAtendidaGlobalmente, foiParaCaixaPostal);
+                    // Maior Duration/BillSec entre as linhas que pertencem ao MESMO linkedid do
+                    // registro principal — nunca do grupo inteiro (v2.3.5: com múltiplas discagens
+                    // manuais agora impedidas de se fundir — ver PodeMesclarGruposPorJanela — isso
+                    // é normalmente só 1-2 linhas; mas em grupos legitimamente fundidos, como fila,
+                    // ainda protege contra herdar a duração de uma perna de OUTRO linkedid).
+                    // Ex.: Asterisk grava uma linha "Dial" com a duração real do toque e depois uma
+                    // linha "Busy" com duration=0 para o mesmo linkedid — pega o maior das duas.
+                    var duracaoToqueGrupoSeg = grupo
+                        .Where(r => string.Equals(r.LinkedId, cdr.LinkedId, StringComparison.OrdinalIgnoreCase))
+                        .Select(r => Math.Max(r.Duration, r.BillSec))
+                        .DefaultIfEmpty(0)
+                        .Max();
+                    Log($"OUTBOUND_ATTEMPT_DURATION uid={cdr.UniqueId} linkedid={cdr.LinkedId} ringDurationSeg={duracaoToqueGrupoSeg}");
+
+                    var tipo          = ClassificarChamada(cdr, ehOrigemPrincipal, foiAtendidaGlobalmente, foiParaCaixaPostal, duracaoToqueGrupoSeg);
                     var numeroExterno = ObterNumeroExterno(cdr, ramal);
                     var duracaoFmt    = FormatarDuracao(cdr.BillSec > 0 ? cdr.BillSec : cdr.Duration);
+
+                    Log($"CALL_CLASSIFY_FINAL linkedids={linkedIds} uid={cdr.UniqueId} tipo={tipo} " +
+                        $"disp={cdr.Disposition} ehOrigemPrincipal={ehOrigemPrincipal} numero={MascararNumeroLog(numeroExterno)}");
 
                     // Um "Perdida"/"NaoAtendidaNesseRamal" no CDR só reflete que ESTA tentativa/
                     // perna terminou — não que a chamada saiu da fila. Se o cliente ainda aparece
@@ -456,7 +501,13 @@ namespace WavenVoIP.Services
                     // src=trunk_DID (e.g. 556684263277), dst=ramal (100).
                     // The real called number is embedded in the recording filename with a route prefix
                     // (e.g. force-266984671226-100-... → 2=route, 66984671226=destination).
-                    // Extract it and override numeroExterno/tipo/origemSaida so the entry is correctly classified.
+                    // Extract it and override numeroExterno/origemSaida so the entry shows the real
+                    // destination. NÃO força mais tipo=Realizada aqui (v2.3.5): o Waven grava o arquivo
+                    // force-record assim que o Dial() começa, mesmo quando a chamada termina em
+                    // BUSY/NO ANSWER sem nunca conectar — forçar Realizada faria uma chamada Recusada/
+                    // Não atendida "virar" Realizada só por ter esse arquivo. O tipo já veio correto de
+                    // ClassificarChamada acima (que agora detecta ehOrigem corretamente via Channel,
+                    // mesmo quando o tronco substitui o Caller-ID em cdr.Src).
                     var origemSaida = DedurzirTronco(cdr);
                     if (!string.IsNullOrWhiteSpace(recordingFile))
                     {
@@ -465,7 +516,6 @@ namespace WavenVoIP.Services
                         {
                             Log($"CDR_RECORDING_CORRECTS_NUMBER | anterior={numeroExterno} correto={numeroDeGravacao} arquivo={recordingFile}");
                             numeroExterno = numeroDeGravacao;
-                            tipo = TipoHistoricoLigacao.Realizada;
                             // Chamadas saintes: extrai rota (Operadora/WhatsApp TIM/Vivo) pelo prefixo do filename
                             var origemDeGravacao = ExtrairOrigemSaidaDeGravacao(recordingFile);
                             if (!string.IsNullOrWhiteSpace(origemDeGravacao))
@@ -485,6 +535,98 @@ namespace WavenVoIP.Services
                             }
                         }
                     }
+
+                    // Perna auxiliar de retentativa de rota (Operadora/WhatsApp TIM/Vivo tentados em
+                    // sequência quando a primeira rota falha): cada tentativa que este ramal ORIGINOU
+                    // e que NUNCA conectou (não é Realizada) recebe seu próprio linkedid do Asterisk —
+                    // não são unificadas pelo agrupamento acima porque o "número externo" varia por
+                    // tentativa. Nessas tentativas, o tronco de saída substitui o Caller-ID pelo
+                    // próprio DID da rota (prática padrão de telefonia) — então cdr.Src carrega nosso
+                    // PRÓPRIO número (ex.: "+556696308630"), que vaza para numeroExterno via fallback
+                    // de CLID em ObterNumeroExterno. Checado só AQUI (depois da correção via nome do
+                    // arquivo de gravação acima) para não suprimir uma chamada cujo número real FOI
+                    // recuperado com sucesso do nome do arquivo — só suprime quando o número seguiu
+                    // sendo o nosso próprio DID mesmo depois dessa tentativa de correção. Exige >=7
+                    // dígitos para nunca comparar ramal-para-ramal (2-5 dígitos) contra os DIDs.
+                    var numeroExternoDigitos = new string((numeroExterno ?? string.Empty).Where(char.IsDigit).ToArray());
+                    if (ehOrigemPrincipal && tipo != TipoHistoricoLigacao.Realizada &&
+                        numeroExternoDigitos.Length >= 7 &&
+                        !string.IsNullOrWhiteSpace(CanalIdentificacaoService.IdentificarPorValor(numeroExterno)))
+                    {
+                        Log($"SELF_NUMBER_LEG_DETECTED linkedids={linkedIds} uid={cdr.UniqueId} " +
+                            $"numero={MascararNumeroLog(numeroExterno)} tipo={tipo} src={cdr.Src} dst={cdr.Dst}");
+                        Log($"SELF_NUMBER_LEG_SUPPRESSED linkedids={linkedIds} uid={cdr.UniqueId}");
+                        continue;
+                    }
+
+                    // O SIP ao vivo (SipService, no momento da discagem) mede o tempo real entre
+                    // Ringing e BusyHere — informação mais precisa que a duração aproximada do CDR.
+                    // Se existe um registro local (FonteCdr=false) já classificado ao vivo para essa
+                    // MESMA tentativa, o resultado do CDR NUNCA rebaixa/substitui esse resultado — só
+                    // confirma ou, se divergir, cede. Não há uniqueid/linkedid do lado do cliente (o
+                    // Asterisk só atribui isso depois, do lado servidor) — por isso a correlação usa,
+                    // em ordem de confiança: número (obrigatório) + janela ESTREITA de tempo (45s —
+                    // cobre a defasagem de relógio cliente/servidor observada, ~15s, sem invadir o
+                    // intervalo típico entre redes discagens manuais, sempre >=80s nos testes reais)
+                    // → se houver mais de um candidato na janela estreita, desempata por ramal
+                    // originador e rota → só cai para a janela ampla (120s) se a estreita não achar
+                    // nada. Se mesmo assim sobrar mais de um candidato, a correlação é ambígua e o
+                    // CDR NÃO é sobrescrito (mantém o valor que ele mesmo calculou, que já é confiável
+                    // agora que o merge não funde mais discagens manuais independentes).
+                    if (ehOrigemPrincipal && (tipo == TipoHistoricoLigacao.Recusada || tipo == TipoHistoricoLigacao.NaoAtendida))
+                    {
+                        var numCdrNorm = NormalizarNumeroParaAgrupamento(numeroExterno);
+                        if (numCdrNorm.Length >= 7)
+                        {
+                            var candidatosEstreitos = locaisComResultadoSip.Where(l =>
+                                Math.Abs((l.DataHora - cdr.CallDate).TotalSeconds) <= 45 &&
+                                string.Equals(NormalizarNumeroParaAgrupamento(l.Numero), numCdrNorm, StringComparison.OrdinalIgnoreCase))
+                                .ToList();
+
+                            var candidatos = candidatosEstreitos.Count > 0
+                                ? candidatosEstreitos
+                                : locaisComResultadoSip.Where(l =>
+                                    Math.Abs((l.DataHora - cdr.CallDate).TotalSeconds) <= 120 &&
+                                    string.Equals(NormalizarNumeroParaAgrupamento(l.Numero), numCdrNorm, StringComparison.OrdinalIgnoreCase))
+                                    .ToList();
+
+                            if (candidatos.Count > 1)
+                            {
+                                var desempate = candidatos.Where(l =>
+                                    (string.IsNullOrWhiteSpace(l.RamalOrigem) ||
+                                     string.Equals(l.RamalOrigem, srcRamal, StringComparison.OrdinalIgnoreCase) ||
+                                     string.Equals(l.RamalOrigem, chRamal, StringComparison.OrdinalIgnoreCase)) &&
+                                    (string.IsNullOrWhiteSpace(l.OrigemSaida) ||
+                                     string.Equals(l.OrigemSaida, origemSaida, StringComparison.OrdinalIgnoreCase)))
+                                    .ToList();
+                                if (desempate.Count == 1) candidatos = desempate;
+                            }
+
+                            Log($"OUTBOUND_CDR_RECONCILE_MATCH linkedids={linkedIds} uid={cdr.UniqueId} candidatos={candidatos.Count}");
+
+                            if (candidatos.Count == 1)
+                            {
+                                var localMatch = candidatos[0];
+                                if (localMatch.Tipo != tipo)
+                                {
+                                    Log($"OUTBOUND_RESULT_CONFLICT linkedids={linkedIds} uid={cdr.UniqueId} sip={localMatch.Tipo} cdr={tipo}");
+                                    tipo = localMatch.Tipo;
+                                    Log($"OUTBOUND_CDR_LOCAL_PRESERVED linkedids={linkedIds} uid={cdr.UniqueId} resultado={tipo}");
+                                }
+                                else
+                                {
+                                    Log($"OUTBOUND_RESULT_CDR_APPLIED linkedids={linkedIds} uid={cdr.UniqueId} resultado={tipo} motivo=concorda_com_sip");
+                                }
+                            }
+                            else if (candidatos.Count > 1)
+                            {
+                                Log($"OUTBOUND_CDR_RECONCILE_AMBIGUOUS linkedids={linkedIds} uid={cdr.UniqueId} " +
+                                    $"candidatos={candidatos.Count} motivo=nao_substitui_mantem_cdr_proprio");
+                            }
+                        }
+                    }
+
+                    Log($"OUTBOUND_LINKEDID_PRESERVED linkedids={linkedIds} uid={cdr.UniqueId} tipo={tipo}");
 
                     var gravacaoUrl = ResolverUrlGravacao(recordingFile, config, recordingDate);
 
@@ -575,6 +717,15 @@ namespace WavenVoIP.Services
                 var numA = PhoneNumberNormalizer.NormalizeBrazilPhone(
                     new string((a.Numero ?? string.Empty).Where(char.IsDigit).ToArray()));
                 if (numA.Length < 7) continue;
+
+                // v2.3.5 — Recusada/NaoAtendida nunca conectam (billsec=0), então nunca têm a perna
+                // de tronco com gravação separada que este método existe pra unificar (esse padrão
+                // é exclusivo de chamada ANSWERED — ver comentário do método). Sem essa guarda, duas
+                // discagens manuais reais e distintas pro mesmo número com o mesmo desfecho (ex.:
+                // Recusada duas vezes seguidas, ~90-115s de intervalo, observado em teste real)
+                // seriam incorretamente unificadas numa só.
+                if (a.Tipo == TipoHistoricoLigacao.Recusada || a.Tipo == TipoHistoricoLigacao.NaoAtendida)
+                    continue;
 
                 for (int j = i + 1; j < itens.Count; j++)
                 {
@@ -776,6 +927,15 @@ namespace WavenVoIP.Services
                     var b = ordenados[j];
                     if (removidos.Contains(b.Id)) continue;
 
+                    // v2.3.5 — duas entradas já confirmadas por CDR (FonteCdr=true, UniqueId real e
+                    // distinto do Asterisk) NUNCA são duplicata uma da outra por número+tempo — são,
+                    // por definição, duas chamadas REAIS diferentes (ex.: operador rediscando pro
+                    // mesmo número minutos depois). Esse dedup existe pra limpar o par CDR×stub local
+                    // (FonteCdr=false) da MESMA chamada — nunca pra colapsar dois registros de CDR já
+                    // confirmados. Sem essa guarda, discagens manuais reais próximas no tempo (ex.:
+                    // 87-115s de intervalo, observado em teste real) eram descartadas indevidamente.
+                    if (a.FonteCdr && b.FonteCdr) continue;
+
                     var diffSec = Math.Abs((a.DataHora - b.DataHora).TotalSeconds);
                     if (diffSec > 120) continue;
 
@@ -802,6 +962,18 @@ namespace WavenVoIP.Services
 
         // Merges groups that share the same external src number within janelaSeg seconds.
         // This handles Issabel queue scenarios where each ramal ring attempt gets its own linkedid.
+        //
+        // v2.3.5 — investigação real provou que isso também fundia discagens MANUAIS
+        // independentes para o mesmo número (ex.: operador clica ligar, cai, clica de novo minutos
+        // depois) porque o "número externo" (com prefixo de rota) é idêntico entre tentativas e
+        // 180s é uma janela larga o bastante pra cobrir o intervalo típico entre cliques. Resultado:
+        // até 4 discagens reais viravam 1 registro no Histórico, com EscolherCdrPrincipal sempre
+        // escolhendo a mais recente e descartando as outras (CDR_QUEUE_ATTEMPT_SUPPRESSED) —
+        // Recusada virava Não atendida por herdar duração de outra tentativa, tentativas
+        // "sumiam", UniqueId principal trocava a cada nova discagem. PodeMesclarGruposPorJanela
+        // agora bloqueia o merge quando AMBOS os grupos são discagens outbound diretas
+        // (dcontext=from-internal originado por um ramal) — cada clique do operador já tem seu
+        // próprio linkedid genuíno do Asterisk e nunca deveria ser fundido com outro clique.
         private static List<List<CdrChamada>> MergeGruposPorSrcJanela(
             List<List<CdrChamada>> grupos, int janelaSeg = 180)
         {
@@ -828,8 +1000,10 @@ namespace WavenVoIP.Services
                     var resMax = res.Max(x => x.CallDate);
                     var resMin = res.Min(x => x.CallDate);
                     // Groups overlap or are within the window
-                    return (dataMin - resMax).TotalSeconds <= janelaSeg &&
-                           (resMin - dataMax).TotalSeconds <= janelaSeg;
+                    var dentroDaJanela = (dataMin - resMax).TotalSeconds <= janelaSeg &&
+                                          (resMin - dataMax).TotalSeconds <= janelaSeg;
+                    if (!dentroDaJanela) return false;
+                    return PodeMesclarGruposPorJanela(res, grupo);
                 });
 
                 if (existente != null)
@@ -839,6 +1013,39 @@ namespace WavenVoIP.Services
             }
 
             return resultado;
+        }
+
+        // Só bloqueia quando os DOIS lados são claramente discagens outbound diretas — nunca
+        // restringe o caso original (pernas de fila/ring-group/URA de uma mesma chamada RECEBIDA),
+        // que continua fundindo normalmente.
+        private static bool PodeMesclarGruposPorJanela(List<CdrChamada> grupoExistente, List<CdrChamada> grupoNovo)
+        {
+            var linkedidsExistente = string.Join(",", grupoExistente.Select(r => r.LinkedId).Distinct());
+            var linkedidsNovo      = string.Join(",", grupoNovo.Select(r => r.LinkedId).Distinct());
+            Log($"CDR_GROUP_MERGE_CHECK existente={linkedidsExistente} novo={linkedidsNovo}");
+
+            if (EhGrupoOutboundDireto(grupoExistente) && EhGrupoOutboundDireto(grupoNovo))
+            {
+                Log($"CDR_GROUP_MERGE_BLOCKED_OUTBOUND existente={linkedidsExistente} novo={linkedidsNovo} " +
+                    $"motivo=ambos_outbound_manual_linkedid_proprio");
+                return false;
+            }
+
+            Log($"CDR_GROUP_MERGE_ALLOWED existente={linkedidsExistente} novo={linkedidsNovo}");
+            return true;
+        }
+
+        // Discagem manual direta de um ramal: dcontext=from-internal (contexto do dialplan do
+        // Issabel pra ramal ligando pra fora) E o canal de origem resolve pra um ramal válido
+        // (SIP/104-...). Esse padrão é exclusivo de Dial() iniciado diretamente por um ramal —
+        // pernas de fila/ring-group/URA usam outros dcontext (from-queue, ext-group, etc.) ou
+        // canais Local/, então EhRotaNaoHumana também protege contra falso positivo aqui.
+        private static bool EhGrupoOutboundDireto(List<CdrChamada> grupo)
+        {
+            return grupo.Any(r =>
+                string.Equals((r.DContext ?? string.Empty).Trim(), "from-internal", StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrWhiteSpace(ExtrairRamal(r.Channel)) &&
+                !EhRotaNaoHumana(r));
         }
 
         // Returns the external phone number for a group by searching Src and Dst.
@@ -1100,23 +1307,64 @@ namespace WavenVoIP.Services
 
         // ── Classification ─────────────────────────────────────────────────────────
 
+        // ehOrigem: este ramal ORIGINOU a chamada (calculado pelo chamador com
+        // srcRamal==ramal || chRamal==ramal — ver comentário em SincronizarAsync sobre por que
+        // cdr.Src sozinho não é confiável quando o tronco de saída substitui o Caller-ID).
+        //
+        // Regra de direção (nunca misturar): Perdida é EXCLUSIVO de chamadas RECEBIDAS sem
+        // atendimento. Uma chamada que ESTE ramal originou e que não conectou é sempre
+        // Recusada (BUSY — cliente rejeitou/estava ocupado) ou NaoAtendida (NO ANSWER/FAILED/
+        // CONGESTION — tocou sem resposta ou falha técnica de rota), nunca Perdida.
+        // duracaoToqueSegundos: maior Duration/BillSec entre todas as linhas do grupo — proxy do
+        // tempo de toque até o desfecho (confirmado por teste real: bate quase exatamente com o
+        // tempo medido ao vivo via SIP Ringing→BusyHere — 11s vs 11s, 60s vs 61s num teste real).
+        // Único jeito de aplicar a mesma heurística de Recusada/NaoAtendida quando NÃO há
+        // observação SIP ao vivo disponível (ramal de outro operador em modo TodosRamais, app
+        // fechado durante a chamada, sync após reinício). Ver SipService.ClassificarResultadoLigacao
+        // para a versão ao vivo e a mesma constante de limiar (SipService.OutboundDeclineThresholdSeconds).
         private static TipoHistoricoLigacao ClassificarChamada(
-            CdrChamada cdr, string ramal,
-            bool foiAtendidaGlobalmente, bool foiParaCaixaPostal)
+            CdrChamada cdr, bool ehOrigem,
+            bool foiAtendidaGlobalmente, bool foiParaCaixaPostal,
+            int duracaoToqueSegundos)
         {
-            var disp     = (cdr.Disposition ?? string.Empty).ToUpperInvariant();
-            var srcRamal = ExtrairRamalSrc(cdr.Src);
-            var ehOrigem = !string.IsNullOrWhiteSpace(ramal) && srcRamal == ramal;
+            var disp = (cdr.Disposition ?? string.Empty).ToUpperInvariant();
 
             // Voicemail-only: nobody answered with a real phone
             if (foiParaCaixaPostal && !foiAtendidaGlobalmente)
                 return TipoHistoricoLigacao.CaixaPostal;
 
             if (disp == "ANSWERED" && cdr.BillSec > 0 && !EhVoicemail(cdr))
+            {
+                if (ehOrigem) Log($"OUTBOUND_RESULT_ANSWERED uid={cdr.UniqueId}");
                 return ehOrigem ? TipoHistoricoLigacao.Realizada : TipoHistoricoLigacao.Recebida;
+            }
 
             if (disp is "NO ANSWER" or "BUSY" or "FAILED" or "CONGESTION")
             {
+                if (ehOrigem)
+                {
+                    if (disp == "BUSY")
+                    {
+                        // Investigação real confirmou: a operadora/gateway devolve BUSY tanto para
+                        // recusa explícita quanto para timeout de toque — disposition sozinho NUNCA
+                        // basta. Sem duração de toque confiável (0 = campo zerado/ausente), a
+                        // escolha conservadora é NaoAtendida — nunca presumir recusa sem sinal.
+                        Log($"OUTBOUND_RING_DURATION uid={cdr.UniqueId} ringDurationSeg={duracaoToqueSegundos} fonte=cdr_duration");
+                        var resultado = duracaoToqueSegundos > 0 && duracaoToqueSegundos < SipService.OutboundDeclineThresholdSeconds
+                            ? TipoHistoricoLigacao.Recusada
+                            : TipoHistoricoLigacao.NaoAtendida;
+                        Log($"OUTBOUND_BUSY_CLASSIFICATION uid={cdr.UniqueId} ringDurationSeg={duracaoToqueSegundos} " +
+                            $"threshold={SipService.OutboundDeclineThresholdSeconds} result={resultado}");
+                        Log(resultado == TipoHistoricoLigacao.Recusada
+                            ? $"OUTBOUND_CLASSIFIED_DECLINED uid={cdr.UniqueId}"
+                            : $"OUTBOUND_CLASSIFIED_NO_ANSWER uid={cdr.UniqueId} motivo=sem_duracao_confiavel_ou_proximo_do_timeout");
+                        return resultado;
+                    }
+                    Log($"OUTBOUND_RESULT_NO_ANSWER uid={cdr.UniqueId} disposition={disp}");
+                    Log($"OUTBOUND_CLASSIFIED_NO_ANSWER uid={cdr.UniqueId} motivo=disposition_{disp}");
+                    return TipoHistoricoLigacao.NaoAtendida;
+                }
+
                 if (foiAtendidaGlobalmente) return TipoHistoricoLigacao.NaoAtendidaNesseRamal;
                 if (foiParaCaixaPostal)     return TipoHistoricoLigacao.CaixaPostal;
                 return TipoHistoricoLigacao.Perdida;
@@ -1125,7 +1373,7 @@ namespace WavenVoIP.Services
             if (disp == "ANSWERED" && !EhVoicemail(cdr))
                 return ehOrigem ? TipoHistoricoLigacao.Realizada : TipoHistoricoLigacao.Recebida;
 
-            return TipoHistoricoLigacao.Perdida;
+            return ehOrigem ? TipoHistoricoLigacao.NaoAtendida : TipoHistoricoLigacao.Perdida;
         }
 
         // ── Number helpers ─────────────────────────────────────────────────────────

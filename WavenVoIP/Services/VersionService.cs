@@ -4,15 +4,34 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "2.3.4";
+        public const string Versao  = "2.3.5";
         public const string NomeApp = "WavenVoIP";
 
-        public static readonly DateTime DataBuild = new DateTime(2026, 7, 30);
+        public static readonly DateTime DataBuild = new DateTime(2026, 8, 8);
 
         public static string VersaoCompleta => $"{NomeApp} v{Versao}";
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v2.3.5 — Correcao de chamadas Realizadas nunca viram Perdida + status Recusada/Nao atendida (08/08/2026)\n" +
+            "• [FIX] Chamada REALIZADA (operador ligou) que nao completa nunca mais aparece como \"Perdida\" no Historico — Perdida volta a ser exclusivo de chamadas RECEBIDAS sem atendimento\n" +
+            "• [FIX] Causa raiz identificada com dados reais de producao: o tronco de saida (Operadora/WhatsApp TIM/Vivo) substitui o Caller-ID pelo proprio DID da rota (pratica padrao de telefonia) — a deteccao de direcao (ClassificarChamada) so olhava cdr.Src, e nao detectava o ramal quando isso acontecia\n" +
+            "• [FIX] Numero da propria empresa (DID de tronco) nao aparece mais como destino de uma chamada Perdida — pernas auxiliares de retentativa de rota que nunca conectam e vazam nosso proprio DID sao detectadas e suprimidas (SELF_NUMBER_LEG_DETECTED/SUPPRESSED)\n" +
+            "• [NEW] Novo status Recusada — chamada REALIZADA rejeitada rapidamente pelo cliente\n" +
+            "• [NEW] Novo status Nao atendida — chamada REALIZADA que tocou ate acabar sem resposta\n" +
+            "• [FIX] Investigacao com testes reais provou que a operadora/WAVOIP devolve o MESMO codigo (486 Busy Here no SIP, disposition BUSY no CDR) tanto para recusa real quanto para timeout de toque — nao ha campo que diferencie os dois. Adotada heuristica por tempo: BUSY com menos de 30s desde o Ringing = Recusada; 30s ou mais = Nao atendida (limiar centralizado em SipService.OutboundDeclineThresholdSeconds, ajustavel). So se aplica com Ringing confirmado — falha rapida sem Ringing (erro de rota, 404, 5xx) nunca vira Recusada\n" +
+            "• [NEW] Toast \"Chamada recusada\" (OutboundDeclinedToast) no canto inferior direito, com nome/numero do cliente — fecha sozinho em 6s ou pelo X. Nunca reutiliza o popup de chamada perdida (exclusivo de chamadas recebidas). So aparece quando o resultado final e Recusada, nunca para Nao atendida\n" +
+            "• [FIX] Resultado classificado ao vivo pelo SipService (tempo real de Ringing->BusyHere) e preservado quando o CDR sincroniza depois — o CDR so pode CONFIRMAR o resultado ao vivo, nunca rebaixa-lo (ex.: SIP classificou Nao atendida por timeout, CDR chega com BUSY generico — mantem Nao atendida)\n" +
+            "• [FIX] Corrigido: nome do arquivo de gravacao (force-record) e criado pelo Asterisk assim que o Dial() comeca, mesmo em chamadas BUSY/sem resposta — o codigo antigo usava a existencia desse arquivo para forcar tipo=Realizada, fazendo uma chamada Recusada/Nao atendida \"virar\" Realizada assim que o CDR sincronizava. Removida essa sobrescrita indevida\n" +
+            "• [FIX] Corrigido bug mais profundo achado com 4 discagens manuais reais para o mesmo numero: MergeGruposPorSrcJanela (feito pra unir pernas de UMA MESMA chamada de fila/ring-group) estava fundindo discagens MANUAIS independentes pro mesmo numero dentro de 180s, porque o numero com prefixo de rota e identico entre tentativas. Isso fazia ate 4 cliques reais virarem 1 registro so (sempre o mais recente), com as outras tentativas descartadas, duracao de toque herdada de OUTRA tentativa (Recusada virando Nao atendida por engano) e o UniqueId principal trocando a cada nova discagem. Nova funcao PodeMesclarGruposPorJanela bloqueia a fusao quando os dois grupos sao discagens outbound diretas (dcontext=from-internal originadas por um ramal) — cada clique do operador mantem seu proprio linkedid, isolado, sem fundir. Fila/ring-group/URA continuam fundindo normalmente (dcontext diferente)\n" +
+            "• [FIX] Duracao de toque usada na heuristica Recusada/Nao atendida agora so soma as pernas do MESMO linkedid do registro escolhido — nunca do grupo inteiro (evita herdar duracao de outra tentativa mesmo em grupos legitimamente fundidos, como fila)\n" +
+            "• [FIX] Reconciliacao SIP↔CDR (item anterior) refinada: janela estreita de 45s (cobre a defasagem de relogio cliente/servidor observada, ~15s, sem invadir o intervalo entre discagens manuais) com desempate por ramal originador e rota antes de cair pra janela ampla de 120s; se sobrar mais de um candidato, nao substitui (mantem o valor que o proprio CDR calculou, ja confiavel com o merge corrigido)\n" +
+            "• [UI] Historico: cores e icones proprios para Recusada (vermelho) e Nao atendida (amarelo/laranja); filtros \"Recusadas\" e \"Nao atendidas\" adicionados\n" +
+            "• [UI] Status \"Nao atendida\" (chamada recebida atendida por outro ramal) renomeado para \"Atendida em outro ramal\" — evita confusao com o novo status de chamada realizada\n" +
+            "• [FIX] Direcao da chamada (ehOrigem) agora tambem reconhece o ramal pelo campo channel do CDR (SIP/104-...), nao so pelo Caller-ID em cdr.Src\n" +
+            "• [LOG] CALL_CLASSIFY_START/GROUP/DIRECTION/FINAL, OUTBOUND_RING_DURATION, OUTBOUND_BUSY_CLASSIFICATION, OUTBOUND_CLASSIFIED_DECLINED/NO_ANSWER, OUTBOUND_RESULT_CONFLICT/SIP_PRESERVED/CDR_APPLIED, SELF_NUMBER_LEG_DETECTED/SUPPRESSED, CDR_MAIN_LEG_SELECTED, OUTBOUND_DECLINED_TOAST_SHOW/AUTO_CLOSE/MANUAL_CLOSE\n" +
+            "• [SAFE] Preservado integralmente: chamada recebida atendida por outro operador, abandono de fila, deduplicacao, refresh 2s/5s, notificacoes de chamada perdida — nenhuma mudanca em audio, RTP, codecs, registro SIP, filas do Issabel, Waven API, contatos, favoritos, WhatsApp ou Auto Start\n" +
+            "\n" +
             "v2.3.4 — Layout dos Favoritos + nome sincronizado com Contatos (30/07/2026)\n" +
             "• [FIX] Favoritos: coluna de nome recebeu mais espaco — nomes longos nao sao mais cortados apos a inclusao do botao WhatsApp na v2.3.3\n" +
             "• [FIX] Nome do favorito agora e resolvido a partir do contato atual (vinculo por ContactId, com fallback por telefone normalizado) — editar o nome de um contato atualiza automaticamente todos os favoritos correspondentes\n" +

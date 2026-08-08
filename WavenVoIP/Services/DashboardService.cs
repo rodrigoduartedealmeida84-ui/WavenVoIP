@@ -22,7 +22,9 @@ namespace WavenVoIP.Services
 
             var duracoes = itens
                 .Where(i => i.Tipo != TipoHistoricoLigacao.Perdida
-                         && i.Tipo != TipoHistoricoLigacao.NaoAtendidaNesseRamal)
+                         && i.Tipo != TipoHistoricoLigacao.NaoAtendidaNesseRamal
+                         && i.Tipo != TipoHistoricoLigacao.Recusada
+                         && i.Tipo != TipoHistoricoLigacao.NaoAtendida)
                 .Select(i => ParseDuracao(i.Duracao))
                 .Where(s => s > 0)
                 .ToList();
@@ -110,6 +112,8 @@ namespace WavenVoIP.Services
             switch (item.Tipo)
             {
                 case TipoHistoricoLigacao.Realizada:
+                case TipoHistoricoLigacao.Recusada:
+                case TipoHistoricoLigacao.NaoAtendida:
                     // Saída: quem originou (RamalOrigem = ramal do operador).
                     if (!string.IsNullOrWhiteSpace(item.RamalOrigem))  return item.RamalOrigem;
                     if (!string.IsNullOrWhiteSpace(item.RamalDestino)) return item.RamalDestino;
