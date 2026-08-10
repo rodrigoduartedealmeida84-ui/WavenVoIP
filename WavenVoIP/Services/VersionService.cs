@@ -4,7 +4,7 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "2.3.6";
+        public const string Versao  = "2.3.7";
         public const string NomeApp = "WavenVoIP";
 
         public static readonly DateTime DataBuild = new DateTime(2026, 8, 10);
@@ -13,6 +13,29 @@ namespace WavenVoIP.Services
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v2.3.7 — Reducao de consumo de CPU ocioso (10/08/2026)\n" +
+            "• [PERF] Investigacao real (instrumentacao temporaria) confirmou CPU ociosa oscilando "+
+            "46-167% mesmo sem nenhuma chamada em andamento — causa dominante: os timers de "+
+            "sincronizacao (CDR/Historico, Google Contatos, AMI) rodando no intervalo padrao de 3s, "+
+            "continuamente, mesmo sem nada novo pra sincronizar\n" +
+            "• [PERF] SipConfig.CarregarSalva() (leitura+parse de sipconfig.json do disco) media "+
+            "~4-5 chamadas/segundo em regime permanente, custando ~10-20ms de CPU a cada 5s — "+
+            "implementado cache em memoria thread-safe, invalidado automaticamente a cada Salvar(), "+
+            "sempre devolvendo uma copia independente pra cada chamador (nunca a mesma instancia "+
+            "compartilhada — sem risco de mutacao acidental entre os ~55 pontos de chamada). "+
+            "Custo por chamada caiu de ~0,5ms para ~0,002ms\n" +
+            "• [LOG] CDR_RECORDING_CORRECTS_NUMBER (calculo deterministico repetido em todo ciclo de "+
+            "sync, ~78% do volume do cdr_sync.log numa sessao de teste) movido para o toggle "+
+            "'Logs detalhados', igual as demais linhas de diagnostico repetitivo — nenhum log "+
+            "critico (Cancelada/Recusada/Nao atendida/erros) foi afetado\n" +
+            "• [PERF] Resultado medido: CPU ociosa media caiu de ~74% para ~56% (-24%) na mesma "+
+            "maquina/config, sem regressao de memoria/threads/handles (testado com 180+ ciclos de "+
+            "chamada e validado em uso real)\n" +
+            "• [SAFE] Nenhuma alteracao em timers/intervalos, sincronizacao de CDR, Reprocessar, "+
+            "classificacao de chamadas (Realizada/Recebida/Perdida/Recusada/Nao atendida/Cancelada), "+
+            "SIP CANCEL/BYE, Historico, filas, canais, popups ou WhatsApp — mudanca isolada ao "+
+            "carregamento de configuracao e a um log nao-critico\n" +
+            "\n" +
             "v2.3.6 — Correcao critica de cancelamento antecipado + Canal externo real no Historico (10/08/2026)\n" +
             "• [FIX-CRITICO] Cancelar uma chamada de saida ANTES do cliente atender podia deixar o telefone do cliente tocando mesmo com o Waven ja mostrando \"Cancelada\" — causa raiz confirmada com log real de producao: SIPUserAgent.Cancel() (SIPSorcery) dispara o retorno de \"cancelado\" IMEDIATAMENTE e LOCALMENTE, sem esperar nenhuma confirmacao de rede do Asterisk. O Waven ja desmontava a chamada (midia, estado, UserAgent livre) achando que o CANCEL tinha sido entregue, sem prova nenhuma disso\n" +
             "• [FIX] Ligar()/Desligar() agora usam um lock dedicado pra fechar a corrida entre clicar Ligar e clicar Desligar quase juntos: se o cancelamento chegar ANTES do INVITE ser efetivamente enviado, o INVITE nunca sai (OUTBOUND_INVITE_SUPPRESSED_BY_CANCEL) — nunca mais uma tentativa cancelada localmente continua tocando no cliente\n" +

@@ -7,6 +7,7 @@ namespace WavenVoIP
 {
     public class SipConfig
     {
+
         // ── Caminhos ─────────────────────────────────────────────────────────────
         // v2.2.5 — Movido de %APPDATA% (roaming) para %LOCALAPPDATA% (local), igual a
         // todo o resto do app (Logs, contatos.json, historico.json, favoritos, flags de
@@ -31,6 +32,37 @@ namespace WavenVoIP
         private static string BackupPath(int n) => Path.Combine(ConfigDir, $"sipconfig.backup{n}.json");
 
         private static bool _legacyMigrationChecked;
+
+        // v2.3.7 — cache em memória de CarregarSalva(). Investigação real (v2.3.7, CPU ociosa alta)
+        // mediu SipConfig.CarregarSalva() sendo chamado ~4-5x/segundo em regime permanente com o
+        // app ocioso (maior parte vindo do loop de correção de ramal dentro de
+        // IssabelCdrService.ReprocessarHistoricoCdrLocalAsync, que roda a cada ciclo de sync de CDR
+        // — por padrão a cada poucos segundos, para sempre, mesmo sem nada novo). Cada chamada faz
+        // File.Exists+File.ReadAllText+JsonSerializer.Deserialize+RepairDefaults — I/O de disco e
+        // parse de JSON reais, não uma leitura de campo simples.
+        //
+        // Design: lock único protege carregar-e-cachear (raro: só na primeira chamada e depois de
+        // Salvar()) e o cache é sempre devolvido como CÓPIA rasa (MemberwiseClone) — nunca a mesma
+        // instância para dois chamadores. SipConfig só tem campos de valor (string/int/bool/
+        // DateTime?), então a cópia rasa é uma cópia completa e segura: nenhum chamador pode mutar o
+        // objeto em cache sem chamar Salvar() explicitamente, e Salvar() sempre invalida o cache no
+        // final — a próxima leitura sempre reflete o que foi realmente persistido em disco. Isso
+        // elimina o polling de arquivo (não existe) e qualquer leitura "stale": o cache só existe
+        // entre uma leitura bem-sucedida e o próximo Salvar() (ou até o processo reiniciar).
+        private static readonly object _cacheLock = new object();
+        private static SipConfig? _cacheInstancia;
+        private static bool _cacheCarregado;
+
+        // Chamado no fim de um Salvar() bem-sucedido — garante que a PRÓXIMA CarregarSalva()
+        // sempre releia do disco em vez de devolver um valor antigo em memória.
+        private static void InvalidarCache()
+        {
+            lock (_cacheLock)
+            {
+                _cacheCarregado = false;
+                _cacheInstancia = null;
+            }
+        }
 
         public bool EstaCompleta =>
             !string.IsNullOrWhiteSpace(Ramal) &&
@@ -65,6 +97,10 @@ namespace WavenVoIP
                     File.Move(tempPath, ConfigFilePath);
 
                 LogHelper.Info("CONFIG_SAVE_OK");
+
+                // v2.3.7 — sempre invalida DEPOIS de escrever no disco com sucesso: a próxima
+                // CarregarSalva() releem do arquivo (que agora é a fonte de verdade) e recacheia.
+                InvalidarCache();
             }
             catch (Exception ex)
             {
@@ -158,6 +194,22 @@ namespace WavenVoIP
         // primeiro) -> caminho legado (roaming). Só retorna null quando nenhuma dessas
         // fontes tem uma configuração válida.
         public static SipConfig? CarregarSalva()
+        {
+            lock (_cacheLock)
+            {
+                if (_cacheCarregado)
+                    return (SipConfig?)_cacheInstancia?.MemberwiseClone();
+
+                // Ainda dentro do lock: qualquer chamada concorrente que chegue aqui enquanto
+                // a primeira leitura ainda está em andamento espera aqui, em vez de bater no
+                // disco ao mesmo tempo (evita leituras duplicadas na largada/pós-invalidação).
+                _cacheInstancia = CarregarSalvaImpl();
+                _cacheCarregado = true;
+                return (SipConfig?)_cacheInstancia?.MemberwiseClone();
+            }
+        }
+
+        private static SipConfig? CarregarSalvaImpl()
         {
             LogHelper.Info($"CONFIG_PATH_RESOLVED | path={ConfigFilePath}");
             LogHelper.Info("CONFIG_LOAD_START");

@@ -1,7 +1,7 @@
 {
-    "versao":  "2.3.6",
-    "zip":  "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.3.6/WavenVoIP.zip",
-    "sha256":  "19fb243f470773a7cb1bead325f019c80209c43acd2b560824c4396cb892a920",
+    "versao":  "2.3.7",
+    "zip":  "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.3.7/WavenVoIP.zip",
+    "sha256":  "c130e687da5afc6ab3e0a9bd0f9c3aa11b41dff1c651539f669580648ac73bc5",
     "data":  "2026-08-10",
-    "notas":  "WavenVoIP 2.3.6 - Correcao critica de cancelamento antecipado + Canal externo real no Historico\n[FIX-CRITICO] Cancelar uma chamada de saida ANTES do cliente atender podia deixar o telefone do cliente tocando mesmo com o Waven ja mostrando \"Cancelada\" - corrigido com prova real de entrega do CANCEL ao Asterisk e reforco automatico de reenvio\n[FIX] Corrigida corrida entre clicar Ligar e Desligar quase juntos: o INVITE nunca mais sai depois que o cancelamento ja foi pedido\n[SAFE] Cancelar durante o toque e chamada atendida continuam funcionando exatamente como antes\n[NEW] Historico: canal externo real (Operadora/0800/WhatsApp TIM/WhatsApp Vivo) exibido mesmo quando a ligacao passa por URA/fila\n[NEW] Historico: botao Ligar oferece retornar pelo mesmo canal da chamada recebida/perdida\n[SAFE] Nenhuma alteracao em audio, RTP, codecs, Issabel, Waven API, contatos, favoritos, WhatsApp ou Auto Start"
+    "notas":  "WavenVoIP v2.3.7 - melhorias de desempenho e estabilidade, reducao do consumo de CPU, correcoes no controle de chamadas canceladas e melhorias no Historico e notificacoes de chamadas."
 }

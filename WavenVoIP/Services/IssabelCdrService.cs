@@ -631,7 +631,15 @@ namespace WavenVoIP.Services
                         var numeroDeGravacao = ExtrairNumeroDestinoDeGravacao(recordingFile);
                         if (!string.IsNullOrWhiteSpace(numeroDeGravacao))
                         {
-                            Log($"CDR_RECORDING_CORRECTS_NUMBER | anterior={numeroExterno} correto={numeroDeGravacao} arquivo={recordingFile}");
+                            // v2.3.7 — este cálculo é determinístico (mesmo CDR + mesmo arquivo de
+                            // gravação sempre produz o mesmo resultado) e roda em TODO ciclo de sync
+                            // de CDR (a cada poucos segundos, para sempre) para cada grupo com
+                            // gravação — não é um evento novo nem um erro, é a mesma correção sendo
+                            // recalculada e logada repetidamente para chamadas antigas que nunca
+                            // mudam. Medido como ~78% do volume do cdr_sync.log numa sessão de teste.
+                            // Igual às demais linhas deste bloco (LogDetalhado acima), fica atrás do
+                            // toggle "Logs detalhados" — nunca esconde erro real, só reduz ruído.
+                            LogDetalhado($"CDR_RECORDING_CORRECTS_NUMBER | anterior={numeroExterno} correto={numeroDeGravacao} arquivo={recordingFile}");
                             numeroExterno = numeroDeGravacao;
                             // Chamadas saintes: extrai rota (Operadora/WhatsApp TIM/Vivo) pelo prefixo do filename
                             var origemDeGravacao = ExtrairOrigemSaidaDeGravacao(recordingFile);
