@@ -95,6 +95,33 @@ namespace WavenVoIP
         private bool _emEspera;
         private volatile bool _cancelamentoSolicitado;
         private volatile bool _chamadaSaindoEmAndamento;
+
+        // v2.3.6 — investigação real (10/08/2026): cancelamento antecipado às vezes deixava o
+        // telefone do cliente tocando mesmo com o Waven já marcando Cancelada. Causa raiz
+        // confirmada por log real (attemptId eb826b82): SIPClientUserAgent.Cancel() (SIPSorcery)
+        // dispara CallFailed IMEDIATAMENTE e LOCALMENTE, sem esperar NENHUMA confirmação de rede —
+        // "conseguimos chamar Cancel()" não é prova de que o Asterisk recebeu o CANCEL. Estes campos
+        // dão: (1) um lock pra fechar a corrida entre Desligar() marcar _cancelamentoSolicitado e
+        // Ligar() checar esse flag logo antes de enviar o INVITE — ver Ligar()/Desligar(); (2) um
+        // flag setado só quando a confirmação de rede REAL chega — ver MonitorarConfirmacaoCancelamento.
+        private readonly object _outboundCancelLock = new object();
+        private volatile bool _inviteEmEnvio;
+        private volatile bool _outboundCancelConfirmado;
+
+        // v2.3.6 — revisão de desempenho: EncerrarSinalizacaoAtiva() roda DUAS vezes pra uma mesma
+        // tentativa cancelada durante a discagem (uma vez chamada por Desligar(), outra pelo próprio
+        // Ligar() no branch de corrida pós-retorno — confirmado em log real, CALL_CANCEL_SENT aparece
+        // 2x por tentativa). Sem este guard, MonitorarConfirmacaoCancelamento/AgendarReenvioSeNaoConfirmado
+        // rodariam 2x por tentativa (handlers duplicados na mesma transação, 2 retries agendados).
+        // Não é vazamento (não cresce por chamada, sempre no máximo 2x por tentativa), mas é
+        // trabalho/log duplicado desnecessário — este campo garante no máximo 1x por attemptId.
+        private volatile string? _outboundCancelMonitorAttemptId;
+
+        // Cache dos FieldInfo de reflection usados só pra LEITURA de m_uac/m_cancelTransaction
+        // (campos privados/internal do SIPSorcery sem getter público) — evita repetir
+        // GetType().GetField(...) a cada cancelamento.
+        private static readonly FieldInfo? _campoUac = typeof(SIPUserAgent).GetField("m_uac", BindingFlags.NonPublic | BindingFlags.Instance);
+        private static readonly FieldInfo? _campoCancelTransaction = typeof(SIPClientUserAgent).GetField("m_cancelTransaction", BindingFlags.NonPublic | BindingFlags.Instance);
         private readonly List<SIPUserAgent> _conferenceAgents = new List<SIPUserAgent>();
         private readonly List<VoIPMediaSession> _conferenceMediaSessions = new List<VoIPMediaSession>();
 
@@ -112,6 +139,18 @@ namespace WavenVoIP
         public bool IsInCall => _userAgent?.IsCallActive ?? false;
         public bool IsOnHold => _emEspera;
         public bool IsDialing => _chamadaSaindoEmAndamento;
+
+        // v2.3.6 — id só de LOG, pra correlacionar todos os eventos (Ringing/Failed/Hangup) de UMA
+        // tentativa de saída específica nos arquivos de diagnóstico. Trocado a cada Ligar().
+        private string _outboundAttemptId = string.Empty;
+
+        // v2.3.6 — true quando ESTA tentativa foi encerrada por Desligar() (o próprio operador,
+        // pelo Waven) enquanto ainda estava discando/tocando — nunca por causa de BusyHere/Decline
+        // do lado do cliente. Investigação de "popup Chamada recusada falso" achou a causa raiz:
+        // Ligar() nunca resetava LastOutboundResultado no início de uma nova tentativa, então um
+        // cancelamento local (que não passa por ClassificarResultadoLigacao) deixava o resultado da
+        // tentativa ANTERIOR (ex.: Recusada) vazar pra tentativa nova. Ver Ligar()/Desligar().
+        public bool LastOutboundWasCancelledLocally { get; private set; }
 
         // v2.1.1 — Offline controlado localmente pelo WavenVoIP, sem depender de
         // discagem de código de função no Issabel/Asterisk (*78/*79).
@@ -746,6 +785,24 @@ namespace WavenVoIP
             if (_config == null || _userAgent == null)
                 throw new InvalidOperationException("SipService não inicializado.");
 
+            // v2.3.6 — trava de reentrância: Ligar() não tinha NENHUMA proteção contra ser chamado
+            // de novo enquanto uma tentativa anterior ainda estava discando/tocando. Um segundo
+            // clique nesse intervalo criava uma SEGUNDA chamada concorrente usando os MESMOS campos
+            // de estado de instância (LastOutboundResultado, _ultimoRingingRecebidoEm, etc.),
+            // corrompendo a classificação de ambas as tentativas — investigação real encontrou
+            // exatamente esse padrão. O guard de UI (DialerShellWindow.IniciarLigacaoAsync) já
+            // deveria impedir isso antes de chegar aqui; esta é a segunda camada de defesa.
+            if (_chamadaSaindoEmAndamento || IsInCall)
+            {
+                LogHelper.Sip($"OUTBOUND_CLICK_IGNORED_BUSY | numero={numeroFinal} discando={_chamadaSaindoEmAndamento} emChamada={IsInCall}", LogLevel.WARN);
+                throw new InvalidOperationException("Já existe uma chamada em andamento.");
+            }
+
+            _outboundAttemptId = Guid.NewGuid().ToString("N").Substring(0, 8);
+            var attemptId = _outboundAttemptId;
+            LastOutboundWasCancelledLocally = false;
+            LastOutboundResultado = TipoHistoricoLigacao.NaoAtendida;
+
             _muteMicrofoneAtivo = false;
             var _swDiscagem = System.Diagnostics.Stopwatch.StartNew();
 
@@ -758,6 +815,7 @@ namespace WavenVoIP
             LastOutboundFailureReason = string.Empty;
             LastOutboundRingDurationSeconds = null;
             _ultimoRingingRecebidoEm = null;
+            LogHelper.Sip($"OUTBOUND_ATTEMPT_CREATED | attemptId={attemptId} numero={MascararTextoSip(numeroNorm)}");
             LogHelper.Sip($"CALL_START_CLICK | destino={numeroNorm} raw={numeroRaw}");
             LogHelper.Sip($"CALL_DIAL_NUMBER_RAW | numero={numeroRaw}");
             LogHelper.Sip($"CALL_DIAL_NUMBER_NORMALIZED | numero={numeroNorm}");
@@ -768,14 +826,43 @@ namespace WavenVoIP
             try
             {
                 _cancelamentoSolicitado = false;
+                _outboundCancelConfirmado = false;
+                _outboundCancelMonitorAttemptId = null;
                 _chamadaSaindoEmAndamento = true;
                 _inicioDialing = DateTime.Now;
 
                 _mediaSession = CriarMedia();
                 LogHelper.Sip($"CALL_MEDIA_STARTED | media session created elapsed_ms={_swDiscagem.ElapsedMilliseconds}");
 
+                // v2.3.6 — CriarMedia() pode levar 150-400ms+ em máquinas reais (enumeração de
+                // dispositivo de áudio, visto em log real). Se Desligar() foi clicado ENQUANTO isso
+                // rodava, _userAgent.Call() nem tinha começado — o Cancel() que Desligar() já tentou
+                // não tinha nenhuma transação pra cancelar ainda (m_uac era o da tentativa ANTERIOR
+                // ou nulo). Sem este check o INVITE seria enviado mesmo assim e o telefone do cliente
+                // tocaria. O lock fecha a corrida com Desligar() (ver lá) sobre _cancelamentoSolicitado.
+                bool abortarAntesDoInvite;
+                lock (_outboundCancelLock)
+                {
+                    abortarAntesDoInvite = _cancelamentoSolicitado;
+                    _inviteEmEnvio = !abortarAntesDoInvite;
+                }
+
+                if (abortarAntesDoInvite)
+                {
+                    _chamadaSaindoEmAndamento = false;
+                    _inicioDialing = DateTime.MinValue;
+                    LastOutboundWasCancelledLocally = true;
+                    LogHelper.Sip($"OUTBOUND_INVITE_SUPPRESSED_BY_CANCEL | attemptId={attemptId} destino={destination}", LogLevel.WARN);
+                    RegistrarSinalSip($"OUTBOUND_INVITE_SUPPRESSED_BY_CANCEL | attemptId={attemptId} destino={destination}");
+                    LimparEstadoChamada("Chamada cancelada antes do envio.");
+                    return false;
+                }
+
                 LogHelper.Sip($"CALL_INVITE_SENT | destino={destination} elapsed_ms={_swDiscagem.ElapsedMilliseconds}");
+                LogHelper.Sip($"OUTBOUND_CLICK_TO_INVITE_TIMING | attemptId={attemptId} ms={_swDiscagem.ElapsedMilliseconds}");
                 bool ok = await _userAgent.Call(destination, _config.Login, _config.Senha, _mediaSession);
+
+                lock (_outboundCancelLock) { _inviteEmEnvio = false; }
 
                 _chamadaSaindoEmAndamento = false;
                 _inicioDialing = DateTime.MinValue;
@@ -788,8 +875,17 @@ namespace WavenVoIP
                     // ok=true indica corrida: 200 OK chegou no Asterisk antes de processar nosso CANCEL.
                     // EncerrarSinalizacaoAtiva envia BYE quando IsCallActive=true (fix Cancel() no-op).
                     // LimparEstadoChamada já foi chamada por Desligar() — não repete para evitar duplo CallEnded.
+                    //
+                    // v2.3.6 — ESTE é o cancelamento pelo PRÓPRIO OPERADOR, nunca uma recusa/timeout
+                    // do lado do cliente. Marca explicitamente (LastOutboundWasCancelledLocally) em
+                    // vez de deixar o chamador ler LastOutboundResultado — antes disso, esse campo
+                    // não era resetado no início de Ligar() e podia carregar o resultado (ex.:
+                    // "Recusada") de uma tentativa ANTERIOR completamente diferente, fazendo o popup
+                    // "Chamada recusada" aparecer para um cancelamento local sem nenhuma relação.
+                    LastOutboundWasCancelledLocally = true;
                     RegistrarSinalSip($"CALL_OUT_CANCEL_POST_RETURN | ok={ok} destino={destination}");
                     LogHelper.Sip($"CALL_OUT_CANCEL_POST_RETURN | ok={ok} destino={destination}" + (ok ? " [RACE: 200 OK before CANCEL — sending BYE]" : ""));
+                    LogHelper.Sip($"OUTBOUND_LOCAL_CANCEL_CONFIRMED | attemptId={attemptId}");
                     EncerrarSinalizacaoAtiva();
                     return false;
                 }
@@ -1418,6 +1514,8 @@ namespace WavenVoIP
         {
             try
             {
+                bool jaEstavaAtiva = _userAgent?.IsCallActive == true;
+
                 // Durante chamada sainte ainda não atendida, alguns métodos Hangup não enviam CANCEL.
                 // Tentamos os nomes usados por versões diferentes do SIPSorcery e, por fim, Hangup.
                 bool cancelEnviado = TentarMetodoSemParametro(_userAgent, "Cancel", "CancelCall", "CancelInvite");
@@ -1431,20 +1529,128 @@ namespace WavenVoIP
                 RegistrarSinalSip($"CALL_CANCEL_SENT | cancelEnviado={cancelEnviado} eraDial={_chamadaSaindoEmAndamento}");
                 LogHelper.Sip($"CALL_CANCEL_SENT | cancelEnviado={cancelEnviado}");
 
-                // Detecção de chamada fantasma: se estávamos discando e o cancel não foi confirmado
-                if (_chamadaSaindoEmAndamento && _inicioDialing != DateTime.MinValue)
+                // v2.3.6 — investigação real confirmou que SIPClientUserAgent.Cancel() (SIPSorcery)
+                // dispara CallFailed IMEDIATAMENTE e LOCALMENTE, sem esperar nenhuma resposta de rede.
+                // "cancelEnviado=true" acima só prova que chamamos o método — não que o Asterisk
+                // recebeu o CANCEL. Só faz sentido pendurar os ganchos de confirmação/reenvio quando
+                // ainda estávamos discando (chamada nunca atendida) e o cancel não é, na verdade, um
+                // Hangup pós-atendimento (jaEstavaAtiva).
+                if (cancelEnviado && _chamadaSaindoEmAndamento && !jaEstavaAtiva)
+                {
+                    var attemptId = _outboundAttemptId;
+                    // Guard: EncerrarSinalizacaoAtiva() pode rodar 2x pra mesma tentativa (Desligar()
+                    // + branch de corrida pós-retorno em Ligar()) — só pendura os ganchos/agenda o
+                    // retry na PRIMEIRA vez por attemptId, nunca duplica.
+                    if (!string.Equals(_outboundCancelMonitorAttemptId, attemptId, StringComparison.Ordinal))
+                    {
+                        _outboundCancelMonitorAttemptId = attemptId;
+                        MonitorarConfirmacaoCancelamento(attemptId);
+                        AgendarReenvioSeNaoConfirmado(attemptId);
+                    }
+                }
+
+                // Detecção de cancelamento antes do Ringing: sinal real de risco (o cliente pode não
+                // ter recebido nenhum toque ainda quando cancelamos) — diferente de cancelar DURANTE
+                // o toque, que é normal e não deve gerar alerta (heurística antiga por tempo decorrido
+                // < 3s disparava também em cancelamentos legítimos durante Ringing, gerando ruído —
+                // ver investigação real de 10/08/2026, attempts das 13:09).
+                if (_chamadaSaindoEmAndamento && _inicioDialing != DateTime.MinValue && _ultimoRingingRecebidoEm == null)
                 {
                     var elapsed = (DateTime.Now - _inicioDialing).TotalSeconds;
-                    if (elapsed < 3.0)
-                    {
-                        RegistrarSinalSip($"CALL_GHOST_CALL_DETECTED | elapsed={elapsed:0.0}s destino={LastDialedDestination}");
-                        LogHelper.Sip($"CALL_GHOST_CALL_DETECTED | elapsed={elapsed:0.0}s destino={LastDialedDestination}", LogLevel.WARN);
-                    }
+                    RegistrarSinalSip($"OUTBOUND_CANCEL_BEFORE_RINGING | elapsed={elapsed:0.0}s destino={LastDialedDestination}");
+                    LogHelper.Sip($"OUTBOUND_CANCEL_BEFORE_RINGING | elapsed={elapsed:0.0}s destino={LastDialedDestination}", LogLevel.WARN);
                 }
             }
             catch
             {
             }
+        }
+
+        // v2.3.6 — pendura handlers nos eventos PÚBLICOS da transação SIP real (UACInviteTransaction/
+        // SIPNonInviteTransaction) pra logar PROVA de que o CANCEL foi entregue (ou não) — nunca só
+        // que conseguimos chamar o método local. m_uac/m_cancelTransaction são campos privados/internal
+        // do SIPSorcery sem getter público; reflection aqui é só LEITURA (nunca seta nada), no mesmo
+        // estilo já usado no resto deste arquivo (TentarMetodoSemParametro/TentarTransferDireta).
+        private void MonitorarConfirmacaoCancelamento(string attemptId)
+        {
+            try
+            {
+                if (_campoUac?.GetValue(_userAgent) is not SIPClientUserAgent uac) return;
+
+                var serverTx = uac.ServerTransaction;
+                if (serverTx != null)
+                {
+                    serverTx.UACInviteTransactionFinalResponseReceived += (localEp, remoteEp, tx, resp) =>
+                    {
+                        _outboundCancelConfirmado = true;
+                        LogHelper.Sip($"OUTBOUND_INVITE_TERMINATED | attemptId={attemptId} status={resp?.Status}");
+                        RegistrarSinalSip($"OUTBOUND_INVITE_TERMINATED | attemptId={attemptId} status={resp?.Status}");
+                        return Task.FromResult(System.Net.Sockets.SocketError.Success);
+                    };
+                }
+
+                // m_cancelTransaction só existe DEPOIS de Cancel() já ter criado a transação — por
+                // isso este método precisa ser chamado logo após TentarMetodoSemParametro(...,"Cancel",...)
+                // ter retornado, dentro de EncerrarSinalizacaoAtiva().
+                if (_campoCancelTransaction?.GetValue(uac) is SIPNonInviteTransaction cancelTx)
+                {
+                    cancelTx.NonInviteTransactionFinalResponseReceived += (localEp, remoteEp, tx, resp) =>
+                    {
+                        _outboundCancelConfirmado = true;
+                        LogHelper.Sip($"OUTBOUND_SIP_CANCEL_RESPONSE | attemptId={attemptId} status={resp?.Status}");
+                        RegistrarSinalSip($"OUTBOUND_SIP_CANCEL_RESPONSE | attemptId={attemptId} status={resp?.Status}");
+                        return Task.FromResult(System.Net.Sockets.SocketError.Success);
+                    };
+                    cancelTx.NonInviteTransactionFailed += (tx, reason) =>
+                    {
+                        LogHelper.Sip($"OUTBOUND_SIP_CANCEL_TRANSPORT_FAILED | attemptId={attemptId} motivo={reason}", LogLevel.WARN);
+                        RegistrarSinalSip($"OUTBOUND_SIP_CANCEL_TRANSPORT_FAILED | attemptId={attemptId} motivo={reason}");
+                    };
+                    LogHelper.Sip($"OUTBOUND_SIP_CANCEL_SENT | attemptId={attemptId}");
+                    RegistrarSinalSip($"OUTBOUND_SIP_CANCEL_SENT | attemptId={attemptId}");
+                }
+                else
+                {
+                    // Cancel() foi chamado mas m_serverTransaction ainda era null (INVITE ainda não
+                    // tinha sido efetivamente montado) — SIPSorcery só marca m_callCancelled=true e
+                    // se auto-cura enviando o CANCEL de verdade assim que a primeira resposta (100/180)
+                    // chegar (ver ServerInformationResponseReceived). AgendarReenvioSeNaoConfirmado
+                    // cobre o caso de nenhuma resposta chegar a tempo.
+                    LogHelper.Sip($"OUTBOUND_SIP_CANCEL_PENDING_NO_TRANSACTION | attemptId={attemptId}", LogLevel.WARN);
+                    RegistrarSinalSip($"OUTBOUND_SIP_CANCEL_PENDING_NO_TRANSACTION | attemptId={attemptId}");
+                }
+            }
+            catch (Exception ex)
+            {
+                LogHelper.Sip($"OUTBOUND_CANCEL_MONITOR_ERROR | attemptId={attemptId} erro={ex.Message}", LogLevel.WARN);
+            }
+        }
+
+        // v2.3.6 — reforço não-bloqueante: se nenhuma confirmação real (487/200 na transação de
+        // CANCEL, ou 487 na transação de INVITE original) chegar em ~600ms, reenvia o Cancel() uma
+        // vez. Nunca bloqueia a UI (Task.Run + Task.Delay, sem .Wait()/.Result/Thread.Sleep na thread
+        // de chamada). Idempotente: SIPClientUserAgent.Cancel() reenvia o CANCEL se m_cancelTransaction
+        // já existir (ver biblioteca) — nunca duplica o INVITE nem afeta chamadas já atendidas.
+        private void AgendarReenvioSeNaoConfirmado(string attemptId)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(600).ConfigureAwait(false);
+                    if (!string.Equals(_outboundAttemptId, attemptId, StringComparison.Ordinal)) return;
+                    if (_outboundCancelConfirmado) return;
+                    if (_userAgent?.IsCallActive == true) return;
+
+                    var reenviado = TentarMetodoSemParametro(_userAgent, "Cancel", "CancelCall", "CancelInvite");
+                    LogHelper.Sip($"OUTBOUND_SIP_CANCEL_RETRY | attemptId={attemptId} reenviado={reenviado}", LogLevel.WARN);
+                    RegistrarSinalSip($"OUTBOUND_SIP_CANCEL_RETRY | attemptId={attemptId} reenviado={reenviado}");
+                }
+                catch (Exception ex)
+                {
+                    LogHelper.Sip($"OUTBOUND_SIP_CANCEL_RETRY_ERROR | attemptId={attemptId} erro={ex.Message}", LogLevel.WARN);
+                }
+            });
         }
 
         public bool VoltarTransferenciaAssistida()
@@ -2159,9 +2365,16 @@ namespace WavenVoIP
 
         public void Desligar()
         {
+            var swDesligar = System.Diagnostics.Stopwatch.StartNew();
             var eraEmChamada = IsInCall;
             var eraDiscando = _chamadaSaindoEmAndamento;
-            _cancelamentoSolicitado = true;
+
+            bool inviteJaEmEnvio;
+            lock (_outboundCancelLock)
+            {
+                _cancelamentoSolicitado = true;
+                inviteJaEmEnvio = _inviteEmEnvio;
+            }
 
             RegistrarSinalSip($"CALL_LOCAL_HANGUP | eraEmChamada={eraEmChamada} eraDiscando={eraDiscando} destino={LastDialedDestination}");
             LogHelper.Sip($"CALL_LOCAL_HANGUP | eraEmChamada={eraEmChamada} eraDiscando={eraDiscando}");
@@ -2170,6 +2383,22 @@ namespace WavenVoIP
             {
                 RegistrarSinalSip($"CALL_CANCEL_REQUESTED | destino={LastDialedDestination}");
                 LogHelper.Sip($"CALL_CANCEL_REQUESTED | destino={LastDialedDestination}");
+
+                // v2.3.6 — INVITE ainda nem começou a ser enviado (Ligar() ainda estava em
+                // CriarMedia() ou equivalente, ver o lock lá). Não existe nenhuma transação SIP
+                // pra cancelar ainda, então não adianta chamar EncerrarSinalizacaoAtiva()/Cancel()
+                // aqui — e não mexe em media/estado pra não correr com o próprio Ligar(), que vai
+                // ver _cancelamentoSolicitado=true (mesmo lock) e abortar ANTES de enviar o INVITE.
+                // Feedback visual é imediato mesmo assim; o encerramento definitivo (LimparEstadoChamada)
+                // acontece no abort de Ligar().
+                if (!inviteJaEmEnvio)
+                {
+                    LogHelper.Sip($"OUTBOUND_CANCEL_BEFORE_INVITE | destino={LastDialedDestination}", LogLevel.WARN);
+                    RegistrarSinalSip($"OUTBOUND_CANCEL_BEFORE_INVITE | destino={LastDialedDestination}");
+                    StatusChanged?.Invoke("Cancelando chamada...");
+                    try { IncomingCallEnded?.Invoke(); } catch { }
+                    return;
+                }
             }
 
             PararRtpKeepalive();
@@ -2178,6 +2407,13 @@ namespace WavenVoIP
 
             try { EncerrarSinalizacaoAtiva(); }
             catch (Exception ex) { StatusChanged?.Invoke($"Aviso ao cancelar chamada: {ex.Message}"); }
+
+            // v2.3.6 — auditoria de desempenho: tempo do clique em Desligar() até o CANCEL/BYE
+            // efetivamente sair (EncerrarSinalizacaoAtiva acima), espelhando OUTBOUND_CLICK_TO_INVITE_TIMING.
+            // Só mede quando havia uma discagem em andamento (eraDiscando) — é o caso relevante pra
+            // Cancelada, onde a resposta imediata do botão Desligar importa (ver item 11 da auditoria).
+            if (eraDiscando)
+                LogHelper.Sip($"OUTBOUND_HANGUP_TO_CANCEL_TIMING | ms={swDesligar.ElapsedMilliseconds}");
 
             _chamadaSaindoEmAndamento = false;
             _inicioDialing = DateTime.MinValue;

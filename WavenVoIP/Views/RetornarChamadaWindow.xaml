@@ -1,0 +1,136 @@
+<Window x:Class="WavenVoIP.Views.RetornarChamadaWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Retornar chamada" Width="500" SizeToContent="Height" MinHeight="320"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
+        ShowInTaskbar="False">
+    <Window.Resources>
+        <!-- Botão principal: cor dinâmica por canal (definida no code-behind), texto branco, bem alto -->
+        <Style x:Key="CanalPrimaryButtonStyle" TargetType="Button">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontSize" Value="16"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="14">
+                            <Border.Effect>
+                                <DropShadowEffect BlurRadius="12" ShadowDepth="2" Opacity="0.22" Color="#000000"/>
+                            </Border.Effect>
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Opacity" Value="0.90"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="bd" Property="Opacity" Value="0.78"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Botão secundário: contorno roxo, texto roxo, hover roxo bem claro -->
+        <Style x:Key="OutlinePrimaryButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="Foreground" Value="{StaticResource PrimaryBrush}"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bd" Background="{TemplateBinding Background}"
+                                BorderBrush="{StaticResource PrimaryBrush}" BorderThickness="1.5" CornerRadius="14">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="{StaticResource PrimarySoftBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="bd" Property="Opacity" Value="0.85"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Cancelar discreto no rodapé -->
+        <Style x:Key="LinkCancelButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="Transparent" Padding="8,4">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="24,22,24,22">
+        <Border Style="{StaticResource CardStyle}" Padding="26,24,26,24">
+            <StackPanel>
+
+                <!-- Título — sem X próprio: o X padrão da janela (canto superior direito do
+                     sistema operacional) já é o único jeito de fechar, evita ter dois. -->
+                <TextBlock Text="Retornar chamada" FontSize="23" FontWeight="Bold"/>
+
+                <!-- Cliente / número -->
+                <StackPanel Margin="0,14,0,0">
+                    <TextBlock x:Name="txtNomeCliente" FontSize="16" FontWeight="SemiBold"
+                               TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
+                    <TextBlock x:Name="txtNumeroCliente" Foreground="{StaticResource MutedBrush}" FontSize="13.5"
+                               Margin="0,3,0,0" TextTrimming="CharacterEllipsis"/>
+                </StackPanel>
+
+                <!-- Frase humana (varia por Tipo: recebida/realizada/tentativa) + canal como
+                     INFORMAÇÃO — indicador colorido pequeno + texto, nunca com cara de botão. -->
+                <StackPanel Margin="0,20,0,0">
+                    <TextBlock x:Name="txtLinha1" FontSize="14" TextWrapping="Wrap"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0" VerticalAlignment="Center">
+                        <Ellipse x:Name="dotCanal" Width="10" Height="10" Margin="0,0,8,0"/>
+                        <TextBlock x:Name="txtCanal" FontSize="18" FontWeight="Bold"
+                                   TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- Pergunta (caso normal) OU aviso especial (caso 0800 → retorno padrão Operadora) -->
+                <StackPanel Margin="0,16,0,0">
+                    <TextBlock x:Name="txtPergunta" FontSize="14.5" Margin="0,0,0,14"/>
+                    <TextBlock x:Name="txtAviso" FontSize="14" TextWrapping="Wrap"
+                               Foreground="{StaticResource MutedBrush}" Margin="0,0,0,14" Visibility="Collapsed"/>
+                    <Button x:Name="btnUsarMesmoCanal" Height="50" Style="{StaticResource CanalPrimaryButtonStyle}"
+                            Click="BtnUsarMesmoCanal_Click"/>
+                    <Button Content="Escolher outro canal" Height="46" Style="{StaticResource OutlinePrimaryButtonStyle}"
+                            Margin="0,10,0,0" Click="BtnEscolherOutro_Click"/>
+                </StackPanel>
+
+                <!-- Cancelar discreto -->
+                <Button Content="Cancelar" Style="{StaticResource LinkCancelButtonStyle}"
+                        HorizontalAlignment="Center" Margin="0,14,0,0" Click="BtnFechar_Click"/>
+
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

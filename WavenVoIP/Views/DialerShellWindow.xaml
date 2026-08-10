@@ -824,6 +824,7 @@
                                         <ComboBoxItem Content="Perdidas"/>
                                         <ComboBoxItem Content="Recusadas"/>
                                         <ComboBoxItem Content="Não atendidas"/>
+                                        <ComboBoxItem Content="Canceladas"/>
                                         <ComboBoxItem Content="Atendida em outro ramal"/>
                                     </ComboBox>
                                     <ComboBox x:Name="cmbFiltroCanalHistorico"
@@ -905,7 +906,7 @@
                                                     </StackPanel>
                                                     <!-- Col 3: Tipo badge (wider so "Não atendida" fits) -->
                                                     <Border Grid.Column="3" VerticalAlignment="Center" HorizontalAlignment="Left" Background="{Binding CorTipoFundo}" CornerRadius="6" Padding="5,3" Margin="0,0,4,0">
-                                                        <TextBlock Text="{Binding TipoTexto}" Foreground="{Binding CorTipo}" FontWeight="SemiBold" FontSize="10" TextTrimming="CharacterEllipsis"/>
+                                                        <TextBlock Text="{Binding TipoTexto}" Foreground="{Binding CorTipo}" FontWeight="SemiBold" FontSize="10" TextTrimming="CharacterEllipsis" ToolTip="{Binding TipoTextoDetalhado}"/>
                                                     </Border>
                                                     <!-- Col 4: Data / Duração -->
                                                     <StackPanel Grid.Column="4" VerticalAlignment="Center" Margin="0,0,4,0">
@@ -916,7 +917,7 @@
                                                     <StackPanel Grid.Column="5" Orientation="Horizontal"
                                                                 HorizontalAlignment="Right" VerticalAlignment="Center"
                                                                 Margin="0,0,2,0">
-                                                        <Button Tag="{Binding NumeroLimpoVisual}"
+                                                        <Button Tag="{Binding}"
                                                                 Style="{StaticResource IconActionButton}"
                                                                 Width="42" Height="42" Margin="0,0,6,0"
                                                                 Background="#7C3AED" ToolTip="Ligar"

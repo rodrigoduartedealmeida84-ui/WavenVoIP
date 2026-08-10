@@ -8,6 +8,7 @@ using WF = System.Windows.Forms;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Threading;
@@ -29,6 +30,11 @@ namespace WavenVoIP.Views
         private bool _dndAtivo; // usado como Offline/Online visual
         private IncomingCallWindow? _incomingPopup;
         private CallWindow? _activeCallWindow;
+        // v2.3.6 — trava de UI contra clique duplo/triplo no botão Ligar (Discador/Contatos/
+        // Favoritos/Histórico passam TODOS por IniciarLigacaoAsync — um único ponto de guarda
+        // protege todo mundo). Complementa (não substitui) a trava equivalente dentro de
+        // SipService.Ligar() — ver comentário lá.
+        private bool _ligacaoEmAndamento;
         private ConferenceControlWindow? _conferenceControlWindow;
         private TaskCompletionSource<SaidaChamada?>? _routeSelectorTcs;
         private WF.NotifyIcon? _trayIcon;
@@ -91,6 +97,7 @@ namespace WavenVoIP.Views
         private static readonly TimeSpan _janelaResfriamentoPosRing = TimeSpan.FromSeconds(6);
         private MissedCallPopup? _missedCallPopup;
         private OutboundDeclinedToast? _outboundDeclinedToast;
+        private OutboundNotAnsweredToast? _outboundNotAnsweredToast;
 
         // ── System log panel ─────────────────────────────────────────────────────
         private readonly List<LogEntry>                     _allLogs  = new(2001);
@@ -868,6 +875,7 @@ namespace WavenVoIP.Views
 
         private async void AtualizarHistoricoShell()
         {
+            var swTotal = Stopwatch.StartNew();
             try
             {
                 if (gridHistoricoShell == null) return;
@@ -894,6 +902,7 @@ namespace WavenVoIP.Views
                             "Perdidas"                => lista.Where(i => i.Tipo == Models.TipoHistoricoLigacao.Perdida).ToList(),
                             "Recusadas"               => lista.Where(i => i.Tipo == Models.TipoHistoricoLigacao.Recusada).ToList(),
                             "Não atendidas"           => lista.Where(i => i.Tipo == Models.TipoHistoricoLigacao.NaoAtendida).ToList(),
+                            "Canceladas"              => lista.Where(i => i.Tipo == Models.TipoHistoricoLigacao.Cancelada).ToList(),
                             "Atendida em outro ramal" => lista.Where(i => i.Tipo == Models.TipoHistoricoLigacao.NaoAtendidaNesseRamal).ToList(),
                             _ => lista
                         };
@@ -912,9 +921,20 @@ namespace WavenVoIP.Views
                     return lista;
                 });
 
-                gridHistoricoShell.ItemsSource = itens;
+                var msBackground = swTotal.ElapsedMilliseconds;
+                var swUi = Stopwatch.StartNew();
+                gridHistoricoShell.ItemsSource = itens; // atribuição roda na UI thread — vale medir à parte
+                var msUi = swUi.ElapsedMilliseconds;
+
+                // Só loga quando algum estágio passa de um limiar pequeno — refresh normal (poucos
+                // ms) não precisa poluir o log a cada 2-5s que o Histórico fica aberto.
+                if (msBackground + msUi >= 30)
+                    RegistrarUiDiagnostico($"ATUALIZAR_HISTORICO_SHELL_TIMING background_ms={msBackground} ui_ms={msUi} itens={itens.Count}");
             }
-            catch { }
+            catch (Exception ex)
+            {
+                RegistrarUiDiagnostico($"ATUALIZAR_HISTORICO_SHELL_EXCEPTION {ex}");
+            }
         }
 
         private void CmbFiltroTipoHistorico_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -1673,6 +1693,21 @@ namespace WavenVoIP.Views
 
         private async Task ExecutarReprocessarAsync(bool silencioso, bool validarUrls = true)
         {
+            // v2.3.6 — "Reprocessar" e a sincronização de CDR (timer automático/botão "Atualizar
+            // CDR") escrevem no MESMO historico.json. Sem esta trava, um clique manual em
+            // "Reprocessar" durante um ciclo automático do timer (a cada poucos segundos) podia
+            // rodar as duas operações ao mesmo tempo — cada uma lendo/escrevendo o arquivo por
+            // conta própria (o lock em HistoricoStorageService.Salvar só protege a escrita em si,
+            // não o ciclo leitura→processamento→escrita inteiro). Reaproveita a MESMA trava do
+            // sync de CDR — nunca roda simultaneamente com ele.
+            if (_cdrSyncEmAndamento)
+            {
+                RegistrarUiDiagnostico("REPROCESS_CDR_SKIPPED_BUSY");
+                if (!silencioso && txtStatusHistorico != null)
+                    txtStatusHistorico.Text = "Aguarde a sincronização atual terminar...";
+                return;
+            }
+            _cdrSyncEmAndamento = true;
             try
             {
                 RegistrarUiDiagnostico("REPROCESS_CDR_START");
@@ -1699,6 +1734,10 @@ namespace WavenVoIP.Views
                     Dispatcher.Invoke(() => MessageBox.Show(
                         "Falha ao reprocessar histórico:\n\n" + ex.Message,
                         "Waven VoIP", MessageBoxButton.OK, MessageBoxImage.Warning));
+            }
+            finally
+            {
+                _cdrSyncEmAndamento = false;
             }
         }
 
@@ -1921,8 +1960,26 @@ namespace WavenVoIP.Views
 
         private async void BtnLigarHistoricoShell_Click(object sender, RoutedEventArgs e)
         {
-            if (sender is FrameworkElement fe && fe.Tag is string numero)
+            // v2.3.6 — investigação de "o botão Ligar às vezes não responde": todo o corpo agora
+            // fica dentro de um try/catch que LOGA (stack trace completo), nunca engole em
+            // silêncio. O "if" abaixo tinha um caminho silencioso real — se fe.Tag não fosse um
+            // HistoricoLigacaoItem por qualquer motivo, o clique simplesmente não fazia nada, sem
+            // nenhum rastro. Agora isso vira um log explícito em vez de nada acontecer.
+            try
             {
+                if (!(sender is FrameworkElement fe && fe.Tag is HistoricoLigacaoItem item))
+                {
+                    RegistrarUiDiagnostico(
+                        $"HISTORICO_LIGAR_TAG_INESPERADA senderTipo={sender?.GetType().FullName ?? "null"} " +
+                        $"tagTipo={(sender as FrameworkElement)?.Tag?.GetType().FullName ?? "null"}");
+                    return;
+                }
+
+                RegistrarUiDiagnostico(
+                    $"HISTORICO_LIGAR_ITEM_RECEBIDO id={item.Id} numero={item.Numero} tipo={item.Tipo} " +
+                    $"canalEntrada={item.CanalEntrada} origemSaida={item.OrigemSaida}");
+
+                var numero = item.NumeroLimpoVisual;
                 var numeroNorm = PhoneNumberNormalizer.NormalizeForDial(numero);
                 RegistrarUiDiagnostico($"CLICK HISTORICO numero={numero} norm={numeroNorm}");
                 try
@@ -1932,11 +1989,19 @@ namespace WavenVoIP.Views
                     txtNumero.Text = DialPlanService.RemoverDuplicacaoSequencial(numeroNorm);
                     txtNumero.CaretIndex = txtNumero.Text.Length;
                 }
-                catch { }
+                catch (Exception exUi)
+                {
+                    RegistrarUiDiagnostico($"HISTORICO_LIGAR_UI_FOCUS_ERRO {exUi}");
+                }
 
                 await Dispatcher.Yield(DispatcherPriority.Background);
                 RegistrarUiDiagnostico($"HISTORICO iniciando fluxo de discagem numeroNorm={numeroNorm}");
-                await IniciarLigacaoDoHistoricoAsync(numeroNorm);
+                await IniciarLigacaoDoHistoricoAsync(numeroNorm, item);
+            }
+            catch (Exception ex)
+            {
+                RegistrarUiDiagnostico($"HISTORICO_LIGAR_EXCEPTION {ex}");
+                TratarErroSemTravamento(ex, "Não foi possível iniciar o retorno da chamada.");
             }
         }
 
@@ -1979,7 +2044,7 @@ namespace WavenVoIP.Views
                 menu.Items.Add(sep);
             }
 
-            Add("📞  Ligar", true, () => { _ = IniciarLigacaoDoHistoricoAsync(item.NumeroLimpoVisual); });
+            Add("📞  Ligar", true, () => { _ = IniciarLigacaoDoHistoricoAsync(item.NumeroLimpoVisual, item); });
             Add("💬  Enviar WhatsApp", true, () => AbrirTelaWhatsApp(item.NumeroLimpoVisual, "historico"));
             AddSep();
             Add("✏️  Salvar contato", true, () => AbrirDialogSalvarContato(item.NumeroLimpoVisual));
@@ -2043,7 +2108,7 @@ namespace WavenVoIP.Views
             var ramal = string.IsNullOrWhiteSpace(item.RamalExibido) ? "—" : item.RamalExibido;
             var detalhes = $"Número:     {item.NumeroLimpoVisual}\n" +
                            $"Nome:       {(string.IsNullOrWhiteSpace(item.Nome) ? "—" : item.Nome)}\n" +
-                           $"Tipo:       {item.TipoTexto}\n" +
+                           $"Tipo:       {item.TipoTextoDetalhado}\n" +
                            $"Data/hora:  {item.DataHora:dd/MM/yyyy HH:mm:ss}\n" +
                            $"Duração:    {(string.IsNullOrWhiteSpace(item.Duracao) ? "—" : item.Duracao)}\n" +
                            $"Ramal:      {ramal}\n" +
@@ -2323,10 +2388,25 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
         }
 
         private async Task IniciarLigacaoAsync(string numeroDigitado) => await IniciarLigacaoAsync(numeroDigitado, false);
-        private async Task IniciarLigacaoDoHistoricoAsync(string numeroHistorico) => await IniciarLigacaoAsync(numeroHistorico, true);
+        private async Task IniciarLigacaoDoHistoricoAsync(string numeroHistorico, HistoricoLigacaoItem? itemHistorico = null)
+            => await IniciarLigacaoAsync(numeroHistorico, true, itemHistorico);
 
-        private async Task IniciarLigacaoAsync(string numeroDigitado, bool veioDoHistorico)
+        private async Task IniciarLigacaoAsync(string numeroDigitado, bool veioDoHistorico, HistoricoLigacaoItem? itemHistorico = null)
         {
+            // v2.3.6 — investigação real: usuário precisou clicar ~3x pra chamada iniciar. Causa
+            // raiz — nenhuma trava contra clique duplo/triplo: cada clique reentrante disparava uma
+            // NOVA chamada a SipService.Ligar() usando os MESMOS campos de estado compartilhados
+            // (LastOutboundResultado, _ultimoRingingRecebidoEm), corrompendo a classificação de
+            // qual tentativa era qual. Ignora silenciosamente (com log) qualquer clique que chegue
+            // enquanto uma tentativa anterior ainda está em andamento — nunca cria um segundo
+            // SIPUserAgent/tentativa concorrente.
+            if (_ligacaoEmAndamento)
+            {
+                RegistrarUiDiagnostico($"OUTBOUND_UI_CLICK_IGNORED numero={numeroDigitado} motivo=ligacao_ja_em_andamento");
+                return;
+            }
+            _ligacaoEmAndamento = true;
+            RegistrarUiDiagnostico($"OUTBOUND_UI_CLICK numero={numeroDigitado} veioDoHistorico={veioDoHistorico}");
             try
             {
                 RegistrarUiDiagnostico($"INICIAR_LIGACAO entrada={numeroDigitado} veioDoHistorico={veioDoHistorico}");
@@ -2343,7 +2423,9 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
                 else
                 {
                     RegistrarUiDiagnostico($"ABRINDO SELETOR numero={numeroDigitado}");
-                    var saida = await AbrirSeletorSaidaAsync(numeroDigitado);
+                    var saida = veioDoHistorico
+                        ? await ResolverSaidaHistoricoAsync(numeroDigitado, itemHistorico)
+                        : await AbrirSeletorSaidaAsync(numeroDigitado);
                     RegistrarUiDiagnostico($"RETORNO SELETOR numero={numeroDigitado} saida={(saida.HasValue ? saida.Value.ToString() : "null")}");
                     if (saida == null) return;
                     origemSaida = DialPlanService.NomeSaida(saida.Value);
@@ -2352,21 +2434,40 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
                 }
 
                 RegistrarUiDiagnostico($"ABRINDO CALLWINDOW numeroFinal={numeroFinal} origem={origemSaida}");
-                var call = CriarTelaDeChamada(ResolverDisplayChamada(numeroFinal), $"Ligando via {origemSaida}...");
+                // v2.3.6 — feedback IMEDIATO e bem visível do primeiro clique: Show()+Activate() logo
+                // de cara, antes de qualquer chamada SIP — investigação real mostrou a janela de
+                // chamada podendo abrir sem tomar foco, dando a impressão de que o clique não fez nada.
+                var call = CriarTelaDeChamada(ResolverDisplayChamada(numeroFinal), $"Iniciando chamada via {origemSaida}...");
                 _activeCallWindow = call;
                 call.Closed += (_, __) => { if (ReferenceEquals(_activeCallWindow, call)) _activeCallWindow = null; };
                 call.Show();
+                try { call.Activate(); } catch { }
+                RegistrarUiDiagnostico($"OUTBOUND_UI_FEEDBACK numeroFinal={numeroFinal}");
 
                 var ramalAtual = SipConfig.CarregarSalva()?.Ramal?.Trim() ?? string.Empty;
 
                 RegistrarUiDiagnostico($"CHAMANDO SIP Ligar numeroFinal={numeroFinal}");
                 bool ok = await _sipService.Ligar(numeroFinal);
-                RegistrarUiDiagnostico($"RETORNO SIP Ligar numeroFinal={numeroFinal} ok={ok} erro={_sipService.LastCallError}");
+                RegistrarUiDiagnostico(
+                    $"RETORNO SIP Ligar numeroFinal={numeroFinal} ok={ok} erro={_sipService.LastCallError} " +
+                    $"canceladoLocalmente={_sipService.LastOutboundWasCancelledLocally}");
                 if (ok)
                 {
                     call.DefinirStatus($"Em chamada via {origemSaida}");
                     call.IniciarContador();
                     IniciarControleHistoricoChamada(RegistrarHistorico(numeroFinal, TipoHistoricoLigacao.Realizada, "Em andamento", origemSaida, ramalAtual));
+                }
+                else if (_sipService.LastOutboundWasCancelledLocally)
+                {
+                    // v2.3.6 — o PRÓPRIO OPERADOR desistiu/desligou enquanto ainda tocava. Nunca é
+                    // Recusada (ação do cliente) nem NaoAtendida (timeout do lado do cliente) — ver
+                    // TipoHistoricoLigacao.Cancelada. Sem toast chamativo, sem popup de "não atendeu".
+                    call.DefinirStatus("Chamada cancelada.");
+                    RegistrarHistorico(numeroFinal, TipoHistoricoLigacao.Cancelada, "00:00", origemSaida, ramalAtual,
+                        canceladaPeloOperador: true);
+                    RegistrarUiDiagnostico(
+                        $"OUTBOUND_NOTIFICATION_SUPPRESSED_LOCAL_CANCEL numeroFinal={numeroFinal} " +
+                        $"ringDurationSeg={_sipService.LastOutboundRingDurationSeconds:F1}");
                 }
                 else
                 {
@@ -2388,10 +2489,19 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
                     // para este registro até a PRÓXIMA chamada terminar, corrompendo a duração dela.
                     RegistrarHistorico(numeroFinal, resultado, "00:00", origemSaida, ramalAtual);
 
-                    // Toast dedicado só dispara quando o resultado FINAL é Recusada — nunca para
-                    // Não atendida, timeout ou qualquer outra falha (ver item 9 da investigação).
+                    // Toast dedicado — no máximo UM por tentativa: Recusada mostra "Chamada
+                    // recusada", NaoAtendida mostra "Cliente não atendeu" (v2.3.6), nunca os dois.
+                    // Disparados a partir do resultado AO VIVO desta própria tentativa (branch só
+                    // alcançado quando ok=false e LastOutboundWasCancelledLocally=false — ou seja,
+                    // nunca para Cancelada, nunca para Realizada, nunca para chamada recebida/
+                    // Perdida, e nunca antes de existir uma tentativa SIP válida, já que uma
+                    // exceção antes disso cai no catch de fora e nunca chega aqui). O sync de CDR
+                    // que roda minutos depois nunca reexecuta este código — só reconcilia o
+                    // Histórico — então não há risco de disparo duplicado pela sincronização.
                     if (resultado == TipoHistoricoLigacao.Recusada)
                         MostrarChamadaRecusadaToast(numeroFinal);
+                    else if (resultado == TipoHistoricoLigacao.NaoAtendida)
+                        MostrarChamadaNaoAtendidaToast(numeroFinal);
 
                     var erro = string.IsNullOrWhiteSpace(_sipService.LastCallError) ? "Issabel/SIP não completou a chamada." : _sipService.LastCallError;
                     RegistrarUiDiagnostico($"OUTBOUND_RESULT_UI resultado={resultado} status_sip={_sipService.LastOutboundFailureStatus} " +
@@ -2402,6 +2512,11 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
             catch (Exception ex)
             {
                 TratarErroSemTravamento(ex, "Não foi possível iniciar a chamada.");
+            }
+            finally
+            {
+                _ligacaoEmAndamento = false;
+                RegistrarUiDiagnostico($"OUTBOUND_ATTEMPT_FINALIZED numero={numeroDigitado}");
             }
         }
 
@@ -2639,6 +2754,31 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
             catch { }
         }
 
+        // Toast de "Cliente não atendeu" para chamadas REALIZADAS (nós ligamos) — v2.3.6.
+        // Chamado só quando o resultado final já foi classificado ao vivo como NaoAtendida E o
+        // operador não cancelou (ver o branch que chama este método em IniciarLigacaoAsync,
+        // alcançado apenas quando LastOutboundWasCancelledLocally=false) — nunca para Cancelada,
+        // Recusada, Realizada, chamada recebida ou Perdida.
+        private void MostrarChamadaNaoAtendidaToast(string numeroDiscado)
+        {
+            try
+            {
+                var semRota    = DialPlanService.RemoverPrefixoDeRota(DialPlanService.RemoverDuplicacaoSequencial(numeroDiscado ?? string.Empty));
+                var numDisplay = PhoneNumberNormalizer.NormalizeForDisplay(semRota);
+                var nomeContato = ContatoStorageService.ResolverNomePorNumero(numDisplay);
+                var nome = string.Equals(nomeContato, numDisplay, StringComparison.OrdinalIgnoreCase) ? string.Empty : nomeContato;
+
+                RegistrarUiDiagnostico($"OUTBOUND_NOT_ANSWERED_TOAST_SHOW numero={MascararNumero(numDisplay)}");
+
+                _outboundNotAnsweredToast?.Close();
+                var toast = new OutboundNotAnsweredToast(nome, numDisplay);
+                _outboundNotAnsweredToast = toast;
+                toast.Closed += (_, __) => { if (ReferenceEquals(_outboundNotAnsweredToast, toast)) _outboundNotAnsweredToast = null; };
+                toast.Show();
+            }
+            catch { }
+        }
+
         private void MostrarMissedCallPopup(Models.HistoricoLigacaoItem item)
         {
             try
@@ -2657,7 +2797,7 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
                     RestaurarJanelas();
                     MainTabs.SelectedIndex = 0;
                     AtualizarNavSelecionada();
-                    await IniciarLigacaoDoHistoricoAsync(numeroNorm);
+                    await IniciarLigacaoDoHistoricoAsync(numeroNorm, item);
                 };
 
                 popup.VerHistoricoSolicitado += () =>
@@ -2998,7 +3138,7 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
         private async void GridHistoricoShell_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
         {
             if (gridHistoricoShell != null && gridHistoricoShell.SelectedItem is HistoricoLigacaoItem item && !string.IsNullOrWhiteSpace(item.Numero))
-                await IniciarLigacaoDoHistoricoAsync(item.Numero);
+                await IniciarLigacaoDoHistoricoAsync(item.Numero, item);
         }
 
         private async void BtnLigar_Click(object sender, RoutedEventArgs e) => await IniciarLigacaoAsync(txtNumero.Text);
@@ -3309,9 +3449,9 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
         // criado ao vivo pelo SipService) — usado pela reconciliação SIP↔CDR em IssabelCdrService
         // como critério extra de desambiguação quando há múltiplas discagens recentes pro mesmo
         // número (ver item 5/9 da investigação v2.3.5).
-        private string RegistrarHistorico(string numero, TipoHistoricoLigacao tipo, string duracao, string origemSaida = "", string ramalOrigem = "")
+        private string RegistrarHistorico(string numero, TipoHistoricoLigacao tipo, string duracao,
+            string origemSaida = "", string ramalOrigem = "", bool canceladaPeloOperador = false)
         {
-            var itens = HistoricoStorageService.Carregar();
             var numeroTratado = DialPlanService.RemoverDuplicacaoSequencial(numero);
             var numLimpo = DialPlanService.RemoverPrefixoDeRota(numeroTratado);
             var numBrasil = PhoneNumberNormalizer.NormalizeBrazilPhone(numLimpo);
@@ -3327,10 +3467,20 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
                 Tipo = tipo,
                 Duracao = duracao,
                 OrigemSaida = origemSaida,
-                RamalOrigem = ramalOrigem ?? string.Empty
+                RamalOrigem = ramalOrigem ?? string.Empty,
+                CanceladaPeloOperador = canceladaPeloOperador
             };
-            itens.Insert(0, item);
-            HistoricoStorageService.Salvar(itens);
+            // v2.3.6 — grava via ExecutarAtomico (Carregar+Insert+Salvar numa única seção crítica,
+            // mesmo lock usado por HistoricoStorageService.MesclarCdr) para nunca perder este registro
+            // pra um sync de CDR concorrente (timer automático de poucos segundos) que estivesse no
+            // meio do seu próprio ciclo leitura→processamento→escrita bem nesse instante.
+            HistoricoStorageService.ExecutarAtomico(itens =>
+            {
+                itens.Insert(0, item);
+                return (itens, 0);
+            });
+            if (canceladaPeloOperador)
+                RegistrarUiDiagnostico($"OUTBOUND_LOCAL_CANCEL_HISTORY_CREATED stubId={item.Id} numero={numeroTratado} tipo={tipo}");
             HistoricoStorageService.LimparAntigas(ObterDiasRetencaoHistorico());
             AtualizarHistoricoShell();
             return item.Id;
@@ -3866,6 +4016,135 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
 
 
 
+        // v2.3.6 — Exclusivo do botão "Ligar" do Histórico. Quando o canal externo é conhecido com
+        // segurança, oferece "retornar/religar pelo mesmo canal" antes do seletor genérico. Nunca
+        // chamado por Discador/Contatos/Favoritos/Dashboard — esses continuam indo direto para
+        // AbrirSeletorSaidaAsync, sem qualquer alteração de comportamento.
+        //
+        // CanalEntrada (por onde uma chamada RECEBIDA entrou) e OrigemSaida (por onde uma chamada
+        // REALIZADA saiu) nunca se misturam — cada família de Tipo lê APENAS o campo que faz
+        // sentido pra ela (ver HistoricoLigacaoItem):
+        //   Recebida/Perdida              → CanalEntrada
+        //   Realizada/Recusada/NaoAtendida → OrigemSaida
+        // Qualquer outro Tipo (CaixaPostal, NaoAtendidaNesseRamal) ou campo vazio/não reconhecido
+        // (ex.: "Ramal interno", "Queue", "Saída não identificada") nunca abre este diálogo — regra
+        // explícita: não inventar, não presumir, não usar o último canal — cai direto pro seletor.
+        private async Task<SaidaChamada?> ResolverSaidaHistoricoAsync(string numeroDigitado, HistoricoLigacaoItem? item)
+        {
+            // v2.3.6 — REGRA (investigação do botão Ligar sem resposta): qualquer falha inesperada
+            // aqui dentro NUNCA pode resultar em "nada acontece" — cai para o seletor normal, com a
+            // exceção completa (stack trace) registrada. Cada estágio pedido na investigação tem
+            // seu próprio log: item recebido → número extraído → CanalEntrada/OrigemSaida →
+            // tentativa de mapear SaidaChamada → abertura de RetornarChamadaWindow → abertura do
+            // seletor → início da chamada (log desse último estágio já existe em IniciarLigacaoAsync).
+            var swResolucao = Stopwatch.StartNew(); // tempo até o diálogo ficar visível (não inclui a espera pelo clique do operador)
+            try
+            {
+                string canalBruto;
+                bool familiaRecebida;
+                switch (item?.Tipo)
+                {
+                    case TipoHistoricoLigacao.Recebida:
+                    case TipoHistoricoLigacao.Perdida:
+                        canalBruto = item.CanalEntrada;
+                        familiaRecebida = true;
+                        break;
+                    case TipoHistoricoLigacao.Realizada:
+                    case TipoHistoricoLigacao.Recusada:
+                    case TipoHistoricoLigacao.NaoAtendida:
+                    case TipoHistoricoLigacao.Cancelada:
+                        canalBruto = item.OrigemSaida;
+                        familiaRecebida = false;
+                        break;
+                    default:
+                        canalBruto = string.Empty;
+                        familiaRecebida = false;
+                        break;
+                }
+
+                // 0800 só é tratável como canal de RETORNO na família "recebida" (CanalEntrada) —
+                // uma chamada de SAÍDA nunca deveria legitimamente ter OrigemSaida="0800" (não
+                // existe rota de saída por 0800), mas se acontecer por algum motivo inesperado,
+                // NÃO aplica a regra especial (que só faz sentido pra "o cliente ligou pelo 0800").
+                var eh0800 = familiaRecebida && string.Equals(canalBruto, "0800", StringComparison.OrdinalIgnoreCase);
+                var canalReconhecido = !string.IsNullOrWhiteSpace(canalBruto) &&
+                    (eh0800 || MapearCanalParaSaidaDisponivel(canalBruto) != null);
+
+                RegistrarUiDiagnostico(
+                    $"RETORNO_CANAL_ELEGIVEL tipo={item?.Tipo} familiaRecebida={familiaRecebida} " +
+                    $"canal=\"{canalBruto}\" eh0800={eh0800} reconhecido={canalReconhecido} numero={numeroDigitado}");
+
+                if (item == null || !canalReconhecido)
+                    return await AbrirSeletorSaidaAsync(numeroDigitado);
+
+                // Regra explícita: retorno padrão de uma chamada recebida pelo 0800 é a Operadora —
+                // nunca discado pelo 0800 em si (não existe rota de saída para esse canal).
+                var canalAcao = eh0800 ? "Operadora" : canalBruto;
+                var saidaAcao = eh0800 ? SaidaChamada.Operadora : MapearCanalParaSaidaDisponivel(canalBruto);
+                RegistrarUiDiagnostico(
+                    $"RETORNO_CANAL_MAPEAMENTO canalExibido=\"{canalBruto}\" canalAcao=\"{canalAcao}\" " +
+                    $"saidaAcao={(saidaAcao.HasValue ? saidaAcao.Value.ToString() : "null")}");
+
+                if (saidaAcao == null)
+                {
+                    // Defensivo — canalReconhecido já deveria garantir isto, mas nunca deixa o
+                    // clique sem ação nenhuma se algo inesperado passar pela checagem acima.
+                    RegistrarUiDiagnostico($"RETORNO_CANAL_SEM_ACAO_INESPERADO canal=\"{canalBruto}\"");
+                    return await AbrirSeletorSaidaAsync(numeroDigitado);
+                }
+
+                RetornarChamadaWindow dlg;
+                try
+                {
+                    dlg = new RetornarChamadaWindow(item.NomeExibido, item.NumeroLimpoVisual, item.Tipo, canalBruto, canalAcao)
+                    {
+                        WindowStartupLocation = WindowStartupLocation.CenterScreen,
+                        Topmost = true
+                    };
+                    try { if (IsVisible) dlg.Owner = this; } catch { }
+                }
+                catch (Exception exDlg)
+                {
+                    RegistrarUiDiagnostico($"RETORNO_CANAL_DIALOG_CONSTRUCAO_FALHOU {exDlg}");
+                    return await AbrirSeletorSaidaAsync(numeroDigitado);
+                }
+
+                RegistrarUiDiagnostico(
+                    $"RETORNO_CANAL_DIALOG_ABRINDO canal=\"{canalBruto}\" numero={numeroDigitado} " +
+                    $"resolucao_ms={swResolucao.ElapsedMilliseconds}");
+                dlg.ShowDialog();
+                RegistrarUiDiagnostico($"RETORNO_CANAL_DIALOG_RESULTADO resultado={dlg.Resultado} canal=\"{canalBruto}\" numero={numeroDigitado}");
+
+                switch (dlg.Resultado)
+                {
+                    case RetornarChamadaResultado.UsarMesmoCanal:
+                        return saidaAcao;
+                    case RetornarChamadaResultado.EscolherOutro:
+                        RegistrarUiDiagnostico($"RETORNO_CANAL_ABRINDO_SELETOR numero={numeroDigitado}");
+                        return await AbrirSeletorSaidaAsync(numeroDigitado);
+                    default:
+                        return null; // cancelado — não abre seletor nem liga
+                }
+            }
+            catch (Exception ex)
+            {
+                RegistrarUiDiagnostico($"RETORNO_CANAL_EXCEPTION {ex}");
+                return await AbrirSeletorSaidaAsync(numeroDigitado);
+            }
+        }
+
+        // Vínculo canal → rota de saída, por identificador estável (SaidaChamada), não por texto de
+        // interface. Retorna null quando o canal não tem rota de saída própria (ex.: "0800" é DID
+        // só de entrada — tratado separadamente em ResolverSaidaHistoricoAsync, nunca aqui) ou
+        // quando o canal não é reconhecido (fluxo interno, vazio, etc.).
+        private static SaidaChamada? MapearCanalParaSaidaDisponivel(string canal) => canal switch
+        {
+            "Operadora"     => SaidaChamada.Operadora,
+            "WhatsApp TIM"  => SaidaChamada.WhatsAppTim,
+            "WhatsApp Vivo" => SaidaChamada.WhatsAppVivo,
+            _               => null
+        };
+
         private Task<SaidaChamada?> AbrirSeletorSaidaAsync(string numero)
         {
             try
@@ -3952,6 +4231,15 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
 
         private void TratarErroSemTravamento(Exception ex, string mensagemPadrao)
         {
+            // v2.3.6 — nunca mais totalmente silencioso: investigação do botão "Ligar" do
+            // Histórico às vezes não responder achou estes dois retornos antecipados como suspeitos
+            // — supersistem o MessageBox por bom motivo (ruído conhecido: .NET às vezes lança
+            // Win32Exception código 0 / "operação concluída com êxito" para uma chamada Win32 que
+            // na verdade teve SUCESSO), mas qualquer exceção que caia aqui, mesmo suprimida da UI,
+            // agora sempre vai pro log com stack trace completo — antes desaparecia sem deixar
+            // nenhum rastro, tornando impossível diferenciar "ruído esperado" de "falha real".
+            RegistrarUiDiagnostico($"TRATAR_ERRO_SEM_TRAVAMENTO tipo={ex?.GetType().FullName} msg={ex?.Message} stacktrace={ex?.StackTrace}");
+
             if (ex is System.ComponentModel.Win32Exception w32 && w32.NativeErrorCode == 0)
                 return;
 

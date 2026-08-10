@@ -1,7 +1,7 @@
 {
-    "versao":  "2.3.5",
-    "zip":  "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.3.5/WavenVoIP.zip",
-    "sha256":  "2e186044a82844217fe96c33f5ec87c3eb8a8dd72c95b3e448aeabd36f33eb23",
-    "data":  "2026-08-08",
-    "notas":  "WavenVoIP 2.3.5 - Classificação correta de chamadas realizadas (Recusada / Não atendida)\n[NEW] Nova classificação de chamadas de saída: Recusada e Não atendida\n[NEW] Popup temporário quando uma chamada realizada é recusada pelo cliente\n[FIX] Chamadas de saída que apareciam como \"Perdida\" ou com o próprio número da empresa no Histórico — corrigido\n[FIX] Agrupamento de CDR: discagens manuais independentes para o mesmo número não são mais fundidas em um só registro\n[FIX] Cada linkedid de uma discagem manual passa a ser preservado individualmente\n[FIX] Chamadas que desapareciam do Histórico após novas tentativas para o mesmo número\n[FIX] Registros órfãos causados pela troca do UniqueId principal entre sincronizações\n[FIX] Duração de toque: uma chamada não herda mais a duração de outra tentativa\n[FIX] Deduplicação indevida de chamadas Recusadas/Não atendidas próximas no tempo\n[SAFE] Preservada integralmente a lógica de filas, ring-groups, chamadas recebidas e abandono de fila\n[SAFE] Nenhuma alteração em SIP de registro, áudio, RTP, codecs, Issabel, Waven API, contatos, favoritos, WhatsApp ou Auto Start"
+    "versao":  "2.3.6",
+    "zip":  "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.3.6/WavenVoIP.zip",
+    "sha256":  "19fb243f470773a7cb1bead325f019c80209c43acd2b560824c4396cb892a920",
+    "data":  "2026-08-10",
+    "notas":  "WavenVoIP 2.3.6 - Correcao critica de cancelamento antecipado + Canal externo real no Historico\n[FIX-CRITICO] Cancelar uma chamada de saida ANTES do cliente atender podia deixar o telefone do cliente tocando mesmo com o Waven ja mostrando \"Cancelada\" - corrigido com prova real de entrega do CANCEL ao Asterisk e reforco automatico de reenvio\n[FIX] Corrigida corrida entre clicar Ligar e Desligar quase juntos: o INVITE nunca mais sai depois que o cancelamento ja foi pedido\n[SAFE] Cancelar durante o toque e chamada atendida continuam funcionando exatamente como antes\n[NEW] Historico: canal externo real (Operadora/0800/WhatsApp TIM/WhatsApp Vivo) exibido mesmo quando a ligacao passa por URA/fila\n[NEW] Historico: botao Ligar oferece retornar pelo mesmo canal da chamada recebida/perdida\n[SAFE] Nenhuma alteracao em audio, RTP, codecs, Issabel, Waven API, contatos, favoritos, WhatsApp ou Auto Start"
 }

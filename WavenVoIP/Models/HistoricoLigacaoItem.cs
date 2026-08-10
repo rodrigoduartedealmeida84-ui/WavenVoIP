@@ -19,7 +19,12 @@ namespace WavenVoIP.Models
         // cliente rejeitou/estava ocupado (CDR disposition BUSY); NaoAtendida = tocou até
         // acabar sem resposta (NO ANSWER/FAILED/CONGESTION).
         Recusada = 5,
-        NaoAtendida = 6
+        NaoAtendida = 6,
+        // v2.3.6 — chamada REALIZADA que o próprio OPERADOR encerrou/desistiu pelo Waven antes do
+        // cliente atender (ex.: discou errado e percebeu ainda tocando). Nunca deve ser confundida
+        // com Recusada (ação do cliente) nem NaoAtendida (timeout do lado do cliente) — a fonte de
+        // verdade é local (SipService.LastOutboundWasCancelledLocally), nunca inferida pelo CDR.
+        Cancelada = 7
     }
 
     public class HistoricoLigacaoItem
@@ -40,6 +45,25 @@ namespace WavenVoIP.Models
         public string GravacaoArquivo { get; set; } = string.Empty;
         public string GravacaoUrl { get; set; } = string.Empty;
         public bool FonteCdr { get; set; } = false;
+
+        // v2.3.6 — canal EXTERNO real de entrada (Operadora/0800/WhatsApp TIM/WhatsApp Vivo),
+        // independente do fluxo interno (URA/fila) percorrido depois. Diferente de OrigemSaida,
+        // que pode ficar "Queue" quando a ligação passa por fila/URA antes de chegar num agente
+        // — nesse caso OrigemSaidaVisual ainda mostra "URA"/"Abandonada na fila" (comportamento
+        // preservado), mas CanalEntrada guarda o canal real para uso pelo botão "Retornar chamada".
+        // Vazio = não foi possível identificar com confiança (registros antigos, ou nenhum DID/
+        // gravação reconhecido) — nesse caso o retorno usa o seletor normal, sem perguntar nada.
+        public string CanalEntrada { get; set; } = string.Empty;
+
+        // v2.3.6 — marcador PERSISTENTE (sobrevive a sync/reprocessar/restart, diferente de
+        // SipService.LastOutboundWasCancelledLocally, que só existe em memória durante a tentativa).
+        // true exclusivamente quando o PRÓPRIO OPERADOR clicou Desligar no Waven enquanto a chamada
+        // de saída ainda não tinha sido atendida (nunca setado se a chamada já estava conectada — ver
+        // IniciarLigacaoAsync). Serve de prova irrefutável de que Tipo=Cancelada é um resultado LOCAL
+        // confiável — nenhum disposition genérico de CDR chegado depois (mesmo ANSWERED/billsec>0,
+        // possível no tronco WAVOIP antes do destino real atender) pode reclassificar esse registro.
+        // Campo novo opcional — historico.json antigo sem ele desserializa como false, sem quebrar.
+        public bool CanceladaPeloOperador { get; set; } = false;
 
         // ── Computed display ──────────────────────────────────────────────────────
 
@@ -139,6 +163,20 @@ namespace WavenVoIP.Models
             {
                 // When both ramal fields confirm an internal call, override any stored channel.
                 if (EhChamadaRamalInterno()) return "Ramal interno";
+
+                // v2.3.6 — CanalEntrada é o canal externo real (Operadora/0800/WhatsApp TIM/Vivo),
+                // resolvido mesmo quando a ligação passou por URA/fila antes de chegar num agente.
+                // Tem prioridade sobre o rótulo de fluxo interno ("URA") — a URA é só uma etapa,
+                // não o canal por onde a ligação realmente entrou. Exceção: quando o desfecho é
+                // abandono na fila (Perdida/NaoAtendidaNesseRamal com OrigemSaida=="Queue"), mantém
+                // "Abandonada na fila"/"Desligou antes da fila" — esse rótulo já foi validado e
+                // corrige uma atribuição falsa de operador (ver v2.2.1).
+                var ehAbandonoNaFila =
+                    (Tipo == TipoHistoricoLigacao.Perdida || Tipo == TipoHistoricoLigacao.NaoAtendidaNesseRamal) &&
+                    string.Equals(OrigemSaida, "Queue", StringComparison.OrdinalIgnoreCase);
+                if (!ehAbandonoNaFila && !string.IsNullOrWhiteSpace(CanalEntrada))
+                    return CanalEntrada;
+
                 var canal = CanalIdentificacaoService.NormalizarCanal(OrigemSaida, Tipo, Numero);
                 if (canal == "Saída não identificada" && EhChamadaRealizadaOuFalhaDeSaida())
                     return DetectarSaidaPeloPrefixo(Numero);
@@ -168,7 +206,8 @@ namespace WavenVoIP.Models
         private bool EhChamadaRealizadaOuFalhaDeSaida() =>
             Tipo == TipoHistoricoLigacao.Realizada ||
             Tipo == TipoHistoricoLigacao.Recusada ||
-            Tipo == TipoHistoricoLigacao.NaoAtendida;
+            Tipo == TipoHistoricoLigacao.NaoAtendida ||
+            Tipo == TipoHistoricoLigacao.Cancelada;
 
         [JsonIgnore]
         public Brush CorCanal => CanalIdentificacaoService.BrushCanal(OrigemSaidaVisual);
@@ -182,6 +221,7 @@ namespace WavenVoIP.Models
             TipoHistoricoLigacao.CaixaPostal => "✉",
             TipoHistoricoLigacao.Recusada => "⊘",
             TipoHistoricoLigacao.NaoAtendida => "↛",
+            TipoHistoricoLigacao.Cancelada => "⦸",
             _ => "•"
         };
 
@@ -197,7 +237,19 @@ namespace WavenVoIP.Models
             TipoHistoricoLigacao.CaixaPostal => "Caixa postal",
             TipoHistoricoLigacao.Recusada => "Recusada",
             TipoHistoricoLigacao.NaoAtendida => "Não atendida",
+            // v2.3.6 — badge da lista precisa ficar curto, igual aos demais tipos (Recebida/Perdida/
+            // Realizada/Recusada/Não atendida). O texto completo "Cancelada pelo operador" fica em
+            // TipoTextoDetalhado, usado em tooltip/detalhes.
+            TipoHistoricoLigacao.Cancelada => "Cancelada",
             _ => Tipo.ToString()
+        };
+
+        // v2.3.6 — versão longa, só para tooltip/"Ver detalhes da chamada" — nunca no badge da lista.
+        [JsonIgnore]
+        public string TipoTextoDetalhado => Tipo switch
+        {
+            TipoHistoricoLigacao.Cancelada => "Cancelada pelo operador",
+            _ => TipoTexto
         };
 
         [JsonIgnore]
@@ -210,6 +262,9 @@ namespace WavenVoIP.Models
             TipoHistoricoLigacao.CaixaPostal => new SolidColorBrush(Color.FromRgb(161, 98, 7)),
             TipoHistoricoLigacao.Recusada => new SolidColorBrush(Color.FromRgb(185, 28, 28)),
             TipoHistoricoLigacao.NaoAtendida => new SolidColorBrush(Color.FromRgb(217, 119, 6)),
+            // v2.3.6 — cinza-azulado neutro, de propósito distinto do vermelho de Perdida/Recusada
+            // e do amarelo de NaoAtendida: Cancelada não é uma falha do cliente nem um timeout.
+            TipoHistoricoLigacao.Cancelada => new SolidColorBrush(Color.FromRgb(100, 116, 139)),
             _ => Brushes.Gray
         };
 
@@ -223,6 +278,7 @@ namespace WavenVoIP.Models
             TipoHistoricoLigacao.CaixaPostal => new SolidColorBrush(Color.FromRgb(254, 249, 195)),
             TipoHistoricoLigacao.Recusada => new SolidColorBrush(Color.FromRgb(254, 226, 226)),
             TipoHistoricoLigacao.NaoAtendida => new SolidColorBrush(Color.FromRgb(255, 251, 235)),
+            TipoHistoricoLigacao.Cancelada => new SolidColorBrush(Color.FromRgb(241, 245, 249)),
             _ => new SolidColorBrush(Color.FromRgb(241, 245, 249))
         };
 

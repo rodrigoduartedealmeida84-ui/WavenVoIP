@@ -4,15 +4,31 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "2.3.5";
+        public const string Versao  = "2.3.6";
         public const string NomeApp = "WavenVoIP";
 
-        public static readonly DateTime DataBuild = new DateTime(2026, 8, 8);
+        public static readonly DateTime DataBuild = new DateTime(2026, 8, 10);
 
         public static string VersaoCompleta => $"{NomeApp} v{Versao}";
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v2.3.6 — Correcao critica de cancelamento antecipado + Canal externo real no Historico (10/08/2026)\n" +
+            "• [FIX-CRITICO] Cancelar uma chamada de saida ANTES do cliente atender podia deixar o telefone do cliente tocando mesmo com o Waven ja mostrando \"Cancelada\" — causa raiz confirmada com log real de producao: SIPUserAgent.Cancel() (SIPSorcery) dispara o retorno de \"cancelado\" IMEDIATAMENTE e LOCALMENTE, sem esperar nenhuma confirmacao de rede do Asterisk. O Waven ja desmontava a chamada (midia, estado, UserAgent livre) achando que o CANCEL tinha sido entregue, sem prova nenhuma disso\n" +
+            "• [FIX] Ligar()/Desligar() agora usam um lock dedicado pra fechar a corrida entre clicar Ligar e clicar Desligar quase juntos: se o cancelamento chegar ANTES do INVITE ser efetivamente enviado, o INVITE nunca sai (OUTBOUND_INVITE_SUPPRESSED_BY_CANCEL) — nunca mais uma tentativa cancelada localmente continua tocando no cliente\n" +
+            "• [NEW] Prova real de entrega do CANCEL: handlers penduram nos eventos da transacao SIP de verdade (nao so no retorno local) e logam a resposta que o Asterisk efetivamente mandou (OUTBOUND_SIP_CANCEL_SENT/RESPONSE, OUTBOUND_INVITE_TERMINATED)\n" +
+            "• [NEW] Reforco automatico: se nenhuma confirmacao de rede chegar em ~600ms, o CANCEL e reenviado uma vez sozinho, em segundo plano, sem travar a interface\n" +
+            "• [SAFE] Cancelar DURANTE o toque (Ringing) continua funcionando exatamente como antes; chamada atendida continua encerrando com BYE normal — nada disso foi alterado\n" +
+            "• [PERF] Testado sob estresse local (180+ ciclos Ligar/Cancelar/Desligar, incluindo corrida real entre threads): sem vazamento de memoria, sem crescimento de threads/handles, sem excecoes\n" +
+            "• [FIX] Causa raiz identificada com CDR real de producao: quando a ligacao passa por URA/fila antes de chegar num agente, o registro CDR \"principal\" escolhido para classificacao e a perna Local/<ramal>@from-queue do agente — sem nenhuma informacao de tronco. DedurzirTronco via o Channel Local/ e devolvia \"Queue\" (nao vazio), bloqueando a deteccao do canal real pelo nome do arquivo de gravacao (guardada por checagem de origemSaida vazia) — o Historico so mostrava \"URA\", escondendo o canal externo verdadeiro\n" +
+            "• [NEW] HistoricoLigacaoItem.CanalEntrada: canal EXTERNO real (Operadora/0800/WhatsApp TIM/WhatsApp Vivo), resolvido em paralelo a OrigemSaida — nao quebra os rotulos de fluxo interno ja validados (\"Abandonada na fila\"/\"Desligou antes da fila\")\n" +
+            "• [NEW] IssabelCdrService.IdentificarCanalExternoDoGrupo: quando o nome da gravacao nao resolve o canal, busca em QUALQUER linha do grupo CDR (nao so a principal) por um Channel/DstChannel que identifique o tronco de entrada\n" +
+            "• [UI] Historico: quando o canal externo e conhecido, o badge mostra o canal real (ex.: \"0800\", \"Operadora\") em vez de \"URA\" — exceto abandono de fila, que continua mostrando \"Abandonada na fila\"/\"Desligou antes da fila\"\n" +
+            "• [NEW] Historico > botao Ligar (exclusivo desta tela — Contatos/Favoritos/Discador inalterados): em chamada Recebida/Perdida com canal externo conhecido, pergunta \"Deseja retornar pelo mesmo canal?\" antes de discar, com opcao de escolher outro canal (reutiliza o seletor existente)\n" +
+            "• [NEW] Se o canal original nao tiver rota de saida equivalente (ex.: 0800 e canal so de ENTRADA — nao existe prefixo de discagem para ele), mostra aviso e abre o seletor normal automaticamente\n" +
+            "• [SAFE] Registros antigos sem CanalEntrada continuam abrindo o seletor normal, sem perguntar nada\n" +
+            "• [SAFE] Nenhuma alteracao em Contatos, Favoritos, Discador, Dashboard, audio, RTP, filas, AMI, WhatsApp, Auto Start ou nas correcoes da v2.3.5 (Recusada/Nao atendida/agrupamento de CDR)\n" +
+            "\n" +
             "v2.3.5 — Correcao de chamadas Realizadas nunca viram Perdida + status Recusada/Nao atendida (08/08/2026)\n" +
             "• [FIX] Chamada REALIZADA (operador ligou) que nao completa nunca mais aparece como \"Perdida\" no Historico — Perdida volta a ser exclusivo de chamadas RECEBIDAS sem atendimento\n" +
             "• [FIX] Causa raiz identificada com dados reais de producao: o tronco de saida (Operadora/WhatsApp TIM/Vivo) substitui o Caller-ID pelo proprio DID da rota (pratica padrao de telefonia) — a deteccao de direcao (ClassificarChamada) so olhava cdr.Src, e nao detectava o ramal quando isso acontecia\n" +
