@@ -1,7 +1,7 @@
 {
-    "versao":  "2.3.7",
-    "zip":  "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.3.7/WavenVoIP.zip",
-    "sha256":  "c130e687da5afc6ab3e0a9bd0f9c3aa11b41dff1c651539f669580648ac73bc5",
-    "data":  "2026-08-10",
-    "notas":  "WavenVoIP v2.3.7 - melhorias de desempenho e estabilidade, reducao do consumo de CPU, correcoes no controle de chamadas canceladas e melhorias no Historico e notificacoes de chamadas."
+    "versao":  "2.4.0",
+    "zip":  "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.4.0/WavenVoIP.zip",
+    "sha256":  "b265b14f981bb7ccfac8d36ed8c3fb08c98d1af2788fc9e035fea4407ffcf7c5",
+    "data":  "2026-08-12",
+    "notas":  "WavenVoIP v2.4.0 - normalizacao automatica do 9o digito em celulares brasileiros (Discador, Historico, Contatos, Favoritos, WhatsApp), melhor retorno de chamadas pela Operadora, e melhorias de desempenho/estabilidade (interface nao trava mais durante criacao de midia de audio, sincronizacoes AMI/Google protegidas contra sobreposicao, otimizacoes no Historico/CDR)."
 }
