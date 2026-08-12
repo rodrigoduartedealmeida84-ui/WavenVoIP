@@ -40,24 +40,15 @@ namespace WavenVoIP.Services
             return digits;
         }
 
-        // Remove country code 55 before dialing. Handles route prefix (1/2/3) + 55.
-        public static string NormalizeForDial(string numero)
-        {
-            var digits = SomenteDigitos(numero);
-            if (digits.Length == 0) return numero;
-
-            // Route prefix + 55: remove 55, preserve route digit
-            if (digits.Length >= 13 && (digits[0] == '1' || digits[0] == '2' || digits[0] == '3'))
-            {
-                var semRota = digits.Substring(1);
-                var normalizado = RemoverPrefixo55SeBrasileiro(semRota);
-                if (normalizado.Length != semRota.Length)
-                    return digits[0] + normalizado;
-                return digits;
-            }
-
-            return RemoverPrefixo55SeBrasileiro(digits);
-        }
+        // Number as it will actually be dialed: mesma normalização de NormalizeBrazilPhone
+        // (remove 55, adiciona 9º dígito em celular antigo). Antes desta correção (v2.4.0),
+        // NormalizeForDial só removia o 55 e NUNCA adicionava o 9º dígito — enquanto
+        // NormalizeBrazilPhone (usado para identificação/match de contatos) já fazia isso.
+        // Essa divergência era a causa raiz de números de celular sem o 9 chegarem intactos
+        // até a discagem (Operadora não completa a ligação) mesmo com o contato/histórico já
+        // reconhecendo o número corretamente. Ver PhoneNumberNormalizer_v240_tests no
+        // harness de testes para os casos cobertos.
+        public static string NormalizeForDial(string numero) => NormalizeBrazilPhone(numero);
 
         // Strips country code 55 for display; returns plain digits.
         public static string NormalizeForDisplay(string numero)

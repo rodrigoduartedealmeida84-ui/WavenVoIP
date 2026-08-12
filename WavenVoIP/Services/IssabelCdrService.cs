@@ -1003,6 +1003,27 @@ namespace WavenVoIP.Services
             => PhoneNumberNormalizer.NormalizeBrazilPhone(
                 DialPlanService.RemoverPrefixoDeRota(numero ?? string.Empty));
 
+        // v2.4.0 — investigação de desempenho: SuprimirPerdidasAtendidasPorOutroRamal e
+        // DeduplicarPorNumeroETempo comparam cada item do histórico contra todos os outros
+        // (O(n²) por natureza — precisam comparar par a par por número+janela de tempo, isso não
+        // muda aqui), mas recalculavam a normalização do número (várias alocações de string por
+        // chamada) DENTRO do loop interno, repetindo o mesmo cálculo para o mesmo item dezenas/
+        // centenas de vezes por ciclo. Com histórico perto do teto de 5000 itens e esses métodos
+        // rodando a cada 2-3s (ver ReprocessarHistoricoCdrLocalAsync), isso significava milhões de
+        // recomputações redundantes por ciclo. Pré-calcular uma vez por item (O(n)) e reaproveitar
+        // via dicionário não muda NENHUMA regra de negócio/comparação/janela — só elimina trabalho
+        // repetido.
+        private static Dictionary<string, string> PrecalcularNumerosAgrupamento(List<HistoricoLigacaoItem> itens)
+        {
+            var mapa = new Dictionary<string, string>(itens.Count, StringComparer.OrdinalIgnoreCase);
+            foreach (var item in itens)
+            {
+                if (!string.IsNullOrEmpty(item.Id) && !mapa.ContainsKey(item.Id))
+                    mapa[item.Id] = NormalizarNumeroParaAgrupamento(item.Numero);
+            }
+            return mapa;
+        }
+
         private static string MascararNumeroLog(string numero)
         {
             var n = new string((numero ?? string.Empty).Where(char.IsDigit).ToArray());
@@ -1071,6 +1092,7 @@ namespace WavenVoIP.Services
             if (itens.Count < 2) return itens;
 
             var removidos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var numeros = PrecalcularNumerosAgrupamento(itens);
 
             // Passo 1: Perdida/NaoAtendida cuja mesma chamada foi atendida em outro lugar.
             var atendidas = itens.Where(i =>
@@ -1078,7 +1100,7 @@ namespace WavenVoIP.Services
 
             foreach (var atendida in atendidas)
             {
-                var numAtendida = NormalizarNumeroParaAgrupamento(atendida.Numero);
+                var numAtendida = numeros[atendida.Id];
                 if (numAtendida.Length < 7) continue;
 
                 foreach (var outro in itens)
@@ -1100,7 +1122,7 @@ namespace WavenVoIP.Services
                          string.Equals(outro.OrigemSaida, "Queue", StringComparison.OrdinalIgnoreCase));
                     if (!elegivelParaSupressao) continue;
 
-                    var numOutro = NormalizarNumeroParaAgrupamento(outro.Numero);
+                    var numOutro = numeros[outro.Id];
                     if (!string.Equals(numAtendida, numOutro, StringComparison.OrdinalIgnoreCase)) continue;
 
                     var diffSec = Math.Abs((atendida.DataHora - outro.DataHora).TotalSeconds);
@@ -1125,14 +1147,14 @@ namespace WavenVoIP.Services
             {
                 var a = restantesPerdidas[i];
                 if (removidos.Contains(a.Id)) continue;
-                var numA = NormalizarNumeroParaAgrupamento(a.Numero);
+                var numA = numeros[a.Id];
                 if (numA.Length < 7) continue;
 
                 for (int j = i + 1; j < restantesPerdidas.Count; j++)
                 {
                     var b = restantesPerdidas[j];
                     if (removidos.Contains(b.Id)) continue;
-                    var numB = NormalizarNumeroParaAgrupamento(b.Numero);
+                    var numB = numeros[b.Id];
                     if (!string.Equals(numA, numB, StringComparison.OrdinalIgnoreCase)) continue;
 
                     var diffSec = Math.Abs((a.DataHora - b.DataHora).TotalSeconds);
@@ -1162,6 +1184,10 @@ namespace WavenVoIP.Services
             // Sort CDR entries first so they win the "keep first" election
             var ordenados = itens.OrderByDescending(i => i.FonteCdr).ThenByDescending(i => i.DataHora).ToList();
             var removidos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            // v2.4.0 — mesma normalização de NormalizarNumeroParaAgrupamento (remove prefixo de
+            // rota + normaliza 9º dígito/55), pré-calculada uma vez por item — ver comentário em
+            // PrecalcularNumerosAgrupamento.
+            var numeros = PrecalcularNumerosAgrupamento(ordenados);
 
             for (int i = 0; i < ordenados.Count; i++)
             {
@@ -1173,7 +1199,7 @@ namespace WavenVoIP.Services
                 // "66984671226") — sem remover o prefixo dos dois lados antes de comparar, esse par
                 // nunca era reconhecido como a MESMA chamada (mesmo bug de raiz encontrado em
                 // NormalizarNumeroParaAgrupamento, que protege Cancelada/Recusada/NaoAtendida).
-                var numA = PhoneNumberNormalizer.NormalizeBrazilPhone(DialPlanService.RemoverPrefixoDeRota(a.Numero ?? string.Empty));
+                var numA = numeros[a.Id];
                 if (numA.Length < 8) continue;
 
                 for (int j = i + 1; j < ordenados.Count; j++)
@@ -1212,7 +1238,7 @@ namespace WavenVoIP.Services
                     var diffSec = Math.Abs((a.DataHora - b.DataHora).TotalSeconds);
                     if (diffSec > 120) continue;
 
-                    var numB = PhoneNumberNormalizer.NormalizeBrazilPhone(DialPlanService.RemoverPrefixoDeRota(b.Numero ?? string.Empty));
+                    var numB = numeros[b.Id];
                     if (!string.Equals(numA, numB, StringComparison.OrdinalIgnoreCase)) continue;
 
                     if (string.IsNullOrWhiteSpace(a.GravacaoUrl) && !string.IsNullOrWhiteSpace(b.GravacaoUrl))

@@ -64,6 +64,16 @@ namespace WavenVoIP
             // Remove o prefixo salvo no histórico antes de aplicar a saída escolhida,
             // evitando duplicar: 266984671226 -> 66984671226 -> 2 + 66984671226.
             numeroLimpo = RemoverPrefixoDeRota(numeroLimpo);
+
+            // v2.4.0 — normalização do 9º dígito acontece AQUI, depois de remover o prefixo de
+            // rota e ANTES de aplicar o novo prefixo. Este é o ponto central por onde passam
+            // Discador, Histórico, Contatos, Favoritos e retorno de chamada perdida antes de
+            // discar — garante que celular antigo (DDD+8 dígitos) sempre complete a ligação
+            // pela Operadora/WhatsApp com o 9º dígito, sem alterar fixo nem duplicar 9 em
+            // número que já o tem (Services.PhoneNumberNormalizer.NormalizeBrazilPhone é
+            // idempotente).
+            numeroLimpo = Services.PhoneNumberNormalizer.NormalizeBrazilPhone(numeroLimpo);
+
             return ((int)saida).ToString() + numeroLimpo;
         }
 

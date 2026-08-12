@@ -871,15 +871,31 @@ namespace WavenVoIP.Services
                         Dispatch(() => existing.Nome = nome);
                     return existing;
                 }
+            }
 
-                // Resolve name from contacts
-                var resolvedName = nome;
-                if (string.IsNullOrWhiteSpace(resolvedName))
+            // v2.4.0 — investigação de desempenho: a resolução de nome (ResolverNomePorNumero pode
+            // ler contatos.json do disco em cache-miss, a cada ~300s) rodava DENTRO do lock acima,
+            // serializando o processamento de TODOS os eventos AMI atrás dessa leitura sempre que
+            // um ramal novo aparecia no meio de uma rajada (ex.: reconexão, CoreShowChannels
+            // listando todos os canais de uma vez). Agora a resolução roda FORA do lock — o lock
+            // volta a proteger só a leitura/inserção do dicionário em memória.
+            var resolvedName = nome;
+            if (string.IsNullOrWhiteSpace(resolvedName))
+            {
+                try { resolvedName = ContatoStorageService.ResolverNomePorNumero(ramal); }
+                catch { }
+                if (string.Equals(resolvedName, ramal, StringComparison.OrdinalIgnoreCase))
+                    resolvedName = ramal;
+            }
+
+            lock (_ramalState)
+            {
+                // outra thread pode ter inserido este ramal enquanto o nome era resolvido acima.
+                if (_ramalState.TryGetValue(ramal, out var existing))
                 {
-                    try { resolvedName = ContatoStorageService.ResolverNomePorNumero(ramal); }
-                    catch { }
-                    if (string.Equals(resolvedName, ramal, StringComparison.OrdinalIgnoreCase))
-                        resolvedName = ramal;
+                    if (!string.IsNullOrWhiteSpace(nome) && string.IsNullOrWhiteSpace(existing.Nome))
+                        Dispatch(() => existing.Nome = nome);
+                    return existing;
                 }
 
                 var item = new RamalStatusItem { Ramal = ramal, Nome = resolvedName };

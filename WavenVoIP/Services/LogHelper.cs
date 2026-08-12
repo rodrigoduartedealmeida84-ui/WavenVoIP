@@ -72,6 +72,12 @@ namespace WavenVoIP.Services
 
         internal static string LogDir => _logDir;
 
+        // v2.4.0 — diagnóstico de UI freeze: última linha de log gravada (canal:caller), usado
+        // apenas como aproximação barata de "última operação" quando o watchdog de UI detecta
+        // atraso — todo LogHelper.Info/Sip/Ami/Cdr/etc. já passa [CallerMemberName], então isso
+        // não exige nenhum novo ponto de instrumentação espalhado pelo app.
+        internal static string UltimaOperacao { get; private set; } = "(nenhuma)";
+
         /// Espera a fila de escrita esvaziar (usado no encerramento do app, para nao perder as ultimas linhas).
         internal static void Flush(TimeSpan timeout)
         {
@@ -132,6 +138,7 @@ namespace WavenVoIP.Services
             if (!IsEnabled && level != LogLevel.ERROR) return;
 
             var ts = DateTime.Now;
+            UltimaOperacao = $"{channel}:{caller}";
             try
             {
                 var line = $"{ts:yyyy-MM-dd HH:mm:ss.fff} [{level,-5}] [{caller}] {msg}{Environment.NewLine}";

@@ -47,6 +47,53 @@ public partial class App : Application
         try { LogHelper.Error($"{tag} | {context}", ex); } catch { }
     }
 
+    // v2.4.0 — investigação de travamento real (usuário relatou app travando por completo,
+    // precisando encerrar pelo Gerenciador de Tarefas). Watchdog de diagnóstico local: a cada
+    // 2s, agenda um callback de prioridade baixa no Dispatcher e mede quanto tempo ele demora
+    // pra rodar — se a UI thread estiver ocupada/bloqueada, o callback fica na fila até ela
+    // liberar. Atraso >= 1500ms é registrado com contexto (threads, working set, handles,
+    // última operação de log conhecida via LogHelper.UltimaOperacao). Não tenta obter stack
+    // trace da UI thread (não é seguro fazer isso de fora da própria thread) e nunca deixa mais
+    // de um ping pendente por vez, pra não gerar uma rajada de logs repetidos numa UI travada
+    // por vários segundos seguidos. Custo: um Timer de 2s + um BeginInvoke de baixa prioridade
+    // — desprezível.
+    private static System.Threading.Timer? _uiFreezeWatchdog;
+    private static volatile bool _uiFreezePingPendente;
+
+    private static void IniciarUiFreezeWatchdog()
+    {
+        _uiFreezeWatchdog = new System.Threading.Timer(_ =>
+        {
+            if (_uiFreezePingPendente) return;
+            var app = Current;
+            if (app?.Dispatcher == null) return;
+
+            _uiFreezePingPendente = true;
+            var agendadoEm = DateTime.UtcNow;
+            try
+            {
+                app.Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+                {
+                    _uiFreezePingPendente = false;
+                    var atrasoMs = (DateTime.UtcNow - agendadoEm).TotalMilliseconds;
+                    if (atrasoMs < 1500) return;
+                    try
+                    {
+                        var proc = System.Diagnostics.Process.GetCurrentProcess();
+                        LogHelper.Warn(
+                            $"UI_FREEZE_DETECTED duracao_ms={atrasoMs:F0} " +
+                            $"ultima_operacao={LogHelper.UltimaOperacao} " +
+                            $"thread_count={proc.Threads.Count} " +
+                            $"working_set_mb={proc.WorkingSet64 / 1024 / 1024} " +
+                            $"handle_count={proc.HandleCount}");
+                    }
+                    catch { }
+                }));
+            }
+            catch { _uiFreezePingPendente = false; }
+        }, null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+    }
+
     protected override void OnStartup(StartupEventArgs e)
     {
         // v2.1.1 — Quando iniciado pelo Run key do Windows (autostart), o processo herda
@@ -94,7 +141,17 @@ public partial class App : Application
 
         AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
         DispatcherUnhandledException += App_DispatcherUnhandledException;
-        TaskScheduler.UnobservedTaskException += (_, ex) => { ex.SetObserved(); };
+        // v2.4.0 — investigação de travamento: antes isso engolia TODA exceção de task
+        // fire-and-forget (padrão usado em vários pontos do app, ex. "_ = Task.Run(...)") sem
+        // nenhum log — se uma dessas tasks falhasse silenciosamente, não sobrava rastro nenhum
+        // pra diagnosticar depois. Agora loga antes de marcar como observada; continua nunca
+        // derrubando o processo por isso (SetObserved já fazia isso).
+        TaskScheduler.UnobservedTaskException += (_, ex) =>
+        {
+            try { LogHelper.Error("TASK_UNOBSERVED_EXCEPTION", ex.Exception); } catch { }
+            ex.SetObserved();
+        };
+        IniciarUiFreezeWatchdog();
 
         base.OnStartup(e);
 

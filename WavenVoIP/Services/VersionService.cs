@@ -4,15 +4,55 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "2.3.7";
+        public const string Versao  = "2.4.0";
         public const string NomeApp = "WavenVoIP";
 
-        public static readonly DateTime DataBuild = new DateTime(2026, 8, 10);
+        public static readonly DateTime DataBuild = new DateTime(2026, 8, 12);
 
         public static string VersaoCompleta => $"{NomeApp} v{Versao}";
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v2.4.0 — Correcao do 9o digito em celulares + desempenho e estabilidade (12/08/2026)\n" +
+            "• [FIX-CRITICO] Celular sem o 9o digito (formato antigo, comum em contatos salvos "+
+            "antes de 2016, retorno de chamada do Historico/Favoritos/WhatsApp) nao completava a "+
+            "ligacao ao discar pela Operadora — a normalizacao que adiciona o 9o digito ja existia "+
+            "no app (usada para identificar/casar contatos), mas nao era aplicada no ponto onde o "+
+            "prefixo de rota (Operadora/WhatsApp TIM/WhatsApp Vivo) e montado antes de discar, nem "+
+            "no envio do template do WhatsApp\n" +
+            "• [FIX] DialPlanService.AplicarRegraDeDiscagem (usado por Discador, Historico, "+
+            "Contatos e Favoritos) agora normaliza o numero — adiciona o 9o digito somente quando "+
+            "for celular (DDD + 8 digitos comecando com 6-9), nunca em fixo — antes de aplicar o "+
+            "prefixo de rota. Normalizacao e idempotente: numero que ja tem 9 ou e fixo passa "+
+            "intacto\n" +
+            "• [FIX] WhatsAppService.NormalizarTelefoneParaEnvio (template iniciar_conversa) e a "+
+            "tela de abrir conversa no WhatsApp agora usam a mesma normalizacao central antes de "+
+            "enviar/exibir o numero\n" +
+            "• [FIX] Busca de nome de contato ao abrir o WhatsApp a partir de Historico/Contatos "+
+            "passou a reconhecer como o mesmo contato tanto o numero salvo com quanto sem o 9o "+
+            "digito (reaproveitando o mesmo casamento ja usado no restante do app)\n" +
+            "• [SAFE] Nenhum contato existente foi alterado em massa — um contato antigo salvo sem "+
+            "o 9 continua exatamente como esta; a normalizacao passa a ser aplicada apenas no "+
+            "momento de discar/enviar\n" +
+            "• [SAFE] Nenhuma alteracao em SIP, RTP, codecs, Issabel, BRDID, AMI, dialplan, filas "+
+            "ou logica de encerramento de chamadas\n" +
+            "• [PERF] Criacao de midia/enumeracao de dispositivo de audio nao bloqueia mais "+
+            "indefinidamente a interface ao iniciar ou atender uma ligacao — agora tem timeout, "+
+            "com fallback pro dispositivo padrao se a busca demorar demais\n" +
+            "• [FIX] Guards contra sincronizacoes concorrentes de AMI e de Google Contacts "+
+            "(evita empilhar tentativas quando uma sincronizacao anterior ainda esta rodando)\n" +
+            "• [FIX] Sincronizacao com Google Contacts agora respeita corretamente o "+
+            "backoff/cooldown em caso de falha temporaria da API, em vez de tentar de novo em "+
+            "paralelo\n" +
+            "• [PERF] Otimizacao do processamento de duplicatas do Historico/CDR (removida "+
+            "recomputacao redundante que rodava a cada ciclo de sincronizacao)\n" +
+            "• [PERF] Reducao de logs redundantes gerados pela sincronizacao de CDR\n" +
+            "• [FIX] Leitura de contato durante sincronizacao AMI nao fica mais presa junto com "+
+            "o bloqueio de memoria compartilhada\n" +
+            "• [DIAG] Novo monitoramento leve interno para detectar e registrar qualquer travamento "+
+            "futuro da interface, e registro de exceções de tarefas em segundo plano que antes "+
+            "eram descartadas silenciosamente\n" +
+            "\n" +
             "v2.3.7 — Reducao de consumo de CPU ocioso (10/08/2026)\n" +
             "• [PERF] Investigacao real (instrumentacao temporaria) confirmou CPU ociosa oscilando "+
             "46-167% mesmo sem nenhuma chamada em andamento — causa dominante: os timers de "+

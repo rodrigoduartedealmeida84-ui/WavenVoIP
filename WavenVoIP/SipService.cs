@@ -831,7 +831,7 @@ namespace WavenVoIP
                 _chamadaSaindoEmAndamento = true;
                 _inicioDialing = DateTime.Now;
 
-                _mediaSession = CriarMedia();
+                _mediaSession = await CriarMediaAsync();
                 LogHelper.Sip($"CALL_MEDIA_STARTED | media session created elapsed_ms={_swDiscagem.ElapsedMilliseconds}");
 
                 // v2.3.6 — CriarMedia() pode levar 150-400ms+ em máquinas reais (enumeração de
@@ -965,7 +965,7 @@ namespace WavenVoIP
                 return false;
             }
 
-            _mediaSession = CriarMedia();
+            _mediaSession = await CriarMediaAsync();
             bool ok = await _userAgent.Answer(uas, _mediaSession);
 
             if (ok)
@@ -2511,7 +2511,16 @@ namespace WavenVoIP
             }
         }
 
-        private VoIPMediaSession CriarMedia()
+        // v2.4.0 — investigação de travamento real: este método era síncrono e chamado ANTES de
+        // qualquer await em Ligar()/AtenderChamada(), então rodava inteiro (inclusive a espera
+        // abaixo) na UI thread. A espera pelos dois lookups de dispositivo usava
+        // .GetAwaiter().GetResult() SEM TIMEOUT sobre uma enumeração de dispositivo de áudio via
+        // API nativa MME (por trás do NAudio) — se o driver de um dispositivo travar (já visto com
+        // headset USB instável, ver AudioDeviceService/hotfix de áudio), a UI trava por completo e
+        // indefinidamente, exigindo encerrar pelo Gerenciador de Tarefas. Agora é async e usa
+        // await (nunca bloqueia a UI thread) com timeout de 3s por segurança — se o lookup não
+        // responder a tempo, segue com o dispositivo padrão do sistema em vez de travar.
+        private async Task<VoIPMediaSession> CriarMediaAsync()
         {
             int outIdx = -1;
             int inIdx  = -1;
@@ -2523,9 +2532,19 @@ namespace WavenVoIP
                 var inDev  = string.IsNullOrEmpty(_config.AudioInputDevice)  ? null : _config.AudioInputDevice;
                 var tOut = outDev != null ? Task.Run(() => AudioDeviceService.IndiceWaveOutPorNome(outDev)) : Task.FromResult(-1);
                 var tIn  = inDev  != null ? Task.Run(() => AudioDeviceService.IndiceWaveInPorNome(inDev))  : Task.FromResult(-1);
-                Task.WhenAll(tOut, tIn).GetAwaiter().GetResult();
-                outIdx = tOut.Result;
-                inIdx  = tIn.Result;
+
+                var conjunto = Task.WhenAll(tOut, tIn);
+                var venceu = await Task.WhenAny(conjunto, Task.Delay(TimeSpan.FromSeconds(3)));
+                if (ReferenceEquals(venceu, conjunto) && conjunto.IsCompletedSuccessfully)
+                {
+                    outIdx = tOut.Result;
+                    inIdx  = tIn.Result;
+                }
+                else
+                {
+                    RegistrarSinalSip($"AUDIO_DEVICE_LOOKUP_TIMEOUT | outDev={outDev} inDev={inDev} | usando dispositivo padrao apos 3s");
+                    LogHelper.Sip($"AUDIO_DEVICE_LOOKUP_TIMEOUT | outDev={outDev} inDev={inDev} | usando dispositivo padrao apos 3s", LogLevel.WARN);
+                }
 
                 if (outDev != null)
                 {

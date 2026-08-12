@@ -28,6 +28,13 @@ namespace WavenVoIP.Services
             if (n.StartsWith("0") && n.Length > 10)
                 n = n.TrimStart('0');
 
+            // v2.4.0 — normalização central (remove 55 já presente, adiciona 9º dígito em
+            // celular antigo) ANTES de reprefixar com 55 para o formato exigido pela API WABA.
+            // Antes desta correção, um contato salvo sem o 9º dígito (comum vindo do
+            // WhatsApp/Histórico) era enviado ao template iniciar_conversa sem o 9, e a
+            // operadora/WhatsApp não reconhecia o destinatário.
+            n = PhoneNumberNormalizer.NormalizeBrazilPhone(n);
+
             if (!n.StartsWith("55"))
                 n = "55" + n;
 

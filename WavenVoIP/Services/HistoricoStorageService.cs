@@ -264,7 +264,18 @@ namespace WavenVoIP.Services
                         // genérico do CDR (o tronco WAVOIP pode registrar ANSWERED mesmo sem atendimento
                         // real — ver comentário na reconciliação).
                         var bloquearTipo = existente.CanceladaPeloOperador && item.Tipo != TipoHistoricoLigacao.Cancelada;
-                        if (existente.Tipo != item.Tipo)
+                        // v2.4.0 — investigação de log excessivo: quando bloqueado=true, esta
+                        // transição é PERMANENTEMENTE recusada (registro protegido por
+                        // CanceladaPeloOperador — ver !bloquearTipo abaixo, que nunca aplica o
+                        // Tipo do CDR nesse caso) e o CDR insiste em reenviar o mesmo Tipo
+                        // divergente a cada sync (a cada 2-3s) — sem gate, isso gerava a MESMA
+                        // linha, para o MESMO registro já finalizado, repetida indefinidamente
+                        // enquanto o item existir no histórico (medido em teste real: ~42 mil
+                        // linhas em 31 min de app ocioso, maior fonte isolada de volume de
+                        // cdr_sync.log). Não muda NENHUM dado — só o volume de log. Uma
+                        // transição REAL (bloqueado=false) sempre loga; a tentativa bloqueada
+                        // (sem efeito algum no registro) só loga com "Logs detalhados" ativado.
+                        if (existente.Tipo != item.Tipo && (!bloquearTipo || LogHelper.IsDetailedEnabled))
                             Log($"HISTORY_TYPE_TRANSITION id={existente.Id} uid={item.UniqueId} from={existente.Tipo} " +
                                 $"to={item.Tipo} method=MesclarCdr fonteCdr={item.FonteCdr} bloqueado={bloquearTipo}");
 

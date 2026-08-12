@@ -55,6 +55,17 @@ namespace WavenVoIP.Views
         // Configurações (que continua rodando em paralelo, sem conflito).
         private readonly DispatcherTimer _historicoFastRefreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         private bool _cdrSyncEmAndamento = false;
+        // v2.4.0 — investigação de desempenho: diferente do CDR (guard acima), AMI e Google não
+        // tinham nenhuma proteção contra sobreposição. O timer de AMI/Google dispara a cada N
+        // segundos independente da sincronização anterior ainda estar rodando (uma sync AMI pode
+        // levar até ~30s somando os timeouts internos de conexão/login/comandos; Google pode
+        // demorar em rede lenta ou com muitas páginas de contatos) — sem guard, uma sync lenta
+        // podia empilhar várias tentativas concorrentes (múltiplas conexões TCP ao AMI ao mesmo
+        // tempo, ou várias chamadas simultâneas à Google People API, plausivelmente contribuindo
+        // pros 429 já vistos). Mesmo padrão do CDR: ignora silenciosamente a chamada extra, nunca
+        // bloqueia a UI.
+        private bool _amiSyncEmAndamento = false;
+        private bool _googleSyncEmAndamento = false;
         private readonly DispatcherTimer _companyConfigTimer  = new DispatcherTimer { Interval = TimeSpan.FromMinutes(30) };
         private readonly DispatcherTimer _contactsSyncTimer   = new DispatcherTimer { Interval = TimeSpan.FromMinutes(5) };
         // Debounce: evita refiltragem a cada tecla — executa só 300ms após parar de digitar
@@ -503,6 +514,18 @@ namespace WavenVoIP.Views
 
         private async Task SincronizarRamaisAmiAsync(bool mostrarMensagem)
         {
+            // v2.4.0 — guard de reentrância (mesmo padrão de _cdrSyncEmAndamento): evita que o
+            // timer periódico dispare uma nova sync AMI por cima de uma anterior ainda em
+            // andamento (a sync pode legitimamente levar até ~30s). Nunca bloqueia a UI, só
+            // ignora a chamada extra.
+            if (_amiSyncEmAndamento)
+            {
+                RegistrarUiDiagnostico("AMI_SYNC_SKIPPED_BUSY");
+                if (mostrarMensagem)
+                    MessageBox.Show("Já existe uma sincronização AMI em andamento. Aguarde terminar.", "Waven VoIP");
+                return;
+            }
+            _amiSyncEmAndamento = true;
             try
             {
                 var config = MontarConfigAmiAtual();
@@ -580,6 +603,10 @@ namespace WavenVoIP.Views
                             "\n\nConfira usuário, senha e permissões (system, command, reporting).",
                             "Waven VoIP - AMI", MessageBoxButton.OK, MessageBoxImage.Warning);
                 }
+            }
+            finally
+            {
+                _amiSyncEmAndamento = false;
             }
         }
 
@@ -705,15 +732,35 @@ namespace WavenVoIP.Views
         private void GoogleSyncTimer_Tick(object? sender, EventArgs e)
             => _ = Task.Run(TentarSincronizarGoogleSilenciosoAsync);
 
+        // v2.4.0 — investigação de desempenho/429: guard de reentrância (evita sync sobreposta se
+        // uma anterior ainda estiver rodando) + a falha "Temporaria" (ex.: 429 TooManyRequests)
+        // agora TAMBÉM para o timer periódico de 3s enquanto o backoff de
+        // IntegrationAutoReconnectService está tentando reconectar (antes só a falha de auth
+        // parava o timer — a falha temporária deixava o timer de 3s martelando a API EM PARALELO
+        // com o próprio backoff, na prática anulando o propósito do backoff). Ao reconectar com
+        // sucesso (aqui ou via retry do backoff), o timer periódico normal é restaurado e o
+        // contador de tentativas do backoff é zerado.
         private async Task TentarSincronizarGoogleSilenciosoAsync()
         {
+            if (_googleSyncEmAndamento)
+            {
+                Services.LogHelper.Info("[GOOGLE_SYNC_SKIPPED_BUSY]");
+                return;
+            }
+            _googleSyncEmAndamento = true;
             try
             {
                 var (contatos, _) = await GoogleContactsService.SincronizarSemBrowserAsync();
                 ContatoStorageService.SincronizarContatosGoogle(contatos);
                 IntegrationStatusService.Atualizar(IntegracaoNome.Google, IntegracaoStatus.Conectado);
+                IntegrationAutoReconnectService.CancelarReconexao(IntegracaoNome.Google);
                 Services.LogHelper.Info("[INTEGRATION_AUTO_RECONNECT_SUCCESS] Google");
-                Dispatcher.Invoke(() => { AtualizarContatosShell(); AtualizarStatusGoogle(); });
+                Dispatcher.Invoke(() =>
+                {
+                    AplicarTimerGoogleSync(SipConfig.CarregarSalva()?.GoogleSyncIntervalSeconds ?? 0);
+                    AtualizarContatosShell();
+                    AtualizarStatusGoogle();
+                });
             }
             catch (UnauthorizedAccessException)
             {
@@ -741,7 +788,10 @@ namespace WavenVoIP.Views
                     Services.LogHelper.Info($"[INTEGRATION_MODAL_SUPPRESSED_TEMPORARY] Google");
                     IntegrationStatusService.Atualizar(IntegracaoNome.Google, IntegracaoStatus.Reconectando);
                     IntegrationAutoReconnectService.AgendarReconexao(IntegracaoNome.Google);
-                    Dispatcher.Invoke(AtualizarStatusGoogle);
+                    // v2.4.0 — para o timer periódico de 3s enquanto o backoff cuida do retry;
+                    // sem isso o timer continuava martelando a API em paralelo ao backoff (ex.:
+                    // 429), na pratica anulando o proposito do backoff. Retomado no sucesso acima.
+                    Dispatcher.Invoke(() => { _googleSyncTimer.Stop(); AtualizarStatusGoogle(); });
                 }
                 else
                 {
@@ -759,6 +809,10 @@ namespace WavenVoIP.Views
                             () => _ = BtnConectarGoogleAsync());
                     });
                 }
+            }
+            finally
+            {
+                _googleSyncEmAndamento = false;
             }
         }
 
@@ -3174,7 +3228,11 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
             confirm.ShowDialog();
             if (!confirm.Confirmado) return;
 
-            bool ok = _sipService.TransferenciaCega(destinoFinal);
+            // v2.4.0 — investigação de travamento: TransferenciaCega envia DTMF passo a passo com
+            // Thread.Sleep(220/900ms) entre dígitos (protocolo Issabel: ##+ramal) — chamado direto
+            // daqui (sem Task.Run) travava a UI por ~1,5-2,5s a cada transferência cega. A lógica
+            // de envio de DTMF em si não muda; só passa a rodar fora da UI thread.
+            bool ok = await Task.Run(() => _sipService.TransferenciaCega(destinoFinal));
             if (!ok) MessageBox.Show("Não foi possível completar a transferência cega.", "Waven VoIP");
         }
 
@@ -3187,7 +3245,9 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
             var destinoFinal = await PrepararDestinoTransferenciaAsync(prompt.ValorDigitado, "transferência assistida");
             if (string.IsNullOrWhiteSpace(destinoFinal)) return;
 
-            bool ok = _sipService.TransferenciaAssistida(destinoFinal);
+            // v2.4.0 — mesma correção de UI blocking da transferência cega (ver comentário lá):
+            // TransferenciaAssistida também envia DTMF com Thread.Sleep entre dígitos.
+            bool ok = await Task.Run(() => _sipService.TransferenciaAssistida(destinoFinal));
             if (!ok) { MessageBox.Show("Não foi possível iniciar a transferência assistida.", "Waven VoIP"); return; }
             AbrirControleTransferenciaAssistida(destinoFinal);
         }
@@ -4001,14 +4061,20 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
             AbrirDialogSeguro(win);
         }
 
+        // v2.4.0 — antes usava NormalizeForSearch (só dígitos, sem equivalência de 9º dígito)
+        // pra comparar diretamente, então um contato salvo antes de 2016 sem o 9 (comum vindo
+        // de sync antigo/Google) nunca era encontrado quando o número chegava do WhatsApp já
+        // com o 9. Delega para ContatoStorageService.ResolverNomePorNumero — a mesma função
+        // central usada pelo restante do app, que já trata as duas variantes (com/sem 9º
+        // dígito) e faz fallback por sufixo de 8 dígitos.
         private static string BuscarNomeContatoPorNumero(string numero)
         {
             try
             {
-                var key = PhoneNumberNormalizer.NormalizeForSearch(numero);
-                return ContatoStorageService.Carregar()
-                    .FirstOrDefault(c => PhoneNumberNormalizer.NormalizeForSearch(c.Numero) == key)?.Nome
-                    ?? string.Empty;
+                var nome = ContatoStorageService.ResolverNomePorNumero(numero);
+                // ResolverNomePorNumero devolve o próprio número de entrada, inalterado,
+                // quando não encontra contato — nesse caso não é nome, é "sem match".
+                return string.Equals(nome, numero, StringComparison.Ordinal) ? string.Empty : nome;
             }
             catch { return string.Empty; }
         }
