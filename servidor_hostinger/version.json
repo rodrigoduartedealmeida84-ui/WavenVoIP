@@ -1,7 +1,7 @@
 {
-    "versao":  "2.4.0",
-    "zip":  "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.4.0/WavenVoIP.zip",
-    "sha256":  "b265b14f981bb7ccfac8d36ed8c3fb08c98d1af2788fc9e035fea4407ffcf7c5",
-    "data":  "2026-08-12",
-    "notas":  "WavenVoIP v2.4.0 - normalizacao automatica do 9o digito em celulares brasileiros (Discador, Historico, Contatos, Favoritos, WhatsApp), melhor retorno de chamadas pela Operadora, e melhorias de desempenho/estabilidade (interface nao trava mais durante criacao de midia de audio, sincronizacoes AMI/Google protegidas contra sobreposicao, otimizacoes no Historico/CDR)."
+    "versao":  "2.4.1",
+    "zip":  "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.4.1/WavenVoIP.zip",
+    "sha256":  "6111fff6d39a2476ebb9f9207f5a54825bf1b910e95cb93c2f235f29f1aad5d5",
+    "data":  "2026-08-14",
+    "notas":  "WavenVoIP v2.4.1 - Correcao de consumo excessivo de memoria durante uso prolongado e muitas chamadas. Melhorias na liberacao dos recursos de audio apos o encerramento das ligacoes. Correcao de favoritos que podiam desaparecer durante a sincronizacao. Melhorias na identificacao de favoritos com numeros contendo 9o digito, 55 ou +55. Melhorias de estabilidade."
 }
