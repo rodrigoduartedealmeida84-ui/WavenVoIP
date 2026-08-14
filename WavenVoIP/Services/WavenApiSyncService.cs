@@ -366,6 +366,8 @@ namespace WavenVoIP.Services
 
         private void AtualizarFavoritosLocais(List<Contato> contatos, HashSet<string> favoritosIds)
         {
+            Log("FAVORITO_REFRESH | inicio sync de favoritos");
+
             // Monta set de números normalizados que devem ser favoritos
             var favNums = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var favNomes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -394,7 +396,7 @@ namespace WavenVoIP.Services
                         Favorito  = true,
                         ContactId = favContactIds.TryGetValue(num, out var cid) ? cid : null
                     });
-                    Log($"API_CONTACT_FAVORITE_UPDATED | numero={num} favorito=true");
+                    Log($"API_CONTACT_FAVORITE_UPDATED | numero={FavoritesStorageService.MascararTelefone(num)} favorito=true");
                 }
             }
 
@@ -402,29 +404,95 @@ namespace WavenVoIP.Services
             // (cobre o caso do nome do contato ter sido alterado por outro usuário).
             FavoritesStorageService.AtualizarNomesPorContatos(contatos);
 
-            // Remove favoritos locais que não estão mais na lista da API
-            // (apenas para contatos que vieram da API, identificados por WavenApiId)
+            // v2.4.1 — Reconciliação com estado ConfirmadoPelaApi. O contrato do endpoint
+            // /sync (WavenApi/Endpoints/ContactEndpoints.cs, SyncContacts) confirma que
+            // favoritosAtuais é uma consulta ao banco em tempo real, SEM filtro incremental —
+            // é sempre um snapshot completo e autoritativo dos favoritos deste ramal + globais.
+            // Isso significa que É seguro aceitar uma remoção legítima feita em outro
+            // computador/sessão do mesmo ramal — mas SÓ depois que este favorito já foi
+            // confirmado pela API pelo menos uma vez (ConfirmadoPelaApi=true). Antes disso,
+            // ausência pode ser só o push local ainda não ter chegado (bug real observado em
+            // produção: ADD/REMOVE em loop a cada ciclo de 60s por remover cedo demais).
+            // Depois de confirmado, exige 2 ciclos consecutivos ausente (~2min) antes de
+            // remover de fato, para não tratar uma resposta pontualmente incompleta como remoção.
             var favLocais = FavoritesStorageService.Carregar();
-            foreach (var fLocal in favLocais.ToList())
+            var alterou = false;
+            var paraRemover = new List<FavoriteItem>();
+
+            foreach (var fLocal in favLocais)
             {
                 var fNum = PhoneNumberNormalizer.NormalizeBrazilPhone(
                     new string(fLocal.Numero.Where(char.IsDigit).ToArray()));
 
-                // Só remove se o contato for gerenciado pela API (tem WavenApiId)
+                // Só é avaliado para remoção quem é gerenciado pela API (tem WavenApiId) —
+                // favoritos locais/Google sem WavenApiId nunca entram nesta reconciliação.
                 var contatoApi = contatos.FirstOrDefault(c =>
                 {
                     var cn = PhoneNumberNormalizer.NormalizeBrazilPhone(
                         new string(c.Numero.Where(char.IsDigit).ToArray()));
                     return cn == fNum && !string.IsNullOrWhiteSpace(c.WavenApiId);
                 });
-                if (contatoApi == null) continue;
-
-                if (!favNums.Contains(fNum))
+                if (contatoApi == null)
                 {
-                    FavoritesStorageService.Remover(fNum);
-                    Log($"API_CONTACT_FAVORITE_UPDATED | numero={fNum} favorito=false");
+                    Log($"FAVORITO_MATCH_FAIL | numero={FavoritesStorageService.MascararTelefone(fNum)} motivo=contato_nao_resolvido_por_id");
+                    continue;
+                }
+
+                var contactId = fLocal.ContactId ?? contatoApi.WavenApiId;
+
+                if (favNums.Contains(fNum))
+                {
+                    // Confirmado pela API neste ciclo.
+                    if (!fLocal.ConfirmadoPelaApi || fLocal.Orfao)
+                    {
+                        fLocal.ConfirmadoPelaApi = true;
+                        fLocal.Orfao = false;
+                        fLocal.OrfaoDesde = null;
+                        alterou = true;
+                        Log($"FAVORITO_MATCH | contactId={contactId} numero={FavoritesStorageService.MascararTelefone(fNum)} motivo=confirmado_pela_api");
+                    }
+                    continue;
+                }
+
+                // Ausente em favoritosAtuais neste ciclo.
+                if (!fLocal.ConfirmadoPelaApi)
+                {
+                    // Nunca foi confirmado — pode ser push pendente/offline. Só marca órfão.
+                    if (!fLocal.Orfao)
+                    {
+                        fLocal.Orfao = true;
+                        fLocal.OrfaoDesde = DateTime.UtcNow;
+                        alterou = true;
+                        Log($"FAVORITO_ORPHAN | contactId={contactId} numero={FavoritesStorageService.MascararTelefone(fNum)} motivo=nunca_confirmado_pela_api");
+                    }
+                    continue;
+                }
+
+                if (!fLocal.Orfao)
+                {
+                    // Já tinha sido confirmado antes e sumiu agora — primeiro ciclo ausente,
+                    // ainda não decide nada (pode ser resposta incompleta pontual).
+                    fLocal.Orfao = true;
+                    fLocal.OrfaoDesde = DateTime.UtcNow;
+                    alterou = true;
+                    Log($"FAVORITO_ORPHAN | contactId={contactId} numero={FavoritesStorageService.MascararTelefone(fNum)} motivo=ausente_apos_confirmado_ciclo1");
+                    continue;
+                }
+
+                if (fLocal.OrfaoDesde.HasValue && DateTime.UtcNow - fLocal.OrfaoDesde.Value >= TimeSpan.FromMinutes(2))
+                {
+                    // Ausente por 2+ ciclos consecutivos depois de já confirmado — aceita
+                    // como remoção legítima (feita em outro computador/sessão/usuário).
+                    Log($"FAVORITO_REMOVE | contactId={contactId} numero={FavoritesStorageService.MascararTelefone(fNum)} motivo=removido_confirmado_pela_api_apos_2_ciclos");
+                    paraRemover.Add(fLocal);
                 }
             }
+
+            if (alterou)
+                FavoritesStorageService.Salvar(favLocais);
+
+            foreach (var f in paraRemover)
+                FavoritesStorageService.Remover(f.Numero, f.ContactId);
         }
 
         // ── Fila offline ──────────────────────────────────────────────────────

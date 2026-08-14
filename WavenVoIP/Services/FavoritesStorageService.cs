@@ -34,6 +34,7 @@ namespace WavenVoIP.Services
                     var json = File.ReadAllText(_path);
                     _cache = (JsonSerializer.Deserialize<List<FavoriteItem>>(json) ?? new List<FavoriteItem>())
                              .OrderBy(f => f.Ordem).ThenBy(f => f.Nome).ToList();
+                    Log($"FAVORITO_LOAD | count={_cache.Count} origem=arquivo");
                     return _cache;
                 }
                 catch
@@ -54,38 +55,58 @@ namespace WavenVoIP.Services
                 var json = JsonSerializer.Serialize(favoritos, new JsonSerializerOptions { WriteIndented = true });
                 File.WriteAllText(_path, json);
                 Log($"FAVORITE_SAVE_OK | count={favoritos.Count}");
+                Log($"FAVORITO_SAVE | count={favoritos.Count}");
                 try { FavoritosAlterados?.Invoke(); } catch { }
             }
             catch (Exception ex) { Log($"FAVORITE_SAVE_ERROR | {ex.Message}"); }
         }
 
+        // Regra de match (v2.4.1): 1) ID persistente do contato, se houver;
+        // 2) número canônico normalizado (mesma normalização usada para discagem/CDR,
+        //    trata sem-9/com-9/55/+55 como o MESMO favorito); nome nunca é chave.
         public static bool Adicionar(FavoriteItem item)
         {
             var lista = Carregar();
-            var numero = SomenteDigitos(item.Numero);
-            if (lista.Any(f => SomenteDigitos(f.Numero) == numero))
+            var numeroNorm = NumeroCanonico(item.Numero);
+            var jaExiste = lista.Any(f => EhMesmoFavorito(f, item.ContactId, numeroNorm));
+            if (jaExiste)
             {
-                Log($"FAVORITE_DUPLICATE_SKIP | nome={item.Nome} numero={item.Numero}");
+                Log($"FAVORITE_DUPLICATE_SKIP | nome={item.Nome} numero={MascararTelefone(item.Numero)}");
                 return false;
             }
             item.Ordem = lista.Count > 0 ? lista.Max(f => f.Ordem) + 1 : 0;
             lista.Add(item);
             Salvar(lista);
-            Log($"FAVORITE_ADDED | nome={item.Nome} numero={item.Numero}");
+            Log($"FAVORITE_ADDED | nome={item.Nome} numero={MascararTelefone(item.Numero)}");
+            Log($"FAVORITO_ADD | contactId={item.ContactId ?? "(none)"} numero={MascararTelefone(item.Numero)} numeroNorm={MascararTelefone(numeroNorm)}");
             return true;
         }
 
-        public static bool Remover(string numero)
+        public static bool Remover(string numero, string? contactId = null)
         {
             var lista = Carregar();
-            var n = SomenteDigitos(numero);
+            var n = NumeroCanonico(numero);
             var antes = lista.Count;
-            lista.RemoveAll(f => SomenteDigitos(f.Numero) == n);
+            lista.RemoveAll(f => EhMesmoFavorito(f, contactId, n));
             if (lista.Count == antes) return false;
             Salvar(lista);
-            Log($"FAVORITE_REMOVED | numero={numero}");
+            Log($"FAVORITE_REMOVED | numero={MascararTelefone(numero)}");
+            Log($"FAVORITO_REMOVE | contactId={contactId ?? "(none)"} numero={MascararTelefone(numero)} numeroNorm={MascararTelefone(n)}");
             return true;
         }
+
+        // Um FavoriteItem casa com (contactId, numeroNorm) se o ID bater (quando ambos
+        // os lados têm ID) OU se o número canônico normalizado bater. Nunca usa nome.
+        private static bool EhMesmoFavorito(FavoriteItem f, string? contactId, string numeroNorm)
+        {
+            if (!string.IsNullOrWhiteSpace(contactId) && !string.IsNullOrWhiteSpace(f.ContactId) &&
+                string.Equals(f.ContactId, contactId, StringComparison.OrdinalIgnoreCase))
+                return true;
+            return NumeroCanonico(f.Numero) == numeroNorm;
+        }
+
+        private static string NumeroCanonico(string? numero)
+            => PhoneNumberNormalizer.NormalizeBrazilPhone(SomenteDigitos(numero));
 
         /// <summary>
         /// Resolve o nome exibido de cada favorito a partir do contato atual (por ContactId,
@@ -158,7 +179,7 @@ namespace WavenVoIP.Services
             return alterou;
         }
 
-        private static string MascararTelefone(string? numero)
+        public static string MascararTelefone(string? numero)
         {
             var n = SomenteDigitos(numero);
             if (n.Length <= 4) return new string('*', n.Length);
@@ -170,8 +191,8 @@ namespace WavenVoIP.Services
             try
             {
                 var lista = Carregar();
-                var n = SomenteDigitos(numero);
-                return lista.Any(f => SomenteDigitos(f.Numero) == n);
+                var n = NumeroCanonico(numero);
+                return lista.Any(f => NumeroCanonico(f.Numero) == n);
             }
             catch { return false; }
         }

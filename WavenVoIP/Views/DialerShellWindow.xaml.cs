@@ -1231,11 +1231,11 @@ namespace WavenVoIP.Views
                 if (item != null)
                 {
                     _favoritos.Remove(item);
-                    Services.FavoritesStorageService.Remover(numero);
+                    Services.FavoritesStorageService.Remover(numero, item.ContactId);
                     AtualizarVisibilidadeFavoritosVazio();
 
                     // Push para API (pessoal, sem alerta — favorito é ação individual)
-                    EnviarFavoritoApiAsync(contactId: null, numero: numero, adicionar: false);
+                    EnviarFavoritoApiAsync(contactId: item.ContactId, numero: numero, adicionar: false);
                 }
             }
             catch { }
@@ -1250,7 +1250,7 @@ namespace WavenVoIP.Views
 
                 if (contato.EhFavorito)
                 {
-                    Services.FavoritesStorageService.Remover(contato.Numero);
+                    Services.FavoritesStorageService.Remover(contato.Numero, contato.WavenApiId);
                     EnviarFavoritoApiAsync(contato.WavenApiId, contato.Numero, adicionar: false);
                 }
                 else

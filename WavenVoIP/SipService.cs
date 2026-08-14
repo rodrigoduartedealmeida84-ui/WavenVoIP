@@ -122,6 +122,15 @@ namespace WavenVoIP
         // GetType().GetField(...) a cada cancelamento.
         private static readonly FieldInfo? _campoUac = typeof(SIPUserAgent).GetField("m_uac", BindingFlags.NonPublic | BindingFlags.Instance);
         private static readonly FieldInfo? _campoCancelTransaction = typeof(SIPClientUserAgent).GetField("m_cancelTransaction", BindingFlags.NonPublic | BindingFlags.Instance);
+
+        // v2.4.1 — fix de vazamento de handle nativo de audio: WindowsAudioEndPoint
+        // (SIPSorceryMedia.Windows 8.0.14) nao expoe Dispose publico e seu CloseAudio() so
+        // chama StopRecording(), nunca Dispose() no WaveInEvent interno. WaveInEvent (NAudio)
+        // nao tem finalizer, entao sem isso o handle WinMM de captura fica aberto para sempre,
+        // um por chamada, ate o processo ser encerrado (investigacao 2026-08-13/14 — handles
+        // do processo cresciam sem retornar). Reflection defensiva, resolvida uma unica vez.
+        private static readonly FieldInfo? _campoWaveInEvent = typeof(WindowsAudioEndPoint).GetField("_waveInEvent", BindingFlags.NonPublic | BindingFlags.Instance);
+        private static bool _avisoWaveInEventAusenteLogado;
         private readonly List<SIPUserAgent> _conferenceAgents = new List<SIPUserAgent>();
         private readonly List<VoIPMediaSession> _conferenceMediaSessions = new List<VoIPMediaSession>();
 
@@ -2456,6 +2465,7 @@ namespace WavenVoIP
                     _mediaSession = null;
                 }
 
+                LiberarAudioInputNativo(_audioEndpoint);
                 _audioEndpoint = null;
                 _transferenciaEmAndamento = false;
                 LogHelper.Sip("WAVOIP_AUDIO_STATE_RESET | estado de audio e mute resetados");
@@ -2466,6 +2476,40 @@ namespace WavenVoIP
 
             StatusChanged?.Invoke(mensagem);
             CallEnded?.Invoke();
+        }
+
+        // Libera o handle nativo WinMM de captura (microfone) que o WindowsAudioEndPoint da
+        // SIPSorceryMedia.Windows nunca fecha sozinho — ver comentario do _campoWaveInEvent.
+        // Reflection defensiva: nunca pode derrubar o encerramento da chamada, mesmo se a
+        // biblioteca externa mudar o nome do campo interno em uma atualizacao futura.
+        private void LiberarAudioInputNativo(WindowsAudioEndPoint? endpoint)
+        {
+            if (endpoint == null) return;
+
+            try
+            {
+                LogHelper.Sip("AUDIO_NATIVE_INPUT_DISPOSE_ATTEMPT");
+
+                if (_campoWaveInEvent == null)
+                {
+                    if (!_avisoWaveInEventAusenteLogado)
+                    {
+                        _avisoWaveInEventAusenteLogado = true;
+                        LogHelper.Warn("AUDIO_NATIVE_INPUT_DISPOSE_FAIL | campo _waveInEvent nao encontrado no WindowsAudioEndPoint (biblioteca SIPSorceryMedia.Windows pode ter mudado) — handle nativo de audio pode estar vazando novamente");
+                    }
+                    return;
+                }
+
+                if (_campoWaveInEvent.GetValue(endpoint) is IDisposable waveIn)
+                {
+                    waveIn.Dispose();
+                    LogHelper.Sip("AUDIO_NATIVE_INPUT_DISPOSE_OK");
+                }
+            }
+            catch (Exception ex)
+            {
+                LogHelper.Warn($"AUDIO_NATIVE_INPUT_DISPOSE_FAIL | {ex.GetType().Name}: {ex.Message}");
+            }
         }
 
         private static string ObterCallId(SIPRequest? req)

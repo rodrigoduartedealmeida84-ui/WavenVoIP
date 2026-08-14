@@ -4,15 +4,24 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "2.4.0";
+        public const string Versao  = "2.4.1";
         public const string NomeApp = "WavenVoIP";
 
-        public static readonly DateTime DataBuild = new DateTime(2026, 8, 12);
+        public static readonly DateTime DataBuild = new DateTime(2026, 8, 14);
 
         public static string VersaoCompleta => $"{NomeApp} v{Versao}";
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v2.4.1 — Memoria e favoritos (14/08/2026)\n" +
+            "• Correcao de consumo excessivo de memoria durante uso prolongado e muitas chamadas\n" +
+            "• Melhorias na liberacao dos recursos de audio apos o encerramento das ligacoes\n" +
+            "• Correcao de favoritos que podiam desaparecer durante a sincronizacao\n" +
+            "• Melhorias na identificacao de favoritos com numeros contendo 9o digito, 55 ou +55\n" +
+            "• Melhorias de estabilidade\n" +
+            "• [SAFE] Nenhuma alteracao em SIP, discagem, CDR, Issabel, BRDID, AMI, dialplan ou "+
+            "Google Contacts\n" +
+            "\n" +
             "v2.4.0 — Correcao do 9o digito em celulares + desempenho e estabilidade (12/08/2026)\n" +
             "• [FIX-CRITICO] Celular sem o 9o digito (formato antigo, comum em contatos salvos "+
             "antes de 2016, retorno de chamada do Historico/Favoritos/WhatsApp) nao completava a "+
