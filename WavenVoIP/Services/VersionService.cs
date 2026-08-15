@@ -4,7 +4,7 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "2.4.2";
+        public const string Versao  = "2.4.3";
         public const string NomeApp = "WavenVoIP";
 
         public static readonly DateTime DataBuild = new DateTime(2026, 8, 15);
@@ -13,6 +13,13 @@ namespace WavenVoIP.Services
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v2.4.3 — Correcao de vazamento de memoria gerenciado (15/08/2026)\n" +
+            "• Correcao de vazamento de memoria confirmado em producao (fila interna de log sem limite)\n" +
+            "• Fila de log agora tem capacidade maxima — nao pode mais crescer sem limite\n" +
+            "• Reducao de volume de log repetitivo na sincronizacao de CDR (mesma logica, so menos linhas)\n" +
+            "• Preserva integralmente as correcoes de audio e favoritos da v2.4.1/v2.4.2 e o Diagnostico Remoto da v2.4.2\n" +
+            "• [SAFE] Nenhuma alteracao em SIP, discagem, regras de CDR, Issabel, BRDID, AMI, dialplan, Google Contacts ou Favoritos\n" +
+            "\n" +
             "v2.4.2 — Diagnostico remoto (15/08/2026)\n" +
             "• Diagnostico remoto de desempenho e estabilidade\n" +
             "• Monitoramento de memoria, CPU, handles, threads e I/O\n" +

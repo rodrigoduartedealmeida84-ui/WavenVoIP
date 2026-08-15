@@ -1,7 +1,7 @@
 {
-    "versao":  "2.4.2",
-    "zip":  "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.4.2/WavenVoIP.zip",
-    "sha256":  "a1ce6d76d5b6810035981b71cebeebab440bf9756cd82763ee47f67138e4d00b",
+    "versao":  "2.4.3",
+    "zip":  "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.4.3/WavenVoIP.zip",
+    "sha256":  "214ef4b949164fbccaba0ed28ffb5f2bd4d816a6e81f39998b98b0021157bd57",
     "data":  "2026-08-15",
-    "notas":  "WavenVoIP v2.4.2 - Diagnostico remoto de desempenho e estabilidade. Monitoramento de memoria, CPU, handles, threads e I/O. Correlacao de consumo com volume de chamadas. Monitoramento remoto de incidentes. Preserva as correcoes de memoria e favoritos da v2.4.1."
+    "notas":  "WavenVoIP v2.4.3 - Correcao de vazamento de memoria gerenciado confirmado em producao (fila interna de log sem limite). Fila de log agora tem capacidade maxima. Reducao de volume de log repetitivo na sincronizacao de CDR. Preserva integralmente audio, favoritos e Diagnostico Remoto das versoes anteriores."
 }

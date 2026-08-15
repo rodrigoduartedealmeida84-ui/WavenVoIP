@@ -250,12 +250,25 @@ namespace WavenVoIP.Services
                 // Build O(1) index of existing CDR items for update lookup.
                 // TryAdd instead of ToDictionary: Asterisk linkedid/uniqueid can repeat in queues and
                 // transfers — crashing the entire sync for a duplicate key is unacceptable.
+                //
+                // v2.4.3 — incidente real de produção (ramal 103): esta função roda a cada
+                // 2-3s (dois timers, ver DialerShellWindow) sobre até 5000 itens de
+                // `existentes`. Quando o arquivo local acumula muitas chaves duplicadas
+                // (histórico de bug antigo — ver comentário logo abaixo, "Prior buggy
+                // syncs..."), o log ANTES daqui era UM POR ITEM duplicado, sem gate nenhum —
+                // measured: ~2.250 linhas/s sustentadas por mais de 1h numa instalação real,
+                // ~4,2 GB de Managed Heap na fila do LogHelper. Vira contador + UM resumo por
+                // ciclo (mesmo padrão de CDR_DEDUP_SAVE_CLEANUP logo abaixo) — a lógica de
+                // dedupe em si (o que é mantido/descartado) não muda em nada, só o volume de log.
                 var indicePorUid = new Dictionary<string, HistoricoLigacaoItem>(StringComparer.OrdinalIgnoreCase);
+                var chavesDuplicadasIgnoradas = 0;
                 foreach (var e in existentes.Where(i => !string.IsNullOrWhiteSpace(i.UniqueId) && i.FonteCdr))
                 {
                     if (!indicePorUid.TryAdd(e.UniqueId, e))
-                        Log($"CDR_DUPLICATE_KEY_DETECTED uid={e.UniqueId} numero={e.Numero} data={e.DataHora:yyyy-MM-dd HH:mm:ss} acao=ignorado");
+                        chavesDuplicadasIgnoradas++;
                 }
+                if (chavesDuplicadasIgnoradas > 0)
+                    Log($"CDR_DUPLICATE_KEYS_SUMMARY count={chavesDuplicadasIgnoradas} totalExistentes={existentes.Count}");
 
                 var novosCount = 0;
                 foreach (var item in itensCdrRestantes)

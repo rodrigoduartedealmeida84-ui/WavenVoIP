@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 
@@ -37,8 +39,28 @@ namespace WavenVoIP.Services
         // Escrita em disco roda numa thread dedicada — chamadas a Append() (feitas direto
         // na UI thread em vários pontos: handlers de clique, StatusChanged, etc.) so
         // enfileiram a linha e retornam na hora, sem bloquear em I/O de disco.
-        private static readonly BlockingCollection<(string Channel, string Line)> _queue = new();
+        //
+        // v2.4.3 — incidente real de produção (ramal 103, ver DiagnosticFinding #1 na Waven
+        // API): esta fila SEM boundedCapacity acumulou ~8,7 milhões de itens e ~4,2 GB de
+        // Managed Heap (matemática bate: ~500 bytes/item, condizente com a tupla+string de
+        // cada linha formatada) quando o produtor (MesclarCdr, ver HistoricoStorageService)
+        // passou a gerar linhas muito mais rápido do que esta única thread conseguia escrever
+        // (File.AppendAllText linha-a-linha é lento sob volume alto). Duas camadas de defesa
+        // agora, nenhuma delas dependendo de identificar corretamente TODO produtor futuro:
+        //   1) capacidade máxima — nunca mais cresce sem limite, não importa o que a produza;
+        //   2) TryAdd não-bloqueante — nunca trava a thread chamadora (UI/SIP/CDR/etc.) mesmo
+        //      com a fila cheia; ERROR/WARN ganham uma folga curta pra tentar entrar, INFO
+        //      desiste na hora. Descartes são contados, nunca geram log por item (só um
+        //      resumo periódico, ver RegistrarDescarteSeNecessario).
+        private const int MaxQueueSize = 20_000; // ~10 MB no pior caso (linha média ~500B) — nunca mais GBs
+        private static readonly BlockingCollection<(string Channel, string Line)> _queue =
+            new(new ConcurrentQueue<(string, string)>(), MaxQueueSize);
         private static readonly Thread _writerThread;
+
+        private static long _droppedCount;
+        // Total de linhas descartadas por fila cheia desde o início do processo — exposto pra
+        // telemetria/diagnóstico futuro, mesma filosofia de QueuedCount abaixo.
+        internal static long DroppedCount => Interlocked.Read(ref _droppedCount);
 
         static LogHelper()
         {
@@ -46,18 +68,32 @@ namespace WavenVoIP.Services
             _writerThread.Start();
         }
 
+        // Drena em lote (até 500 por vez) e agrupa por canal antes de escrever — evita abrir/
+        // escrever/fechar o arquivo linha a linha sob volume alto (gargalo real que ajudou a
+        // fila a crescer no incidente). Comportamento idêntico ao anterior no caso comum
+        // (poucas linhas por vez): cada lote de 1 item vira exatamente 1 File.AppendAllText,
+        // mesmo conteúdo, mesma rotação.
         private static void WriterLoop()
         {
-            foreach (var (channel, line) in _queue.GetConsumingEnumerable())
+            var buffer = new List<(string Channel, string Line)>(64);
+            foreach (var primeiro in _queue.GetConsumingEnumerable())
             {
-                try
+                buffer.Add(primeiro);
+                while (buffer.Count < 500 && _queue.TryTake(out var proximo))
+                    buffer.Add(proximo);
+
+                foreach (var grupo in buffer.GroupBy(x => x.Channel, x => x.Line))
                 {
-                    Directory.CreateDirectory(_logDir);
-                    var path = Path.Combine(_logDir, $"{channel}.log");
-                    RotateIfNeeded(path);
-                    File.AppendAllText(path, line);
+                    try
+                    {
+                        Directory.CreateDirectory(_logDir);
+                        var path = Path.Combine(_logDir, $"{grupo.Key}.log");
+                        RotateIfNeeded(path);
+                        File.AppendAllText(path, string.Concat(grupo));
+                    }
+                    catch { /* logging must never crash the app */ }
                 }
-                catch { /* logging must never crash the app */ }
+                buffer.Clear();
             }
         }
 
@@ -147,7 +183,16 @@ namespace WavenVoIP.Services
             try
             {
                 var line = $"{ts:yyyy-MM-dd HH:mm:ss.fff} [{level,-5}] [{caller}] {msg}{Environment.NewLine}";
-                _queue.Add((channel, line));
+
+                // Nunca bloqueia a thread chamadora. WARN/ERROR ganham uma folga curtíssima
+                // (ainda não-bloqueante de verdade pra UI — só reduz a chance de perder um
+                // erro num pico passageiro); INFO desiste na hora se a fila estiver cheia.
+                var entrou = level == LogLevel.INFO
+                    ? _queue.TryAdd((channel, line))
+                    : _queue.TryAdd((channel, line), TimeSpan.FromMilliseconds(20));
+
+                if (!entrou)
+                    RegistrarDescarteSeNecessario();
             }
             catch { /* logging must never crash the app */ }
 
@@ -164,6 +209,19 @@ namespace WavenVoIP.Services
                 });
             }
             catch { }
+        }
+
+        // Conta o descarte e, a cada 1000, tenta registrar UM resumo (nunca um log por item
+        // descartado — geraria o mesmo tipo de flood que estamos protegendo contra). O log do
+        // resumo passa pelo mesmo Append() normal; na pior hipótese (fila permanentemente
+        // cheia) a recursão pára sozinha em 1 nível, porque o contador já foi incrementado
+        // antes da checagem de módulo.
+        private static void RegistrarDescarteSeNecessario()
+        {
+            var total = Interlocked.Increment(ref _droppedCount);
+            if (total % 1000 == 0)
+                Append("ui_flow", LogLevel.WARN, nameof(RegistrarDescarteSeNecessario),
+                    $"LOG_QUEUE_OVERFLOW dropped_total={total} queue_size={_queue.Count}");
         }
 
         private static void RotateIfNeeded(string path)
