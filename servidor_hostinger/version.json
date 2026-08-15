@@ -3,5 +3,5 @@
     "zip":  "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.4.2/WavenVoIP.zip",
     "sha256":  "a1ce6d76d5b6810035981b71cebeebab440bf9756cd82763ee47f67138e4d00b",
     "data":  "2026-08-15",
-    "notas":  "WavenVoIP v2.4.1 - Correcao de consumo excessivo de memoria durante uso prolongado e muitas chamadas. Melhorias na liberacao dos recursos de audio apos o encerramento das ligacoes. Correcao de favoritos que podiam desaparecer durante a sincronizacao. Melhorias na identificacao de favoritos com numeros contendo 9o digito, 55 ou +55. Melhorias de estabilidade."
+    "notas":  "WavenVoIP v2.4.2 - Diagnostico remoto de desempenho e estabilidade. Monitoramento de memoria, CPU, handles, threads e I/O. Correlacao de consumo com volume de chamadas. Monitoramento remoto de incidentes. Preserva as correcoes de memoria e favoritos da v2.4.1."
 }
