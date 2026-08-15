@@ -15,8 +15,14 @@
     </Content>
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.*" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.*">
+    <!-- v2.4.2 — PINNED (não "8.*"): 8.0.30+ traz SQLitePCLRaw 2.1.12, cujo
+         libe_sqlite3.so linux-x64 exige GLIBC_2.34. O servidor de produção (Rocky
+         Linux 8.10) só tem GLIBC 2.28 — a versão flutuante quebrou o deploy em
+         produção (crash loop, "GLIBC_2.33 not found") até ser revertida. 8.0.28 usa
+         SQLitePCLRaw 2.1.6, que exige no máximo GLIBC_2.28 — compatível. Não trocar
+         para "8.*"/floating de novo sem testar contra o glibc real do servidor. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.28" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.28">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
     </PackageReference>

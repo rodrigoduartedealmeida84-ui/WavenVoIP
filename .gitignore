@@ -7,6 +7,15 @@ publish/
 WavenVoIP.zip
 WavenVoIP_Setup.exe
 _tmp_waven.zip
+waven-api-linux-x64.zip
+_tmp_wavenapi.zip
+WavenApi/publish-linux/
+WavenApi/local-test/
+WavenApi/api-stdout.txt
+WavenApi/api-stderr.txt
+
+# ── Chaves/known_hosts de deploy (nunca commitar, mesmo que só a pública) ────
+.ssh/
 
 # ── Credenciais OAuth do app (NUNCA commitar) ─────────────────────────────────
 WavenVoIP/Config/google_credentials.json

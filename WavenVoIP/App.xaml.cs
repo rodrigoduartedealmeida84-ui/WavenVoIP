@@ -17,6 +17,7 @@ public partial class App : Application
     private static Mutex? _instanceMutex;
     private static EventWaitHandle? _activateEvent;
     private static WavenApiSyncService? _wavenSyncService;
+    private static WavenVoIP.Services.DiagnosticTelemetryService? _diagnosticService;
 
     private static readonly string CrashLogPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
@@ -273,6 +274,14 @@ public partial class App : Application
                 LogHelper.Info($"WAVEN_API_SYNC_STARTED | ramal={config.Ramal} url={config.WavenApiUrl}");
             }
 
+            // Telemetria de diagnóstico remoto — independente do sync de contatos acima
+            // (usa a mesma URL/token da Waven API, mas é um toggle separado: DiagnosticoRemotoAtivado).
+            if (config.DiagnosticoRemotoAtivado && !string.IsNullOrWhiteSpace(config.WavenApiToken))
+            {
+                _diagnosticService = new WavenVoIP.Services.DiagnosticTelemetryService(config.Ramal);
+                LogHelper.Info($"DIAGNOSTIC_TELEMETRY_STARTED | installationId={WavenVoIP.Services.DiagnosticTelemetryService.InstallationId} machineId={WavenVoIP.Services.DiagnosticTelemetryService.MachineId}");
+            }
+
             return;
         }
 
@@ -474,6 +483,7 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         _wavenSyncService?.Dispose();
+        _diagnosticService?.Dispose();
         try { _activateEvent?.Set(); } catch { }
         _activateEvent?.Dispose();
         _instanceMutex?.ReleaseMutex();

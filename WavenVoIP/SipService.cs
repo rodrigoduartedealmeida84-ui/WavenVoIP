@@ -496,6 +496,9 @@ namespace WavenVoIP
                     }
                     else
                     {
+                        // v2.4.2 — marcador só de log (nenhuma mudança de comportamento/estado SIP)
+                        // para a telemetria de diagnóstico contar chamadas recebidas.
+                        LogHelper.Sip($"CALL_INCOMING_NEW callId={MascararTextoSip(callId)}");
                         novoCiclo = false;
                     }
 

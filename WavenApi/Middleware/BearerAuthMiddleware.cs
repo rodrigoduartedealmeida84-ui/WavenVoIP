@@ -14,6 +14,16 @@ public class BearerAuthMiddleware(RequestDelegate next, IOptions<WavenApiOptions
             return;
         }
 
+        // Painel administrativo é HTML/JS/CSS estático servido por wwwroot/diagnostics —
+        // sem dado nenhum embutido. O token continua exigido em cada chamada que o
+        // próprio painel faz aos endpoints /api/diagnostics/* (o usuário digita o token
+        // no navegador, guardado só em localStorage).
+        if (context.Request.Path.StartsWithSegments("/diagnostics"))
+        {
+            await next(context);
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(_token))
         {
             logger.LogError("AUTH_CONFIG_ERROR | BearerToken não configurado em appsettings.Production.json");

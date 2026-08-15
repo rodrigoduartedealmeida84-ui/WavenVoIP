@@ -9,6 +9,10 @@ public class WavenDbContext(DbContextOptions<WavenDbContext> options) : DbContex
     public DbSet<Favorito> Favoritos => Set<Favorito>();
     public DbSet<CompanyConfigEntry> CompanyConfig => Set<CompanyConfigEntry>();
 
+    public DbSet<DiagnosticInstallation> DiagnosticInstallations => Set<DiagnosticInstallation>();
+    public DbSet<DiagnosticSnapshot>     DiagnosticSnapshots     => Set<DiagnosticSnapshot>();
+    public DbSet<DiagnosticIncident>     DiagnosticIncidents     => Set<DiagnosticIncident>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Contact>(e =>
@@ -36,6 +40,27 @@ public class WavenDbContext(DbContextOptions<WavenDbContext> options) : DbContex
         modelBuilder.Entity<CompanyConfigEntry>(e =>
         {
             e.HasKey(c => c.Id);
+        });
+
+        modelBuilder.Entity<DiagnosticInstallation>(e =>
+        {
+            e.HasKey(d => d.Id);
+            e.HasIndex(d => d.LastSeenUtc);
+        });
+
+        modelBuilder.Entity<DiagnosticSnapshot>(e =>
+        {
+            e.HasKey(d => d.Id);
+            e.HasIndex(d => new { d.InstallationId, d.TimestampUtc });
+            e.HasIndex(d => d.TimestampUtc); // usado pela limpeza por retenção
+        });
+
+        modelBuilder.Entity<DiagnosticIncident>(e =>
+        {
+            e.HasKey(d => d.Id);
+            e.HasIndex(d => new { d.InstallationId, d.TimestampUtc });
+            e.HasIndex(d => d.Evento);
+            e.HasIndex(d => d.TimestampUtc);
         });
     }
 }

@@ -72,6 +72,11 @@ namespace WavenVoIP.Services
 
         internal static string LogDir => _logDir;
 
+        // Usado pela telemetria de diagnóstico (DiagnosticTelemetryService) para monitorar
+        // se o produtor está ultrapassando o consumidor (ver comentário sobre _queue acima
+        // não ter boundedCapacity) — leitura O(1), sem custo extra.
+        internal static int QueuedCount => _queue.Count;
+
         // v2.4.0 — diagnóstico de UI freeze: última linha de log gravada (canal:caller), usado
         // apenas como aproximação barata de "última operação" quando o watchdog de UI detecta
         // atraso — todo LogHelper.Info/Sip/Ami/Cdr/etc. já passa [CallerMemberName], então isso

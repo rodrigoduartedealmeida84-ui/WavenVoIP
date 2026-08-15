@@ -4,6 +4,7 @@ using WavenApi;
 using WavenApi.Data;
 using WavenApi.Endpoints;
 using WavenApi.Middleware;
+using WavenApi.Services;
 
 // Serilog mínimo antes de ler config (captura erros de startup)
 Log.Logger = new LoggerConfiguration()
@@ -30,6 +31,8 @@ try
     builder.Services.AddDbContext<WavenDbContext>(opt =>
         opt.UseSqlite($"Data Source={dbPath}"));
 
+    builder.Services.AddHostedService<DiagnosticRetentionService>();
+
     // ── Limite de payload ─────────────────────────────────────────────────────
     var maxBytes = builder.Configuration.GetValue<int>("WavenApi:MaxPayloadBytes", 1_048_576);
     builder.WebHost.ConfigureKestrel(k =>
@@ -42,6 +45,20 @@ try
     {
         var db = scope.ServiceProvider.GetRequiredService<WavenDbContext>();
         db.Database.EnsureCreated();
+
+        // v2.4.2 — EnsureCreated() só cria o schema inteiro quando o arquivo do banco
+        // NÃO existe; em produção o waven.db já existe (Contacts/Favoritos/CompanyConfig),
+        // então as tabelas novas (Diagnostic*) nunca seriam criadas sozinhas — a primeira
+        // chamada a /api/diagnostics/heartbeat quebraria com "no such table". Este passo é
+        // idempotente e não toca nas tabelas existentes: gera o script de criação do
+        // modelo INTEIRO e adiciona "IF NOT EXISTS" em cada CREATE TABLE/INDEX, então só
+        // as tabelas realmente ausentes são criadas — dado real de Contacts/Favoritos
+        // nunca é afetado.
+        var createScript = db.Database.GenerateCreateScript()
+            .Replace("CREATE TABLE \"", "CREATE TABLE IF NOT EXISTS \"")
+            .Replace("CREATE UNIQUE INDEX \"", "CREATE UNIQUE INDEX IF NOT EXISTS \"")
+            .Replace("CREATE INDEX \"", "CREATE INDEX IF NOT EXISTS \"");
+        db.Database.ExecuteSqlRaw(createScript);
     }
 
     // ── Garante JSON em qualquer excecao nao-tratada ──────────────────────────
@@ -70,6 +87,10 @@ try
         }
     });
 
+    // ── Painel administrativo estático (wwwroot/diagnostics) ───────────────────
+    app.UseDefaultFiles();
+    app.UseStaticFiles();
+
     // ── Auth middleware (antes das rotas) ─────────────────────────────────────
     app.UseMiddleware<BearerAuthMiddleware>();
 
@@ -79,6 +100,7 @@ try
     app.MapCompanyConfigEndpoints();
     app.MapCdrEndpoints();
     app.MapAmiEndpoints();
+    app.MapDiagnosticsEndpoints();
 
     Log.Information("WavenApi iniciada em {Urls}", string.Join(", ",
         builder.Configuration["ASPNETCORE_URLS"] ?? "http://127.0.0.1:5005"));

@@ -748,6 +748,8 @@ namespace WavenVoIP.Views
                 return;
             }
             _googleSyncEmAndamento = true;
+            // v2.4.2 — marcador só de log para a telemetria de diagnóstico (LastOperation).
+            Services.LogHelper.Info("[GOOGLE_SYNC_START]");
             try
             {
                 var (contatos, _) = await GoogleContactsService.SincronizarSemBrowserAsync();

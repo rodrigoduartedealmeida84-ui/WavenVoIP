@@ -405,6 +405,13 @@ namespace WavenVoIP
         public string WavenApiUrl    { get; set; } = "https://api.almeidagas.com";
         public string WavenApiToken  { get; set; } = string.Empty;
 
+        // ── Diagnóstico remoto v2.4.2 (ver DiagnosticTelemetryService) ─────────
+        // Reaproveita WavenApiUrl/WavenApiToken acima — mesmo mecanismo de autenticação,
+        // nenhuma credencial nova no cliente. Default true: frota é toda Almeida Gás: ligado
+        // por padrão, mas pode ser desligado por instalação se necessário (ex.: pedido do
+        // cliente, investigação em andamento que não deve gerar tráfego extra).
+        public bool DiagnosticoRemotoAtivado { get; set; } = true;
+
         // ── Migrações automáticas ──────────────────────────────────────────────
         public bool MigracaoAplicada142   { get; set; } = false;
         public bool MigracaoWaba144Aplicada { get; set; } = false;

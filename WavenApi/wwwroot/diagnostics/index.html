@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Diagnóstico Remoto WavenVoIP</title>
+<style>
+  :root{
+    --bg:#f4f5f7; --surface:#fff; --border:#dde1e6; --ink:#1a222b; --muted:#66707a;
+    --ok:#1f8a55; --ok-bg:#e6f6ec; --warn:#a3720a; --warn-bg:#fdf1d8;
+    --crit:#b3261e; --crit-bg:#fbe4e2; --offline:#8a94a0; --offline-bg:#eceff2;
+    --accent:#3b4a82;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--bg); color:var(--ink); font:14px/1.5 -apple-system,Segoe UI,Arial,sans-serif;}
+  header{background:var(--surface); border-bottom:1px solid var(--border); padding:14px 20px; display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;}
+  header h1{font-size:17px; margin:0;}
+  header .sub{color:var(--muted); font-size:12px;}
+  .wrap{padding:20px; max-width:1200px; margin:0 auto;}
+  .toolbar{display:flex; gap:10px; align-items:center; margin-bottom:16px; flex-wrap:wrap;}
+  .toolbar input{padding:6px 9px; border:1px solid var(--border); border-radius:6px; font-size:13px;}
+  .toolbar button{padding:7px 14px; border:1px solid var(--accent); background:var(--accent); color:#fff; border-radius:6px; cursor:pointer; font-size:13px;}
+  .toolbar button.secondary{background:transparent; color:var(--accent);}
+  .toolbar .status{font-size:12px; color:var(--muted); margin-left:auto;}
+  table{width:100%; border-collapse:collapse; background:var(--surface); border:1px solid var(--border); border-radius:8px; overflow:hidden;}
+  th,td{padding:9px 10px; text-align:left; border-bottom:1px solid var(--border); font-size:12.5px; white-space:nowrap;}
+  th{background:#f0f1f4; font-weight:600; color:var(--muted); text-transform:uppercase; font-size:10.5px; letter-spacing:.03em;}
+  tbody tr{cursor:pointer;}
+  tbody tr:hover{background:#f8f9fb;}
+  tbody tr:last-child td{border-bottom:none;}
+  .dot{display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; vertical-align:middle;}
+  .dot.ok{background:var(--ok);} .dot.warn{background:var(--warn);} .dot.crit{background:var(--crit);} .dot.off{background:var(--offline);}
+  .badge{display:inline-block; padding:1px 7px; border-radius:10px; font-size:11px; font-weight:600;}
+  .badge.ok{background:var(--ok-bg); color:var(--ok);} .badge.warn{background:var(--warn-bg); color:var(--warn);}
+  .badge.crit{background:var(--crit-bg); color:var(--crit);} .badge.off{background:var(--offline-bg); color:var(--offline);}
+  .tabnum{font-variant-numeric:tabular-nums;}
+  #login{max-width:420px; margin:80px auto; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:24px;}
+  #login h2{margin-top:0; font-size:16px;}
+  #login label{display:block; font-size:12px; color:var(--muted); margin:12px 0 4px;}
+  #login input{width:100%; padding:8px 10px; border:1px solid var(--border); border-radius:6px; font-size:13px;}
+  #login button{margin-top:16px; width:100%; padding:9px; border:none; background:var(--accent); color:#fff; border-radius:6px; cursor:pointer; font-size:13px;}
+  #login .err{color:var(--crit); font-size:12px; margin-top:8px; min-height:16px;}
+  #detail{display:none; margin-top:20px; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:18px;}
+  #detail h2{margin:0 0 4px; font-size:15px;}
+  #detail .meta{color:var(--muted); font-size:12px; margin-bottom:16px;}
+  .charts{display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:16px;}
+  .chart-box{border:1px solid var(--border); border-radius:8px; padding:10px;}
+  .chart-box .title{font-size:11px; text-transform:uppercase; letter-spacing:.03em; color:var(--muted); margin-bottom:6px;}
+  canvas{width:100%; height:120px; display:block;}
+  .close-btn{float:right; background:transparent; border:1px solid var(--border); border-radius:6px; padding:5px 10px; cursor:pointer; font-size:12px;}
+  .empty{padding:40px; text-align:center; color:var(--muted);}
+</style>
+</head>
+<body>
+
+<div id="login">
+  <h2>Diagnóstico Remoto WavenVoIP</h2>
+  <p style="font-size:12.5px;color:var(--muted);margin:0;">Consulta direta à Waven API. O token fica só neste navegador (localStorage), nunca é enviado a mais ninguém.</p>
+  <label>URL da Waven API</label>
+  <input id="inUrl" placeholder="https://api.almeidagas.com" />
+  <label>Bearer token</label>
+  <input id="inToken" type="password" placeholder="token" />
+  <button onclick="salvarLogin()">Entrar</button>
+  <div class="err" id="loginErr"></div>
+</div>
+
+<div id="app" style="display:none">
+  <header>
+    <div>
+      <h1>Diagnóstico Remoto WavenVoIP</h1>
+      <div class="sub" id="apiUrlLabel"></div>
+    </div>
+    <button class="secondary" onclick="logout()" style="border:1px solid var(--border);background:transparent;color:var(--ink);padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;">Trocar servidor/token</button>
+  </header>
+  <div class="wrap">
+    <div class="toolbar">
+      <button onclick="carregar()">Atualizar</button>
+      <span class="status" id="status"></span>
+    </div>
+    <table id="tbl">
+      <thead><tr>
+        <th></th><th>Instalação</th><th>Ramal</th><th>Versão</th><th>Último heartbeat</th><th>Uptime</th>
+        <th>Chamadas</th><th>RAM atual</th><th>Pico RAM</th><th>Private</th><th>Handles</th><th>Threads</th><th>CPU</th><th>Operação</th>
+      </tr></thead>
+      <tbody id="tbody"><tr><td colspan="14" class="empty">Carregando…</td></tr></tbody>
+    </table>
+
+    <div id="detail">
+      <button class="close-btn" onclick="fecharDetalhe()">Fechar</button>
+      <h2 id="detTitle"></h2>
+      <div class="meta" id="detMeta"></div>
+      <div class="charts">
+        <div class="chart-box"><div class="title">RAM (Working Set) — MB</div><canvas id="cRam"></canvas></div>
+        <div class="chart-box"><div class="title">Private Bytes — MB</div><canvas id="cPriv"></canvas></div>
+        <div class="chart-box"><div class="title">Handles</div><canvas id="cHandles"></canvas></div>
+        <div class="chart-box"><div class="title">Chamadas desde o início</div><canvas id="cCalls"></canvas></div>
+      </div>
+      <table id="tblSnap">
+        <thead><tr><th>Hora</th><th>RAM</th><th>Private</th><th>Managed Heap</th><th>Handles</th><th>Threads</th><th>CPU</th><th>Chamadas</th><th>Operação</th></tr></thead>
+        <tbody id="tbodySnap"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+const LS_URL = 'waven_diag_url', LS_TOKEN = 'waven_diag_token';
+
+function apiUrl(){ return (localStorage.getItem(LS_URL) || '').replace(/\/$/, ''); }
+function apiToken(){ return localStorage.getItem(LS_TOKEN) || ''; }
+
+function salvarLogin(){
+  const url = document.getElementById('inUrl').value.trim();
+  const token = document.getElementById('inToken').value.trim();
+  if(!url || !token){ document.getElementById('loginErr').textContent = 'Preencha URL e token.'; return; }
+  localStorage.setItem(LS_URL, url);
+  localStorage.setItem(LS_TOKEN, token);
+  entrar();
+}
+function logout(){
+  localStorage.removeItem(LS_URL); localStorage.removeItem(LS_TOKEN);
+  document.getElementById('app').style.display='none';
+  document.getElementById('login').style.display='block';
+}
+function entrar(){
+  document.getElementById('login').style.display='none';
+  document.getElementById('app').style.display='block';
+  document.getElementById('apiUrlLabel').textContent = apiUrl();
+  carregar();
+}
+
+async function apiGet(path){
+  const resp = await fetch(apiUrl() + path, { headers: { 'Authorization': 'Bearer ' + apiToken() } });
+  if(!resp.ok) throw new Error('HTTP ' + resp.status);
+  return resp.json();
+}
+
+function statusDe(inst){
+  const minsDesde = (Date.now() - new Date(inst.lastSeenUtc + 'Z')) / 60000;
+  if(minsDesde > 3) return 'off';
+  if(inst.ultimoWorkingSetMb >= 1000) return 'crit';
+  if(inst.ultimoWorkingSetMb >= 500) return 'warn';
+  return 'ok';
+}
+function badgeTexto(s){ return {ok:'Normal', warn:'Atenção', crit:'Crítico', off:'Offline'}[s]; }
+function fmtDur(segs){
+  const h = Math.floor(segs/3600), m = Math.floor((segs%3600)/60);
+  return h + 'h ' + m + 'm';
+}
+function fmtHora(iso){
+  const d = new Date(iso + (iso.endsWith('Z') ? '' : 'Z'));
+  return d.toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+}
+
+let instalacoes = [];
+
+async function carregar(){
+  const st = document.getElementById('status');
+  st.textContent = 'Atualizando…';
+  try{
+    instalacoes = await apiGet('/api/diagnostics/installations');
+    renderTabela();
+    st.textContent = instalacoes.length + ' instalação(ões) — ' + new Date().toLocaleTimeString('pt-BR');
+  }catch(e){
+    st.textContent = 'Falha ao consultar API: ' + e.message;
+  }
+}
+
+function renderTabela(){
+  const tbody = document.getElementById('tbody');
+  if(instalacoes.length === 0){
+    tbody.innerHTML = '<tr><td colspan="14" class="empty">Nenhuma instalação reportou heartbeat ainda.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = instalacoes.map(i => {
+    const s = statusDe(i);
+    const nome = i.machineAlias && i.machineAlias.length ? i.machineAlias : i.machineId;
+    return `<tr onclick="abrirDetalhe('${i.id}')">
+      <td><span class="dot ${s}"></span><span class="badge ${s}">${badgeTexto(s)}</span></td>
+      <td>${nome}</td>
+      <td>${i.ramal || '—'}</td>
+      <td>${i.appVersion || '—'}</td>
+      <td>${fmtHora(i.lastSeenUtc)}</td>
+      <td class="tabnum">—</td>
+      <td class="tabnum">${i.ultimoCallsSinceStartup}</td>
+      <td class="tabnum">${i.ultimoWorkingSetMb.toFixed(0)} MB</td>
+      <td class="tabnum">${i.picoWorkingSetMb.toFixed(0)} MB</td>
+      <td class="tabnum">${i.ultimoPrivateBytesMb.toFixed(0)} MB</td>
+      <td class="tabnum">${i.ultimoHandleCount}</td>
+      <td class="tabnum">${i.ultimoThreadCount}</td>
+      <td class="tabnum">${i.ultimoCpuPercent.toFixed(1)}%</td>
+      <td>${i.ultimoLastOperation}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function abrirDetalhe(id){
+  const inst = instalacoes.find(i => i.id === id);
+  document.getElementById('detTitle').textContent = (inst.machineAlias || inst.machineId) + ' — ramal ' + (inst.ramal || '—');
+  document.getElementById('detMeta').textContent = 'installationId: ' + id + ' · versão ' + inst.appVersion;
+  document.getElementById('detail').style.display = 'block';
+  document.getElementById('detail').scrollIntoView({behavior:'smooth'});
+
+  let snaps;
+  try{ snaps = await apiGet('/api/diagnostics/installations/' + encodeURIComponent(id) + '/snapshots?horas=24'); }
+  catch(e){ document.getElementById('tbodySnap').innerHTML = '<tr><td colspan="9">Falha ao carregar: ' + e.message + '</td></tr>'; return; }
+
+  desenharGrafico('cRam', snaps.map(s=>s.workingSetMb));
+  desenharGrafico('cPriv', snaps.map(s=>s.privateBytesMb));
+  desenharGrafico('cHandles', snaps.map(s=>s.handleCount));
+  desenharGrafico('cCalls', snaps.map(s=>s.callsSinceStartup));
+
+  document.getElementById('tbodySnap').innerHTML = snaps.slice().reverse().map(s => `<tr>
+    <td>${fmtHora(s.timestampUtc)}</td>
+    <td class="tabnum">${s.workingSetMb.toFixed(0)} MB</td>
+    <td class="tabnum">${s.privateBytesMb.toFixed(0)} MB</td>
+    <td class="tabnum">${s.managedHeapMb.toFixed(0)} MB</td>
+    <td class="tabnum">${s.handleCount}</td>
+    <td class="tabnum">${s.threadCount}</td>
+    <td class="tabnum">${s.cpuPercent.toFixed(1)}%</td>
+    <td class="tabnum">${s.callsSinceStartup}</td>
+    <td>${s.lastOperation}</td>
+  </tr>`).join('');
+}
+function fecharDetalhe(){ document.getElementById('detail').style.display = 'none'; }
+
+// Sparkline simples em canvas — sem biblioteca externa.
+function desenharGrafico(canvasId, valores){
+  const canvas = document.getElementById(canvasId);
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth || 260, h = 120;
+  canvas.width = w*dpr; canvas.height = h*dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0,0,w,h);
+  if(valores.length === 0){
+    ctx.fillStyle = '#8a94a0'; ctx.font = '12px sans-serif'; ctx.fillText('sem dados', 10, h/2);
+    return;
+  }
+  const max = Math.max(...valores, 1), min = Math.min(...valores, 0);
+  const range = (max - min) || 1;
+  const pad = 8;
+  const x = i => pad + (i/(Math.max(valores.length-1,1))) * (w - pad*2);
+  const y = v => h - pad - ((v-min)/range) * (h - pad*2);
+
+  // grade sutil
+  ctx.strokeStyle = '#e3e6ea'; ctx.lineWidth = 1;
+  for(let g=0; g<=2; g++){ const gy = pad + g*(h-pad*2)/2; ctx.beginPath(); ctx.moveTo(pad,gy); ctx.lineTo(w-pad,gy); ctx.stroke(); }
+
+  // area
+  ctx.beginPath(); ctx.moveTo(x(0), h-pad);
+  valores.forEach((v,i)=> ctx.lineTo(x(i), y(v)));
+  ctx.lineTo(x(valores.length-1), h-pad); ctx.closePath();
+  ctx.fillStyle = 'rgba(59,74,130,0.10)'; ctx.fill();
+
+  // linha
+  ctx.beginPath();
+  valores.forEach((v,i)=> i===0 ? ctx.moveTo(x(i),y(v)) : ctx.lineTo(x(i),y(v)));
+  ctx.strokeStyle = '#3b4a82'; ctx.lineWidth = 1.6; ctx.stroke();
+
+  // ponto final
+  const lastI = valores.length-1;
+  ctx.beginPath(); ctx.arc(x(lastI), y(valores[lastI]), 3, 0, 7); ctx.fillStyle = '#3b4a82'; ctx.fill();
+
+  // rótulos min/max
+  ctx.fillStyle = '#66707a'; ctx.font = '10px sans-serif';
+  ctx.fillText(max.toFixed(0), pad, pad+8);
+  ctx.fillText(min.toFixed(0), pad, h-2);
+}
+
+// boot
+if(apiUrl() && apiToken()){ entrar(); }
+</script>
+</body>
+</html>

@@ -4,15 +4,24 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "2.4.1";
+        public const string Versao  = "2.4.2";
         public const string NomeApp = "WavenVoIP";
 
-        public static readonly DateTime DataBuild = new DateTime(2026, 8, 14);
+        public static readonly DateTime DataBuild = new DateTime(2026, 8, 15);
 
         public static string VersaoCompleta => $"{NomeApp} v{Versao}";
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v2.4.2 — Diagnostico remoto (15/08/2026)\n" +
+            "• Diagnostico remoto de desempenho e estabilidade\n" +
+            "• Monitoramento de memoria, CPU, handles, threads e I/O\n" +
+            "• Correlacao de consumo com volume de chamadas\n" +
+            "• Monitoramento remoto de incidentes\n" +
+            "• Preserva as correcoes de memoria e favoritos da v2.4.1\n" +
+            "• [SAFE] Nenhuma alteracao em SIP, discagem, CDR, Issabel, BRDID, AMI, dialplan ou "+
+            "Google Contacts\n" +
+            "\n" +
             "v2.4.1 — Memoria e favoritos (14/08/2026)\n" +
             "• Correcao de consumo excessivo de memoria durante uso prolongado e muitas chamadas\n" +
             "• Melhorias na liberacao dos recursos de audio apos o encerramento das ligacoes\n" +

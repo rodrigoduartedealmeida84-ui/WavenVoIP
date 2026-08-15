@@ -80,6 +80,24 @@ namespace WavenVoIP.Services
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
             var json = JsonSerializer.Serialize(itens, new JsonSerializerOptions { WriteIndented = true });
             File.WriteAllText(_path, json);
+            UltimoTotalConhecido = itens.Count;
+        }
+
+        // Atualizado a cada Salvar()/ExecutarAtomico — permite a telemetria de diagnóstico
+        // reportar a contagem de itens sem reler/reparsear historico.json a cada heartbeat
+        // (arquivo pode ter até 5000 itens; reler no heartbeat violaria o requisito de
+        // telemetria "leve" — ver DiagnosticTelemetryService).
+        internal static int UltimoTotalConhecido { get; private set; }
+
+        // Tamanho em disco via FileInfo — não lê o conteúdo do arquivo.
+        internal static double TamanhoArquivoKb()
+        {
+            try
+            {
+                var fi = new FileInfo(_path);
+                return fi.Exists ? Math.Round(fi.Length / 1024.0, 1) : 0;
+            }
+            catch { return 0; }
         }
 
         // v2.3.6 — elimina a condição de corrida entre RegistrarHistorico (grava o stub Cancelada no
