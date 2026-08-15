@@ -32,6 +32,7 @@ try
         opt.UseSqlite($"Data Source={dbPath}"));
 
     builder.Services.AddHostedService<DiagnosticRetentionService>();
+    builder.Services.AddHostedService<DiagnosticAnalysisService>();
 
     // ── Limite de payload ─────────────────────────────────────────────────────
     var maxBytes = builder.Configuration.GetValue<int>("WavenApi:MaxPayloadBytes", 1_048_576);
@@ -89,7 +90,17 @@ try
 
     // ── Painel administrativo estático (wwwroot/diagnostics) ───────────────────
     app.UseDefaultFiles();
-    app.UseStaticFiles();
+    // Sem Cache-Control explícito, StaticFileMiddleware só manda ETag/Last-Modified —
+    // navegadores aplicam cache heurístico (RFC 7234) por conta própria e podem servir
+    // uma cópia velha do painel sem revalidar, mesmo com o arquivo já atualizado no
+    // servidor (causa real de um "painel parou de mostrar dados" após deploy — o HTML/JS
+    // rodando no navegador era de uma versão anterior). no-cache força revalidação
+    // (condicional via ETag) a cada carga — não impede cache, só exige checar primeiro.
+    app.UseStaticFiles(new Microsoft.AspNetCore.Builder.StaticFileOptions
+    {
+        OnPrepareResponse = ctx =>
+            ctx.Context.Response.Headers.CacheControl = "no-cache, must-revalidate",
+    });
 
     // ── Auth middleware (antes das rotas) ─────────────────────────────────────
     app.UseMiddleware<BearerAuthMiddleware>();

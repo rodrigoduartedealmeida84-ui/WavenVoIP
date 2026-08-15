@@ -8,54 +8,110 @@
   :root{
     --bg:#f4f5f7; --surface:#fff; --border:#dde1e6; --ink:#1a222b; --muted:#66707a;
     --ok:#1f8a55; --ok-bg:#e6f6ec; --warn:#a3720a; --warn-bg:#fdf1d8;
-    --crit:#b3261e; --crit-bg:#fbe4e2; --offline:#8a94a0; --offline-bg:#eceff2;
-    --accent:#3b4a82;
+    --crit:#b3261e; --crit-bg:#fbe4e2; --emerg:#7a1210; --emerg-bg:#f6d3d1; --offline:#8a94a0; --offline-bg:#eceff2;
+    --accent:#3b4a82; --accent-bg:#e9ecf7;
   }
   *{box-sizing:border-box;}
   body{margin:0; background:var(--bg); color:var(--ink); font:14px/1.5 -apple-system,Segoe UI,Arial,sans-serif;}
   header{background:var(--surface); border-bottom:1px solid var(--border); padding:14px 20px; display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;}
   header h1{font-size:17px; margin:0;}
   header .sub{color:var(--muted); font-size:12px;}
-  .wrap{padding:20px; max-width:1200px; margin:0 auto;}
-  .toolbar{display:flex; gap:10px; align-items:center; margin-bottom:16px; flex-wrap:wrap;}
-  .toolbar input{padding:6px 9px; border:1px solid var(--border); border-radius:6px; font-size:13px;}
-  .toolbar button{padding:7px 14px; border:1px solid var(--accent); background:var(--accent); color:#fff; border-radius:6px; cursor:pointer; font-size:13px;}
-  .toolbar button.secondary{background:transparent; color:var(--accent);}
-  .toolbar .status{font-size:12px; color:var(--muted); margin-left:auto;}
-  table{width:100%; border-collapse:collapse; background:var(--surface); border:1px solid var(--border); border-radius:8px; overflow:hidden;}
-  th,td{padding:9px 10px; text-align:left; border-bottom:1px solid var(--border); font-size:12.5px; white-space:nowrap;}
-  th{background:#f0f1f4; font-weight:600; color:var(--muted); text-transform:uppercase; font-size:10.5px; letter-spacing:.03em;}
-  tbody tr{cursor:pointer;}
-  tbody tr:hover{background:#f8f9fb;}
-  tbody tr:last-child td{border-bottom:none;}
-  .dot{display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; vertical-align:middle;}
-  .dot.ok{background:var(--ok);} .dot.warn{background:var(--warn);} .dot.crit{background:var(--crit);} .dot.off{background:var(--offline);}
-  .badge{display:inline-block; padding:1px 7px; border-radius:10px; font-size:11px; font-weight:600;}
-  .badge.ok{background:var(--ok-bg); color:var(--ok);} .badge.warn{background:var(--warn-bg); color:var(--warn);}
-  .badge.crit{background:var(--crit-bg); color:var(--crit);} .badge.off{background:var(--offline-bg); color:var(--offline);}
-  .tabnum{font-variant-numeric:tabular-nums;}
+  .wrap{padding:20px; max-width:1400px; margin:0 auto;}
+  button{padding:7px 14px; border:1px solid var(--accent); background:var(--accent); color:#fff; border-radius:6px; cursor:pointer; font-size:13px;}
+  button.ghost{background:transparent; color:var(--ink); border:1px solid var(--border);}
+  button.small{padding:4px 10px; font-size:12px;}
+  button.danger{background:var(--emerg); border-color:var(--emerg);}
+  .status-line{font-size:12px; color:var(--muted); margin-bottom:14px; display:flex; justify-content:space-between; align-items:center;}
+  select{padding:6px 9px; border:1px solid var(--border); border-radius:6px; font-size:13px;}
+
   #login{max-width:420px; margin:80px auto; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:24px;}
   #login h2{margin-top:0; font-size:16px;}
   #login label{display:block; font-size:12px; color:var(--muted); margin:12px 0 4px;}
   #login input{width:100%; padding:8px 10px; border:1px solid var(--border); border-radius:6px; font-size:13px;}
-  #login button{margin-top:16px; width:100%; padding:9px; border:none; background:var(--accent); color:#fff; border-radius:6px; cursor:pointer; font-size:13px;}
+  #login button{margin-top:16px; width:100%; padding:9px;}
   #login .err{color:var(--crit); font-size:12px; margin-top:8px; min-height:16px;}
-  #detail{display:none; margin-top:20px; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:18px;}
-  #detail h2{margin:0 0 4px; font-size:15px;}
-  #detail .meta{color:var(--muted); font-size:12px; margin-bottom:16px;}
-  .charts{display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:16px;}
-  .chart-box{border:1px solid var(--border); border-radius:8px; padding:10px;}
-  .chart-box .title{font-size:11px; text-transform:uppercase; letter-spacing:.03em; color:var(--muted); margin-bottom:6px;}
-  canvas{width:100%; height:120px; display:block;}
-  .close-btn{float:right; background:transparent; border:1px solid var(--border); border-radius:6px; padding:5px 10px; cursor:pointer; font-size:12px;}
-  .empty{padding:40px; text-align:center; color:var(--muted);}
+
+  section{margin-bottom:22px;}
+  .section-title{font-size:11.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); font-weight:600; margin-bottom:8px; display:flex; align-items:center; gap:8px;}
+
+  /* Cards de resumo */
+  .cards{display:grid; grid-template-columns:repeat(8, 1fr); gap:10px;}
+  .card{background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:12px; text-align:center;}
+  .card .v{font-size:22px; font-weight:700; font-variant-numeric:tabular-nums;}
+  .card .k{font-size:10.5px; text-transform:uppercase; color:var(--muted); letter-spacing:.03em; margin-top:2px;}
+  .card.ok .v{color:var(--ok);} .card.warn .v{color:var(--warn);} .card.crit .v{color:var(--crit);} .card.emerg .v{color:var(--emerg);}
+  .card.metric .v{font-size:15px; color:var(--accent);}
+  .card.metric .k2{font-size:11px; color:var(--ink); margin-top:1px;}
+
+  /* Alerta grande em destaque */
+  .big-alert{border:2px solid var(--emerg); background:var(--emerg-bg); border-radius:10px; padding:18px 20px; margin-bottom:10px;}
+  .big-alert.CRITICO{border-color:var(--crit); background:var(--crit-bg);}
+  .big-alert.ATENCAO{border-color:var(--warn); background:var(--warn-bg);}
+  .big-alert h3{margin:0 0 10px; font-size:15px;}
+  .big-alert .metrics{display:grid; grid-template-columns:repeat(auto-fit, minmax(140px,1fr)); gap:10px; margin-bottom:12px;}
+  .big-alert .metrics .m .k{font-size:10.5px; text-transform:uppercase; color:var(--muted);}
+  .big-alert .metrics .m .v{font-size:15px; font-weight:600; font-variant-numeric:tabular-nums;}
+  .big-alert .tags{font-family:ui-monospace,Consolas,monospace; font-size:11px; color:var(--muted); margin-bottom:10px;}
+  .empty{padding:24px; text-align:center; color:var(--muted); font-size:13px;}
+
+  /* Tabela principal compacta */
+  .tablewrap{overflow-x:auto; border-radius:8px; border:1px solid var(--border);}
+  table{width:100%; border-collapse:collapse; background:var(--surface);}
+  th,td{padding:9px 10px; text-align:left; border-bottom:1px solid var(--border); font-size:12.5px;}
+  th{background:#f0f1f4; font-weight:600; color:var(--muted); text-transform:uppercase; font-size:10px; letter-spacing:.03em; white-space:nowrap;}
+  tbody tr:hover{background:#f8f9fb;}
+  tbody tr:last-child td{border-bottom:none;}
+  .tabnum{font-variant-numeric:tabular-nums; text-align:right; white-space:nowrap;}
+  .up{color:var(--crit);} .down{color:var(--ok);}
+  .dot{display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:5px; vertical-align:middle;}
+  .dot.NORMAL{background:var(--ok);} .dot.ATENCAO{background:var(--warn);} .dot.CRITICO{background:var(--crit);}
+  .dot.EMERGENCIA{background:var(--emerg);} .dot.OFFLINE{background:var(--offline);}
+  .badge{display:inline-block; padding:1px 8px; border-radius:10px; font-size:10.5px; font-weight:600; text-transform:uppercase; white-space:nowrap;}
+  .badge.NORMAL{background:var(--ok-bg); color:var(--ok);} .badge.ATENCAO{background:var(--warn-bg); color:var(--warn);}
+  .badge.CRITICO{background:var(--crit-bg); color:var(--crit);} .badge.EMERGENCIA{background:var(--emerg-bg); color:var(--emerg);}
+  .badge.OFFLINE{background:var(--offline-bg); color:var(--offline);}
+  .causa-cell{max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11.5px; color:var(--muted);}
+
+  /* Modal de detalhe */
+  #detailOverlay{display:none; position:fixed; inset:0; background:rgba(20,26,33,.45); z-index:20; padding:24px; overflow-y:auto;}
+  #detail{background:var(--surface); border-radius:10px; max-width:1100px; margin:0 auto; padding:22px 26px 26px;}
+  #detail h2{margin:0 0 4px; font-size:17px;}
+  #detail .meta{color:var(--muted); font-size:12px; margin-bottom:14px;}
+  .close-btn{float:right;}
+  .detail-section{border:1px solid var(--border); border-radius:8px; padding:14px 16px; margin-bottom:14px;}
+  .detail-section h4{margin:0 0 10px; font-size:11.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted);}
+  .kv-grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(150px,1fr)); gap:10px;}
+  .kv-grid .kv .k{font-size:10.5px; text-transform:uppercase; color:var(--muted);}
+  .kv-grid .kv .v{font-size:15px; font-weight:600; font-variant-numeric:tabular-nums;}
+  .invest-box{background:var(--accent-bg); border-radius:8px; padding:12px 14px; font-size:13px; margin-top:10px;}
+  .invest-box ul{margin:6px 0 0; padding-left:18px;}
+  .invest-box .warn-note{font-size:11px; color:var(--muted); margin-top:8px; font-style:italic;}
+  .period-row{display:flex; gap:6px; margin-bottom:12px;}
+  .period-row button.active{background:var(--accent); color:#fff;}
+  .period-row button{background:transparent; color:var(--ink); border:1px solid var(--border);}
+  .charts{display:grid; grid-template-columns:repeat(auto-fill, minmax(230px,1fr)); gap:12px; margin-bottom:10px;}
+  .chart-box{border:1px solid var(--border); border-radius:8px; padding:9px;}
+  .chart-box .title{font-size:10.5px; text-transform:uppercase; letter-spacing:.03em; color:var(--muted); margin-bottom:4px;}
+  canvas{width:100%; height:90px; display:block;}
+  .footnote{font-size:11px; color:var(--muted); margin-top:6px;}
+  details.mais-metricas{margin-top:6px;}
+  details.mais-metricas summary{cursor:pointer; font-size:12px; color:var(--accent); font-weight:600; margin-bottom:8px;}
+
+  .findings-list, .incidents-list{display:flex; flex-direction:column; gap:6px; max-height:260px; overflow-y:auto;}
+  .finding-row{border:1px solid var(--border); border-radius:6px; padding:8px 10px; font-size:12px; display:flex; justify-content:space-between; gap:10px;}
+  .status-pill{font-family:ui-monospace,Consolas,monospace; font-size:10px; padding:2px 7px; border-radius:10px; background:var(--accent-bg); color:var(--accent); white-space:nowrap;}
+
+  #compareBox{display:none;}
+  .compare-grid{display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:12px;}
+
+  @media (max-width:1100px){ .cards{grid-template-columns:repeat(4,1fr);} }
 </style>
 </head>
 <body>
 
 <div id="login">
   <h2>Diagnóstico Remoto WavenVoIP</h2>
-  <p style="font-size:12.5px;color:var(--muted);margin:0;">Consulta direta à Waven API. O token fica só neste navegador (localStorage), nunca é enviado a mais ninguém.</p>
+  <p style="font-size:12.5px;color:var(--muted);margin:0;">Consulta direta à Waven API. O token fica só neste navegador (localStorage).</p>
   <label>URL da Waven API</label>
   <input id="inUrl" placeholder="https://api.almeidagas.com" />
   <label>Bearer token</label>
@@ -70,42 +126,108 @@
       <h1>Diagnóstico Remoto WavenVoIP</h1>
       <div class="sub" id="apiUrlLabel"></div>
     </div>
-    <button class="secondary" onclick="logout()" style="border:1px solid var(--border);background:transparent;color:var(--ink);padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;">Trocar servidor/token</button>
+    <div style="display:flex; gap:8px;">
+      <button class="ghost small" onclick="mostrarComparacao()">Comparar instalações</button>
+      <button class="ghost small" onclick="logout()">Trocar servidor/token</button>
+    </div>
   </header>
   <div class="wrap">
-    <div class="toolbar">
-      <button onclick="carregar()">Atualizar</button>
-      <span class="status" id="status"></span>
-    </div>
-    <table id="tbl">
-      <thead><tr>
-        <th></th><th>Instalação</th><th>Ramal</th><th>Versão</th><th>Último heartbeat</th><th>Uptime</th>
-        <th>Chamadas</th><th>RAM atual</th><th>Pico RAM</th><th>Private</th><th>Handles</th><th>Threads</th><th>CPU</th><th>Operação</th>
-      </tr></thead>
-      <tbody id="tbody"><tr><td colspan="14" class="empty">Carregando…</td></tr></tbody>
-    </table>
 
-    <div id="detail">
-      <button class="close-btn" onclick="fecharDetalhe()">Fechar</button>
-      <h2 id="detTitle"></h2>
-      <div class="meta" id="detMeta"></div>
-      <div class="charts">
-        <div class="chart-box"><div class="title">RAM (Working Set) — MB</div><canvas id="cRam"></canvas></div>
-        <div class="chart-box"><div class="title">Private Bytes — MB</div><canvas id="cPriv"></canvas></div>
-        <div class="chart-box"><div class="title">Handles</div><canvas id="cHandles"></canvas></div>
-        <div class="chart-box"><div class="title">Chamadas desde o início</div><canvas id="cCalls"></canvas></div>
+    <section>
+      <div class="cards" id="cards"></div>
+    </section>
+
+    <section id="bigAlertsSection" style="display:none">
+      <div class="section-title">🚨 Alertas em destaque</div>
+      <div id="bigAlerts"></div>
+    </section>
+
+    <section>
+      <div class="status-line">
+        <span id="status"></span>
+        <button class="ghost small" onclick="carregar()">Atualizar</button>
       </div>
-      <table id="tblSnap">
-        <thead><tr><th>Hora</th><th>RAM</th><th>Private</th><th>Managed Heap</th><th>Handles</th><th>Threads</th><th>CPU</th><th>Chamadas</th><th>Operação</th></tr></thead>
-        <tbody id="tbodySnap"></tbody>
-      </table>
+      <div class="tablewrap"><table id="tbl">
+        <thead><tr>
+          <th></th><th>Instalação</th><th>Ramal</th><th>Versão</th><th>Últ. heartbeat</th>
+          <th>Chamadas</th><th>RAM atual</th><th>Pico RAM</th><th>Private</th><th>Heap</th>
+          <th>Handles</th><th>LogQueue</th><th>CPU</th><th>Causa / Classificação</th><th></th>
+        </tr></thead>
+        <tbody id="tbody"><tr><td colspan="15" class="empty">Carregando…</td></tr></tbody>
+      </table></div>
+    </section>
+
+    <div id="compareBox">
+      <div class="section-title">Comparar duas instalações <button class="ghost small" onclick="fecharComparacao()" style="margin-left:auto">Fechar</button></div>
+      <div class="compare-grid">
+        <select id="cmpA"></select>
+        <select id="cmpB"></select>
+      </div>
+      <button onclick="compararAgora()">Comparar</button>
+      <div id="cmpResult" style="margin-top:12px"></div>
+    </div>
+
+  </div>
+</div>
+
+<div id="detailOverlay" onclick="if(event.target===this) fecharDetalhe()">
+  <div id="detail">
+    <button class="close-btn ghost small" onclick="fecharDetalhe()">Fechar ✕</button>
+    <h2 id="detTitle"></h2>
+    <div class="meta" id="detMeta"></div>
+
+    <div class="detail-section" id="detInvestSection" style="display:none">
+      <h4>Resumo para investigação de código</h4>
+      <div id="detInvest"></div>
+    </div>
+
+    <div class="detail-section">
+      <h4>Resumo</h4>
+      <div class="kv-grid" id="detResumoKv"></div>
+    </div>
+    <div class="detail-section">
+      <h4>Recursos</h4>
+      <div class="kv-grid" id="detRecursosKv"></div>
+    </div>
+    <div class="detail-section">
+      <h4>Atividade</h4>
+      <div class="kv-grid" id="detAtividadeKv"></div>
+    </div>
+    <div class="detail-section" id="detDiagSection" style="display:none">
+      <h4>Diagnóstico</h4>
+      <div id="detDiag"></div>
+    </div>
+
+    <div class="detail-section">
+      <h4>Série temporal</h4>
+      <div class="period-row" id="periodRow">
+        <button data-p="1h" onclick="mudarPeriodo('1h')">1h</button>
+        <button data-p="4h" onclick="mudarPeriodo('4h')">4h</button>
+        <button data-p="hoje" onclick="mudarPeriodo('hoje')">Hoje</button>
+        <button data-p="24h" class="active" onclick="mudarPeriodo('24h')">24h</button>
+        <button data-p="7d" onclick="mudarPeriodo('7d')">7 dias</button>
+      </div>
+      <div class="charts" id="detChartsPrincipais"></div>
+      <div class="footnote" id="detAgregNota"></div>
+      <details class="mais-metricas">
+        <summary>Mais métricas (GC, LOH, POH, Threads, GDI, USER, CPU)</summary>
+        <div class="charts" id="detChartsExtras"></div>
+      </details>
+    </div>
+
+    <div class="detail-section">
+      <h4>Diagnósticos (persistentes) desta instalação</h4>
+      <div class="findings-list" id="detFindings"><div class="empty">Nenhum diagnóstico registrado ainda.</div></div>
+    </div>
+    <div class="detail-section">
+      <h4>Incidentes recentes</h4>
+      <div class="incidents-list" id="detIncidents"><div class="empty">Nenhum incidente.</div></div>
     </div>
   </div>
 </div>
 
 <script>
 const LS_URL = 'waven_diag_url', LS_TOKEN = 'waven_diag_token';
-
 function apiUrl(){ return (localStorage.getItem(LS_URL) || '').replace(/\/$/, ''); }
 function apiToken(){ return localStorage.getItem(LS_TOKEN) || ''; }
 
@@ -113,8 +235,7 @@ function salvarLogin(){
   const url = document.getElementById('inUrl').value.trim();
   const token = document.getElementById('inToken').value.trim();
   if(!url || !token){ document.getElementById('loginErr').textContent = 'Preencha URL e token.'; return; }
-  localStorage.setItem(LS_URL, url);
-  localStorage.setItem(LS_TOKEN, token);
+  localStorage.setItem(LS_URL, url); localStorage.setItem(LS_TOKEN, token);
   entrar();
 }
 function logout(){
@@ -128,147 +249,346 @@ function entrar(){
   document.getElementById('apiUrlLabel').textContent = apiUrl();
   carregar();
 }
-
 async function apiGet(path){
   const resp = await fetch(apiUrl() + path, { headers: { 'Authorization': 'Bearer ' + apiToken() } });
   if(!resp.ok) throw new Error('HTTP ' + resp.status);
   return resp.json();
 }
 
-function statusDe(inst){
-  const minsDesde = (Date.now() - new Date(inst.lastSeenUtc + 'Z')) / 60000;
-  if(minsDesde > 3) return 'off';
-  if(inst.ultimoWorkingSetMb >= 1000) return 'crit';
-  if(inst.ultimoWorkingSetMb >= 500) return 'warn';
-  return 'ok';
-}
-function badgeTexto(s){ return {ok:'Normal', warn:'Atenção', crit:'Crítico', off:'Offline'}[s]; }
-function fmtDur(segs){
-  const h = Math.floor(segs/3600), m = Math.floor((segs%3600)/60);
-  return h + 'h ' + m + 'm';
-}
 function fmtHora(iso){
-  const d = new Date(iso + (iso.endsWith('Z') ? '' : 'Z'));
+  if(!iso) return '—';
+  const d = new Date(iso.endsWith('Z') ? iso : iso + 'Z');
   return d.toLocaleString('pt-BR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+}
+function sinal(v){ return (v ?? 0) > 0 ? '+' : ''; }
+function deltaClasse(v){ v = v ?? 0; return v > 0 ? 'up' : (v < 0 ? 'down' : ''); }
+function n(v, casas){ return (v ?? 0).toFixed(casas ?? 0); }
+function iv(v){ return (v === null || v === undefined) ? '—' : v; }
+function fmtMbGb(mb){
+  mb = mb ?? 0;
+  return mb >= 1024 ? (mb/1024).toFixed(2) + ' GB' : mb.toFixed(0) + ' MB';
+}
+function fmtBig(v){
+  v = v ?? 0;
+  if(v >= 1e6) return (v/1e6).toFixed(2) + 'M';
+  if(v >= 1e3) return (v/1e3).toFixed(1) + 'k';
+  return String(v);
 }
 
 let instalacoes = [];
+
+let findingsAbertos = [];
 
 async function carregar(){
   const st = document.getElementById('status');
   st.textContent = 'Atualizando…';
   try{
     instalacoes = await apiGet('/api/diagnostics/installations');
+    try{ findingsAbertos = await apiGet('/api/diagnostics/findings?apenasAbertos=true'); }
+    catch(e){ findingsAbertos = []; }
+    renderCards();
     renderTabela();
+    renderBigAlerts();
     st.textContent = instalacoes.length + ' instalação(ões) — ' + new Date().toLocaleTimeString('pt-BR');
-  }catch(e){
-    st.textContent = 'Falha ao consultar API: ' + e.message;
-  }
+  }catch(e){ st.textContent = 'Falha ao consultar API: ' + e.message; }
+}
+
+function renderCards(){
+  const box = document.getElementById('cards');
+  const online = instalacoes.filter(i => i.online).length;
+  const porStatus = s => instalacoes.filter(i => i.status === s).length;
+  const maiorRam = instalacoes.slice().sort((a,b)=>b.workingSetAtualMb-a.workingSetAtualMb)[0];
+  const maiorHeap = instalacoes.slice().sort((a,b)=>b.managedHeapAtualMb-a.managedHeapAtualMb)[0];
+  const maiorLogQ = instalacoes.slice().sort((a,b)=>b.logQueueAtual-a.logQueueAtual)[0];
+  const rot = i => i ? `${i.machineAlias || i.machineId} (ramal ${i.ramal})` : '—';
+
+  box.innerHTML = `
+    <div class="card"><div class="v">${online}</div><div class="k">Online</div></div>
+    <div class="card ok"><div class="v">${porStatus('NORMAL')}</div><div class="k">Normais</div></div>
+    <div class="card warn"><div class="v">${porStatus('ATENCAO')}</div><div class="k">Atenção</div></div>
+    <div class="card crit"><div class="v">${porStatus('CRITICO')}</div><div class="k">Críticas</div></div>
+    <div class="card emerg"><div class="v">${porStatus('EMERGENCIA')}</div><div class="k">Emergência</div></div>
+    <div class="card metric"><div class="v">${maiorRam ? fmtMbGb(maiorRam.workingSetAtualMb) : '—'}</div><div class="k2">${rot(maiorRam)}</div><div class="k">Maior RAM</div></div>
+    <div class="card metric"><div class="v">${maiorHeap ? fmtMbGb(maiorHeap.managedHeapAtualMb) : '—'}</div><div class="k2">${rot(maiorHeap)}</div><div class="k">Maior Heap</div></div>
+    <div class="card metric"><div class="v">${maiorLogQ ? fmtBig(maiorLogQ.logQueueAtual) : '—'}</div><div class="k2">${rot(maiorLogQ)}</div><div class="k">Maior LogQueue</div></div>
+  `;
 }
 
 function renderTabela(){
   const tbody = document.getElementById('tbody');
   if(instalacoes.length === 0){
-    tbody.innerHTML = '<tr><td colspan="14" class="empty">Nenhuma instalação reportou heartbeat ainda.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="15" class="empty">Nenhuma instalação reportou heartbeat ainda.</td></tr>';
     return;
   }
   tbody.innerHTML = instalacoes.map(i => {
-    const s = statusDe(i);
-    const nome = i.machineAlias && i.machineAlias.length ? i.machineAlias : i.machineId;
-    return `<tr onclick="abrirDetalhe('${i.id}')">
-      <td><span class="dot ${s}"></span><span class="badge ${s}">${badgeTexto(s)}</span></td>
-      <td>${nome}</td>
-      <td>${i.ramal || '—'}</td>
-      <td>${i.appVersion || '—'}</td>
-      <td>${fmtHora(i.lastSeenUtc)}</td>
-      <td class="tabnum">—</td>
-      <td class="tabnum">${i.ultimoCallsSinceStartup}</td>
-      <td class="tabnum">${i.ultimoWorkingSetMb.toFixed(0)} MB</td>
-      <td class="tabnum">${i.picoWorkingSetMb.toFixed(0)} MB</td>
-      <td class="tabnum">${i.ultimoPrivateBytesMb.toFixed(0)} MB</td>
-      <td class="tabnum">${i.ultimoHandleCount}</td>
-      <td class="tabnum">${i.ultimoThreadCount}</td>
-      <td class="tabnum">${i.ultimoCpuPercent.toFixed(1)}%</td>
-      <td>${i.ultimoLastOperation}</td>
-    </tr>`;
+    try {
+      const nome = i.machineAlias && i.machineAlias.length ? i.machineAlias : i.machineId;
+      const findingAberto = findingsAbertos.find(f => f.installationId === i.id);
+      const causa = findingAberto ? (findingAberto.classifications || findingAberto.probableCause || '') : '';
+      return `<tr>
+        <td><span class="dot ${i.status}"></span><span class="badge ${i.status}">${i.status}</span></td>
+        <td>${nome}</td><td>${i.ramal || '—'}</td><td>${i.appVersion || '—'}</td><td>${fmtHora(i.lastSeenUtc)}</td>
+        <td class="tabnum">${iv(i.callsSinceStartup)}</td>
+        <td class="tabnum">${fmtMbGb(i.workingSetAtualMb)}</td>
+        <td class="tabnum">${fmtMbGb(i.workingSetPicoMb)}</td>
+        <td class="tabnum">${fmtMbGb(i.privateAtualMb)}</td>
+        <td class="tabnum">${fmtMbGb(i.managedHeapAtualMb)}</td>
+        <td class="tabnum">${iv(i.handlesAtual)}</td>
+        <td class="tabnum">${fmtBig(i.logQueueAtual)}</td>
+        <td class="tabnum">${n(i.cpuPercent,1)}%</td>
+        <td class="causa-cell" title="${causa}">${causa || '—'}</td>
+        <td><button class="small" onclick="abrirDetalhe('${i.id}')">Ver detalhes</button></td>
+      </tr>`;
+    } catch(e) {
+      console.error('Falha ao renderizar linha', i && i.id, e);
+      return `<tr style="background:#fdf1d8"><td colspan="5"><span class="badge ATENCAO">ERRO</span> ${(i&&(i.machineAlias||i.machineId))||'?'}</td>
+        <td class="tabnum">${iv(i&&i.callsSinceStartup)}</td><td class="tabnum">${fmtMbGb(i&&i.workingSetAtualMb)}</td>
+        <td colspan="2"></td><td class="tabnum">${iv(i&&i.handlesAtual)}</td><td colspan="2"></td>
+        <td class="tabnum">${n(i&&i.cpuPercent,1)}%</td><td colspan="2">erro de exibição — ver console</td></tr>`;
+    }
   }).join('');
 }
 
-async function abrirDetalhe(id){
-  const inst = instalacoes.find(i => i.id === id);
-  document.getElementById('detTitle').textContent = (inst.machineAlias || inst.machineId) + ' — ramal ' + (inst.ramal || '—');
-  document.getElementById('detMeta').textContent = 'installationId: ' + id + ' · versão ' + inst.appVersion;
-  document.getElementById('detail').style.display = 'block';
-  document.getElementById('detail').scrollIntoView({behavior:'smooth'});
+function renderBigAlerts(){
+  const section = document.getElementById('bigAlertsSection');
+  const box = document.getElementById('bigAlerts');
+  if(!findingsAbertos || findingsAbertos.length === 0){ section.style.display='none'; return; }
+  section.style.display='block';
 
-  let snaps;
-  try{ snaps = await apiGet('/api/diagnostics/installations/' + encodeURIComponent(id) + '/snapshots?horas=24'); }
-  catch(e){ document.getElementById('tbodySnap').innerHTML = '<tr><td colspan="9">Falha ao carregar: ' + e.message + '</td></tr>'; return; }
+  const ordem = {EMERGENCIA:0, CRITICO:1, ATENCAO:2};
+  findingsAbertos.sort((a,b) => (ordem[a.severity]??9) - (ordem[b.severity]??9));
 
-  desenharGrafico('cRam', snaps.map(s=>s.workingSetMb));
-  desenharGrafico('cPriv', snaps.map(s=>s.privateBytesMb));
-  desenharGrafico('cHandles', snaps.map(s=>s.handleCount));
-  desenharGrafico('cCalls', snaps.map(s=>s.callsSinceStartup));
-
-  document.getElementById('tbodySnap').innerHTML = snaps.slice().reverse().map(s => `<tr>
-    <td>${fmtHora(s.timestampUtc)}</td>
-    <td class="tabnum">${s.workingSetMb.toFixed(0)} MB</td>
-    <td class="tabnum">${s.privateBytesMb.toFixed(0)} MB</td>
-    <td class="tabnum">${s.managedHeapMb.toFixed(0)} MB</td>
-    <td class="tabnum">${s.handleCount}</td>
-    <td class="tabnum">${s.threadCount}</td>
-    <td class="tabnum">${s.cpuPercent.toFixed(1)}%</td>
-    <td class="tabnum">${s.callsSinceStartup}</td>
-    <td>${s.lastOperation}</td>
-  </tr>`).join('');
+  box.innerHTML = findingsAbertos.map(f => {
+    const inst = instalacoes.find(i => i.id === f.installationId);
+    const nome = inst ? (inst.machineAlias || inst.machineId) : (f.installationId||'').slice(0,10);
+    const emoji = f.severity === 'EMERGENCIA' ? '🚨' : f.severity === 'CRITICO' ? '⛔' : '⚠️';
+    return `<div class="big-alert ${f.severity}">
+      <h3>${emoji} ${f.severity} — RAMAL ${f.ramal || '—'} (${nome})</h3>
+      <div class="metrics">
+        <div class="m"><div class="k">RAM</div><div class="v">${fmtMbGb(f.workingSetStartMb)} → ${fmtMbGb(f.workingSetPeakMb)}</div></div>
+        <div class="m"><div class="k">Private</div><div class="v">${fmtMbGb(f.privateStartMb)} → ${fmtMbGb(f.privatePeakMb)}</div></div>
+        <div class="m"><div class="k">Managed Heap</div><div class="v">${fmtMbGb(f.managedHeapStartMb)} → ${fmtMbGb(f.managedHeapPeakMb)}</div></div>
+        <div class="m"><div class="k">Handles</div><div class="v">${iv(f.handlesStart)} → ${iv(f.handlesPeak)}</div></div>
+        <div class="m"><div class="k">LogQueue pico</div><div class="v">${fmtBig(f.logQueuePeak)}</div></div>
+        <div class="m"><div class="k">Chamadas</div><div class="v">${iv(f.callsAtPeak)}</div></div>
+      </div>
+      <div class="tags">${f.classifications || 'sem classificação ainda'} · status <b>${f.status}</b></div>
+      ${f.probableCause ? `<div style="margin-bottom:10px">${f.probableCause}</div>` : ''}
+      <button onclick="abrirDetalhe('${f.installationId}')">Investigar</button>
+    </div>`;
+  }).join('');
 }
-function fecharDetalhe(){ document.getElementById('detail').style.display = 'none'; }
 
-// Sparkline simples em canvas — sem biblioteca externa.
-function desenharGrafico(canvasId, valores){
-  const canvas = document.getElementById(canvasId);
+// ── Detalhe da instalação ───────────────────────────────────────────────────
+let detalheAtualId = null, periodoAtual = '24h';
+
+async function abrirDetalhe(id){
+  detalheAtualId = id;
+  document.getElementById('detailOverlay').style.display = 'block';
+
+  let data;
+  try{ data = await apiGet('/api/diagnostics/installations/' + encodeURIComponent(id) + '/summary'); }
+  catch(e){ document.getElementById('detTitle').textContent = 'Falha: ' + e.message; return; }
+
+  const inst = data.installation;
+  document.getElementById('detTitle').textContent = (inst.machineAlias || inst.machineId) + ' — ramal ' + (inst.ramal || '—');
+  document.getElementById('detMeta').innerHTML =
+    `installationId: ${inst.id} · versão ${inst.appVersion} · <span class="badge ${inst.status}">${inst.status}</span> · ` +
+    `primeiro heartbeat ${fmtHora(inst.firstSeenUtc)} · último ${fmtHora(inst.lastSeenUtc)} · uptime ${Math.floor(inst.uptimeSeconds/3600)}h${Math.floor((inst.uptimeSeconds%3600)/60)}m`;
+
+  document.getElementById('detResumoKv').innerHTML = kv([
+    ['RAM inicial', fmtMbGb(inst.workingSetInicialMb)], ['RAM atual', fmtMbGb(inst.workingSetAtualMb)], ['RAM pico', fmtMbGb(inst.workingSetPicoMb)],
+    ['Private inicial', fmtMbGb(inst.privateInicialMb)], ['Private atual', fmtMbGb(inst.privateAtualMb)], ['Private pico', fmtMbGb(inst.privatePicoMb)],
+    ['Managed Heap atual', fmtMbGb(inst.managedHeapAtualMb)], ['Managed Heap pico', fmtMbGb(inst.managedHeapPicoMb)],
+    ['Δ RAM', sinal(inst.crescimentoRamMb)+n(inst.crescimentoRamMb)+' MB'], ['Δ Private', sinal(inst.crescimentoPrivateMb)+n(inst.crescimentoPrivateMb)+' MB'],
+  ]);
+  document.getElementById('detRecursosKv').innerHTML = kv([
+    ['Handles inicial', iv(inst.handlesInicial)], ['Handles atual', iv(inst.handlesAtual)], ['Handles pico', iv(inst.handlesPico)],
+    ['Δ Handles', sinal(inst.crescimentoHandles)+iv(inst.crescimentoHandles)],
+    ['Threads', iv(inst.threads)], ['GDI Objects', iv(inst.gdiObjects)], ['USER Objects', iv(inst.userObjects)],
+    ['Handles / 100 chamadas', inst.handlesPor100Chamadas != null ? n(inst.handlesPor100Chamadas,1) : '—'],
+  ]);
+  document.getElementById('detAtividadeKv').innerHTML = kv([
+    ['Chamadas desde início', iv(inst.callsSinceStartup)], ['CPU', n(inst.cpuPercent,1)+'%'],
+    ['Read MB/s', n(inst.readMBs,2)], ['Write MB/s', n(inst.writeMBs,2)],
+    ['LogQueue atual', fmtBig(inst.logQueueAtual)], ['LogQueue pico', fmtBig(inst.logQueuePico)],
+    ['Última operação', inst.lastOperation || '—'], ['MB / 100 chamadas', inst.mbPor100Chamadas != null ? n(inst.mbPor100Chamadas,1) : '—'],
+  ]);
+
+  // Diagnóstico + Resumo para investigação — do finding mais recente (aberto ou não).
+  const diagSection = document.getElementById('detDiagSection');
+  const investSection = document.getElementById('detInvestSection');
+  if(data.diagnosticos && data.diagnosticos.length > 0){
+    const f = data.diagnosticos[0];
+    diagSection.style.display = 'block';
+    document.getElementById('detDiag').innerHTML = `
+      <div class="kv-grid">
+        <div class="kv"><div class="k">Classificações</div><div class="v" style="font-size:12px">${f.classifications||'—'}</div></div>
+        <div class="kv"><div class="k">Status</div><div class="v"><span class="status-pill">${f.status}</span></div></div>
+        <div class="kv"><div class="k">Severidade</div><div class="v"><span class="badge ${f.severity}">${f.severity}</span></div></div>
+      </div>
+      <p style="margin:10px 0 4px"><b>Causa provável:</b> ${f.probableCause || '—'}</p>
+      <p style="margin:4px 0"><b>Evidência:</b> ${f.evidence || '—'}</p>
+      <p style="margin:4px 0"><b>Componentes suspeitos:</b> ${f.suspectComponents || '—'}</p>
+      ${f.contradictions ? `<p style="margin:4px 0"><b>Contradições:</b> ${f.contradictions}</p>` : ''}
+    `;
+
+    try {
+      const invest = await apiGet('/api/diagnostics/findings/' + f.id);
+      const r = invest.resumoInvestigacao;
+      if(r){
+        investSection.style.display = 'block';
+        document.getElementById('detInvest').innerHTML = `
+          <p>${r.interpretacaoPreliminar}</p>
+          <p><b>Tendência do LogQueue:</b> ${r.tendenciaLogQueue} · <b>Correlação LogQueue×ManagedHeap:</b> ${r.logQueueCorrelacaoComManagedHeap}</p>
+          <p><b>Última operação mais frequente no período:</b> ${(r.frequenciaLastOperation||[]).map(x=>`${x.operacao} (${x.ocorrencias}x)`).join(', ') || '—'}</p>
+          <div class="invest-box">
+            <b>Próxima investigação recomendada:</b>
+            <ul>${(r.proximaInvestigacaoRecomendada||[]).map(p=>`<li>${p}</li>`).join('')}</ul>
+            <div class="warn-note">${r.avisoImportante}</div>
+          </div>
+        `;
+      } else investSection.style.display = 'none';
+    } catch(e) { investSection.style.display = 'none'; }
+  } else {
+    diagSection.style.display = 'none';
+    investSection.style.display = 'none';
+  }
+
+  document.getElementById('detFindings').innerHTML = (!data.diagnosticos || data.diagnosticos.length === 0)
+    ? '<div class="empty">Nenhum diagnóstico registrado ainda.</div>'
+    : data.diagnosticos.map(f => `<div class="finding-row">
+        <span>#${f.id} · ${fmtHora(f.startedUtc)} → ${f.normalizedUtc ? fmtHora(f.normalizedUtc) : 'em aberto'} ·
+          RAM ${fmtMbGb(f.workingSetStartMb)}→${fmtMbGb(f.workingSetPeakMb)} · ${f.classifications || 'sem classificação'}</span>
+        <span class="status-pill">${f.status}</span>
+      </div>`).join('');
+
+  document.getElementById('detIncidents').innerHTML = (!data.incidentesRecentes || data.incidentesRecentes.length === 0)
+    ? '<div class="empty">Nenhum incidente.</div>'
+    : data.incidentesRecentes.slice(0,20).map(i => `<div class="finding-row">
+        <span>${fmtHora(i.timestampUtc)} · <b>${i.evento}</b> · ${i.detalhe || ''}</span>
+        <span class="status-pill">${fmtMbGb(i.workingSetMb)}</span>
+      </div>`).join('');
+
+  await carregarSerieTemporal(id, periodoAtual);
+}
+
+function kv(pares){
+  return pares.map(([k,v]) => `<div class="kv"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
+}
+
+function fecharDetalhe(){ document.getElementById('detailOverlay').style.display = 'none'; detalheAtualId = null; }
+
+function mudarPeriodo(p){
+  periodoAtual = p;
+  document.querySelectorAll('#periodRow button').forEach(b => b.classList.toggle('active', b.dataset.p === p));
+  if(detalheAtualId) carregarSerieTemporal(detalheAtualId, p);
+}
+
+// 5 principais primeiro (item 6 do pedido) + o resto dentro de "Mais métricas".
+const SERIES_PRINCIPAIS = [
+  ['Working Set (MB)', s => s.workingSetMb],
+  ['Private Bytes (MB)', s => s.privateBytesMb],
+  ['Managed Heap (MB)', s => s.managedHeapMb],
+  ['LogQueue', s => s.logQueueCount],
+  ['Handles', s => s.handleCount],
+  ['Chamadas acumuladas', s => s.callsSinceStartup],
+];
+const SERIES_EXTRAS = [
+  ['GC Total Memory (MB)', s => s.gcTotalMemoryMb],
+  ['LOH (MB)', s => s.lohMb],
+  ['POH (MB)', s => s.pohMb],
+  ['Threads', s => s.threadCount],
+  ['GDI Objects', s => s.gdiObjectCount],
+  ['USER Objects', s => s.userObjectCount],
+  ['CPU (%)', s => s.cpuPercent],
+  ['Read (MB/s)', s => s.readBytesPerSecond/1024/1024],
+  ['Write (MB/s)', s => s.writeBytesPerSecond/1024/1024],
+];
+
+async function carregarSerieTemporal(id, periodo){
+  const boxP = document.getElementById('detChartsPrincipais');
+  const boxE = document.getElementById('detChartsExtras');
+  boxP.innerHTML = SERIES_PRINCIPAIS.map(([l]) => `<div class="chart-box"><div class="title">${l}</div><canvas></canvas></div>`).join('');
+  boxE.innerHTML = SERIES_EXTRAS.map(([l]) => `<div class="chart-box"><div class="title">${l}</div><canvas></canvas></div>`).join('');
+
+  let data;
+  try{ data = await apiGet(`/api/diagnostics/installations/${encodeURIComponent(id)}/timeseries?periodo=${periodo}`); }
+  catch(e){ document.getElementById('detAgregNota').textContent = 'Falha ao carregar série: ' + e.message; return; }
+
+  document.getElementById('detAgregNota').textContent = data.agregado
+    ? `${data.pontosOriginais} pontos no período — exibindo ${data.pontos.length} agregados (pico preservado por balde, não média).`
+    : `${data.pontos.length} pontos no período.`;
+
+  SERIES_PRINCIPAIS.forEach(([label, fn], idx) => desenharGrafico(boxP.querySelectorAll('canvas')[idx], data.pontos.map(fn)));
+  SERIES_EXTRAS.forEach(([label, fn], idx) => desenharGrafico(boxE.querySelectorAll('canvas')[idx], data.pontos.map(fn)));
+}
+
+function desenharGrafico(canvas, valores){
   const dpr = window.devicePixelRatio || 1;
-  const w = canvas.clientWidth || 260, h = 120;
+  const w = canvas.clientWidth || 200, h = 90;
   canvas.width = w*dpr; canvas.height = h*dpr;
   const ctx = canvas.getContext('2d');
-  ctx.scale(dpr, dpr);
-  ctx.clearRect(0,0,w,h);
-  if(valores.length === 0){
-    ctx.fillStyle = '#8a94a0'; ctx.font = '12px sans-serif'; ctx.fillText('sem dados', 10, h/2);
-    return;
-  }
+  ctx.scale(dpr, dpr); ctx.clearRect(0,0,w,h);
+  if(!valores || valores.length === 0){ ctx.fillStyle = '#8a94a0'; ctx.font = '11px sans-serif'; ctx.fillText('sem dados', 8, h/2); return; }
   const max = Math.max(...valores, 1), min = Math.min(...valores, 0);
-  const range = (max - min) || 1;
-  const pad = 8;
+  const range = (max - min) || 1, pad = 6;
   const x = i => pad + (i/(Math.max(valores.length-1,1))) * (w - pad*2);
   const y = v => h - pad - ((v-min)/range) * (h - pad*2);
-
-  // grade sutil
   ctx.strokeStyle = '#e3e6ea'; ctx.lineWidth = 1;
   for(let g=0; g<=2; g++){ const gy = pad + g*(h-pad*2)/2; ctx.beginPath(); ctx.moveTo(pad,gy); ctx.lineTo(w-pad,gy); ctx.stroke(); }
-
-  // area
   ctx.beginPath(); ctx.moveTo(x(0), h-pad);
   valores.forEach((v,i)=> ctx.lineTo(x(i), y(v)));
   ctx.lineTo(x(valores.length-1), h-pad); ctx.closePath();
   ctx.fillStyle = 'rgba(59,74,130,0.10)'; ctx.fill();
-
-  // linha
   ctx.beginPath();
   valores.forEach((v,i)=> i===0 ? ctx.moveTo(x(i),y(v)) : ctx.lineTo(x(i),y(v)));
-  ctx.strokeStyle = '#3b4a82'; ctx.lineWidth = 1.6; ctx.stroke();
-
-  // ponto final
+  ctx.strokeStyle = '#3b4a82'; ctx.lineWidth = 1.5; ctx.stroke();
   const lastI = valores.length-1;
-  ctx.beginPath(); ctx.arc(x(lastI), y(valores[lastI]), 3, 0, 7); ctx.fillStyle = '#3b4a82'; ctx.fill();
-
-  // rótulos min/max
-  ctx.fillStyle = '#66707a'; ctx.font = '10px sans-serif';
-  ctx.fillText(max.toFixed(0), pad, pad+8);
-  ctx.fillText(min.toFixed(0), pad, h-2);
+  ctx.beginPath(); ctx.arc(x(lastI), y(valores[lastI]), 2.5, 0, 7); ctx.fillStyle = '#3b4a82'; ctx.fill();
+  ctx.fillStyle = '#66707a'; ctx.font = '9px sans-serif';
+  ctx.fillText(max.toFixed(0), pad, pad+7); ctx.fillText(min.toFixed(0), pad, h-2);
 }
 
-// boot
+// ── Comparação ───────────────────────────────────────────────────────────────
+function mostrarComparacao(){
+  const box = document.getElementById('compareBox');
+  box.style.display = box.style.display === 'block' ? 'none' : 'block';
+  const opts = instalacoes.map(i => `<option value="${i.id}">${(i.machineAlias||i.machineId)} — ramal ${i.ramal}</option>`).join('');
+  document.getElementById('cmpA').innerHTML = opts;
+  document.getElementById('cmpB').innerHTML = opts;
+}
+function fecharComparacao(){ document.getElementById('compareBox').style.display = 'none'; }
+
+async function compararAgora(){
+  const a = document.getElementById('cmpA').value, b = document.getElementById('cmpB').value;
+  const result = document.getElementById('cmpResult');
+  if(a === b){ result.innerHTML = '<div class="empty">Escolha duas instalações diferentes.</div>'; return; }
+  let data;
+  try{ data = await apiGet(`/api/diagnostics/compare?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`); }
+  catch(e){ result.innerHTML = '<div class="empty">Falha: ' + e.message + '</div>'; return; }
+
+  const linhas = [
+    ['Chamadas', x => x.callsSinceStartup],
+    ['RAM atual', x => fmtMbGb(x.workingSetAtualMb)],
+    ['Δ RAM', x => sinal(x.crescimentoRamMb)+n(x.crescimentoRamMb)+' MB'],
+    ['MB / 100 chamadas', x => x.mbPor100Chamadas != null ? n(x.mbPor100Chamadas,1) : '—'],
+    ['Private atual', x => fmtMbGb(x.privateAtualMb)],
+    ['Managed Heap atual', x => fmtMbGb(x.managedHeapAtualMb)],
+    ['Handles atual', x => x.handlesAtual],
+    ['Δ Handles', x => sinal(x.crescimentoHandles)+x.crescimentoHandles],
+    ['LogQueue atual', x => fmtBig(x.logQueueAtual)],
+    ['Threads', x => x.threads], ['GDI', x => x.gdiObjects], ['USER', x => x.userObjects],
+    ['Read MB/s', x => n(x.readMBs,2)], ['Write MB/s', x => n(x.writeMBs,2)],
+  ];
+  result.innerHTML = `<div class="tablewrap"><table><thead><tr><th>Métrica</th>
+      <th>${data.a.machineAlias||data.a.machineId} (ramal ${data.a.ramal})</th>
+      <th>${data.b.machineAlias||data.b.machineId} (ramal ${data.b.ramal})</th></tr></thead>
+    <tbody>${linhas.map(([k,fn]) => `<tr><td>${k}</td><td class="tabnum">${fn(data.a)}</td><td class="tabnum">${fn(data.b)}</td></tr>`).join('')}</tbody>
+    </table></div>
+    <p class="footnote">Comparar taxas "por 100 chamadas" é o que importa — várias métricas sobem naturalmente no aquecimento; o que só acontece na máquina problemática é o sinal real.</p>`;
+}
+
 if(apiUrl() && apiToken()){ entrar(); }
 </script>
 </body>

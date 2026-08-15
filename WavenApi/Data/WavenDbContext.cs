@@ -12,6 +12,7 @@ public class WavenDbContext(DbContextOptions<WavenDbContext> options) : DbContex
     public DbSet<DiagnosticInstallation> DiagnosticInstallations => Set<DiagnosticInstallation>();
     public DbSet<DiagnosticSnapshot>     DiagnosticSnapshots     => Set<DiagnosticSnapshot>();
     public DbSet<DiagnosticIncident>     DiagnosticIncidents     => Set<DiagnosticIncident>();
+    public DbSet<DiagnosticFinding>      DiagnosticFindings      => Set<DiagnosticFinding>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -61,6 +62,14 @@ public class WavenDbContext(DbContextOptions<WavenDbContext> options) : DbContex
             e.HasIndex(d => new { d.InstallationId, d.TimestampUtc });
             e.HasIndex(d => d.Evento);
             e.HasIndex(d => d.TimestampUtc);
+        });
+
+        modelBuilder.Entity<DiagnosticFinding>(e =>
+        {
+            e.HasKey(d => d.Id);
+            e.HasIndex(d => new { d.InstallationId, d.NormalizedUtc });
+            e.HasIndex(d => d.Status);
+            e.HasIndex(d => d.StartedUtc);
         });
     }
 }
