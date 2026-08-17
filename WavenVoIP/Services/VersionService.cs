@@ -4,15 +4,22 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "2.4.3";
+        public const string Versao  = "2.4.4";
         public const string NomeApp = "WavenVoIP";
 
-        public static readonly DateTime DataBuild = new DateTime(2026, 8, 15);
+        public static readonly DateTime DataBuild = new DateTime(2026, 8, 17);
 
         public static string VersaoCompleta => $"{NomeApp} v{Versao}";
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v2.4.4 — Instrumentacao de diagnostico remoto (17/08/2026)\n" +
+            "• [NEW] Diagnostico Remoto: exceptions UNOBSERVED_EXCEPTION agora capturam tipo, mensagem, inner exception, stack resumido, thread/task e origem funcional (tudo sanitizado: sem caminho de usuario, sem numero de telefone, sem credenciais) — antes so um texto fixo generico chegava ao servidor\n" +
+            "• [NEW] Helper interno FireAndForget observa as tasks de segundo plano de maior risco (sync com Waven API, o proprio heartbeat de diagnostico, sync do Google, exclusao/favoritar contato, auto-join de conferencia) no momento real da falha, nao so quando o coletor de lixo do .NET decide agir — sem mudar o comportamento de nenhuma dessas rotinas\n" +
+            "• [FIX] Painel de diagnostico: corrigido bug em que o pico de RAM de uma sessao antiga (ex.: o vazamento historico da v2.4.2) podia aparecer misturado com o pico da sessao atual — agora sempre exibidos separados (Pico da sessao atual / Pico historico)\n" +
+            "• [NEW] Deteccao de sessao no Diagnostico Remoto agora usa reinicio real do processo (queda no contador de uptime), nao mais uma janela de tempo aproximada\n" +
+            "• [SAFE] Versao de instrumentacao/diagnostico apenas — nenhuma mudanca de comportamento em SIP, audio, discador, CDR, Google Sync, Favoritos, Historico, WhatsApp ou AMI. Nao tenta corrigir a causa da UNOBSERVED_EXCEPTION nesta versao, so instrumenta para investigar com evidencia\n" +
+            "\n" +
             "v2.4.3 — Correcao de vazamento de memoria gerenciado (15/08/2026)\n" +
             "• Correcao de vazamento de memoria confirmado em producao (fila interna de log sem limite)\n" +
             "• Fila de log agora tem capacidade maxima — nao pode mais crescer sem limite\n" +

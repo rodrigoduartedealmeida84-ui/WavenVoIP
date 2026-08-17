@@ -43,8 +43,14 @@ public sealed class DiagnosticRetentionService(
             .Where(i => i.TimestampUtc < corteIncidents)
             .ExecuteDeleteAsync(ct);
 
-        if (snapshotsApagados > 0 || incidentsApagados > 0)
-            logger.LogInformation("DIAGNOSTIC_RETENTION_CLEANUP | snapshots={S} incidents={I}",
-                snapshotsApagados, incidentsApagados);
+        // v2.4.4 — mesma retenção do incidente-pai; DiagnosticExceptionDetail nunca sobrevive
+        // sozinho a um DiagnosticIncident já apagado (evita linha órfã acumulando pra sempre).
+        var excecoesApagadas = await db.DiagnosticExceptionDetails
+            .Where(d => d.TimestampUtc < corteIncidents)
+            .ExecuteDeleteAsync(ct);
+
+        if (snapshotsApagados > 0 || incidentsApagados > 0 || excecoesApagadas > 0)
+            logger.LogInformation("DIAGNOSTIC_RETENTION_CLEANUP | snapshots={S} incidents={I} exceptionDetails={E}",
+                snapshotsApagados, incidentsApagados, excecoesApagadas);
     }
 }

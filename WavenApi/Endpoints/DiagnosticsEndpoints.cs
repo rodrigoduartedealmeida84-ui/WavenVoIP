@@ -26,6 +26,10 @@ public static class DiagnosticsEndpoints
         g.MapGet("/findings/{id:long}",                 GetFindingDetail);
         g.MapGet("/installations/{id}/investigation",   GetInstallationInvestigation);
         g.MapGet("/summary",                            GetFleetSummary);
+
+        // v2.4.4 — instrumentação de UNOBSERVED_EXCEPTION (ver DiagnosticExceptionDetail)
+        g.MapGet("/installations/{id}/exceptions",       GetInstallationExceptions);
+        g.MapGet("/incidents/{id:long}/detail",          GetIncidentDetail);
     }
 
     // ── Rate limit server-side (ver comentário original) ────────────────────────
@@ -118,7 +122,7 @@ public static class DiagnosticsEndpoints
             return Results.Ok(new { ok = true, ignored = true, reason = "rate_limited" });
         _ultimoIncident[chave] = DateTime.UtcNow;
 
-        db.DiagnosticIncidents.Add(new DiagnosticIncident
+        var incident = new DiagnosticIncident
         {
             InstallationId = req.InstallationId,
             Ramal          = req.Ramal ?? "",
@@ -134,39 +138,108 @@ public static class DiagnosticsEndpoints
             CpuPercent     = req.CpuPercent,
             CallsSinceStartup = req.CallsSinceStartup,
             LastOperation  = req.LastOperation ?? "IDLE",
-        });
-
+        };
+        db.DiagnosticIncidents.Add(incident);
         await db.SaveChangesAsync();
+
+        // v2.4.4 — se o cliente enviou detalhe de exceção (hoje: UNOBSERVED_EXCEPTION vindo do
+        // TaskScheduler.UnobservedTaskException ou do helper FireAndForget), persiste em tabela
+        // separada, 1:1 com o incidente. Nunca bloqueia/derruba o heartbeat principal por isso —
+        // truncamento E sanitização de novo no servidor (defesa em profundidade — o cliente já faz
+        // isso em DiagnosticTelemetryService.SanitizarTexto, mas o servidor não deve depender só do
+        // cliente se acertar: um cliente antigo/com bug poderia mandar texto cru sem sanitizar).
+        if (!string.IsNullOrWhiteSpace(req.ExceptionType))
+        {
+            db.DiagnosticExceptionDetails.Add(new DiagnosticExceptionDetail
+            {
+                IncidentId            = incident.Id,
+                InstallationId        = req.InstallationId,
+                TimestampUtc          = incident.TimestampUtc,
+                Origem                = Sanitizar(req.Origem, 200),
+                CaptureSource         = Truncar(req.CaptureSource, 40),
+                ExceptionType         = Truncar(req.ExceptionType, 200),
+                ExceptionMessage      = Sanitizar(req.ExceptionMessage, 500),
+                InnerExceptionType    = string.IsNullOrWhiteSpace(req.InnerExceptionType) ? null : Truncar(req.InnerExceptionType, 200),
+                InnerExceptionMessage = string.IsNullOrWhiteSpace(req.InnerExceptionMessage) ? null : Sanitizar(req.InnerExceptionMessage, 500),
+                StackTraceTop         = Sanitizar(req.StackTraceTop, 1500),
+                ThreadId              = req.ExceptionThreadId,
+                TaskId                = req.ExceptionTaskId,
+            });
+            await db.SaveChangesAsync();
+        }
+
         logger.LogWarning("DIAGNOSTIC_INCIDENT | id={Id} evento={Evento} ramal={Ramal} workingSetMb={Mb} detalhe={Detalhe}",
             req.InstallationId, req.Evento, req.Ramal, req.WorkingSetMb, req.Detalhe);
 
         return Results.Ok(new { ok = true });
     }
 
+    private static string Truncar(string? s, int max)
+        => string.IsNullOrEmpty(s) ? "" : (s.Length <= max ? s : s[..max]);
+
+    // v2.4.4 — mesma lógica de DiagnosticTelemetryService.SanitizarTexto no cliente, repetida
+    // aqui como defesa em profundidade (não confiar só no cliente ter sanitizado certo).
+    private static readonly System.Text.RegularExpressions.Regex RegexCaminhoUsuario =
+        new(@"[A-Za-z]:\\Users\\[^\\]+\\?", System.Text.RegularExpressions.RegexOptions.Compiled);
+    private static readonly System.Text.RegularExpressions.Regex RegexPossivelTelefone =
+        new(@"\b\d{10,13}\b", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private static string Sanitizar(string? s, int max)
+    {
+        if (string.IsNullOrEmpty(s)) return "";
+        var t = RegexCaminhoUsuario.Replace(s, @"C:\Users\<user>\");
+        t = RegexPossivelTelefone.Replace(t, "<num>");
+        return Truncar(t, max);
+    }
+
     // ── Núcleo de correlação compartilhado (endpoints de leitura) ──────────────
-    // Mesma heurística de "sessão atual" usada pelo DiagnosticAnalysisService: infere o
-    // início da sessão a partir do UptimeSeconds do snapshot mais recente, sem precisar
-    // de coluna nova. Ver comentário completo em DiagnosticAnalysisService.cs.
+    // v2.4.4 — sessão atual detectada por QUEBRA REAL de UptimeSeconds (sinal 100%
+    // confiável de reinício do processo: uptime só pode crescer enquanto o mesmo processo
+    // roda), substituindo a heurística anterior de janela de tempo fixa (2min de folga),
+    // que podia cortar uma sessão longa no meio ou juntar sessão nova com a anterior.
+    // Ainda sem coluna nova no banco — é só uma varredura sobre os snapshots já existentes.
+    // Cap de 3000 snapshots (~2,5 dias a 60s/heartbeat) é generoso o bastante pra cobrir
+    // qualquer sessão real de desktop sem carregar o histórico inteiro da instalação.
+    private const int MaxSnapshotsParaSessao = 3000;
 
     private sealed record ResumoSessao(
         DiagnosticSnapshot Baseline, DiagnosticSnapshot Latest, List<DiagnosticSnapshot> Sessao,
         double PicoWorkingSetMb, double PicoPrivateMb, double PicoManagedHeapMb, int PicoHandles, int PicoLogQueue);
+
+    // Divide uma lista de snapshots (ordem cronológica) em sessões, cortando toda vez que
+    // UptimeSeconds cai em relação ao snapshot anterior — só acontece quando o processo
+    // reiniciou (novo Stopwatch.StartNew() em DiagnosticTelemetryService).
+    private static List<List<DiagnosticSnapshot>> DetectarSessoes(List<DiagnosticSnapshot> ordemCronologica)
+    {
+        var sessoes = new List<List<DiagnosticSnapshot>>();
+        var atual = new List<DiagnosticSnapshot>();
+        foreach (var s in ordemCronologica)
+        {
+            if (atual.Count > 0 && s.UptimeSeconds < atual[^1].UptimeSeconds)
+            {
+                sessoes.Add(atual);
+                atual = new List<DiagnosticSnapshot>();
+            }
+            atual.Add(s);
+        }
+        if (atual.Count > 0) sessoes.Add(atual);
+        return sessoes;
+    }
 
     private static async Task<ResumoSessao?> CarregarResumoSessaoAsync(WavenDbContext db, string installationId, CancellationToken ct = default)
     {
         var recentes = await db.DiagnosticSnapshots
             .Where(s => s.InstallationId == installationId)
             .OrderByDescending(s => s.TimestampUtc)
-            .Take(200)
+            .Take(MaxSnapshotsParaSessao)
             .ToListAsync(ct);
         if (recentes.Count == 0) return null;
-        recentes.Reverse();
-        var latest = recentes[^1];
+        recentes.Reverse(); // ordem cronológica
 
-        var inicioSessaoAprox = latest.TimestampUtc - TimeSpan.FromSeconds(latest.UptimeSeconds) - TimeSpan.FromMinutes(2);
-        var sessao = recentes.Where(s => s.TimestampUtc >= inicioSessaoAprox).ToList();
-        if (sessao.Count < 2) sessao = recentes;
+        var sessoes = DetectarSessoes(recentes);
+        var sessao = sessoes[^1]; // sessão mais recente = a atual
         var baseline = sessao[0];
+        var latest = sessao[^1];
 
         return new ResumoSessao(
             baseline, latest, sessao,
@@ -185,15 +258,23 @@ public static class DiagnosticsEndpoints
 
     // record (não anonymous object) — evita "dynamic" nos consumidores (OrderBy, cálculo do
     // texto de resumo) e deixa os nomes de campo do JSON explícitos/estáveis para o painel.
+    // v2.4.4 — "Pico" deixou de ser um único número ambíguo (bug confirmado: o painel
+    // misturava o pico histórico de todas as sessões já vividas por essa instalação com o
+    // pico da sessão atual). Agora: *PicoSessaoMb = só a sessão atual (detectada por
+    // DetectarSessoes); workingSetPicoHistoricoMb = inst.PicoWorkingSetMb, o único campo que
+    // realmente acumula pra sempre no banco (Private/Heap/Handles/Threads/LogQueue nunca
+    // tiveram um campo histórico persistido — não inventamos um agora, só renomeamos pra
+    // deixar claro que já eram sempre "da sessão").
     private sealed record InstallationSummary(
         string id, string machineId, string machineAlias, string ramal, string appVersion,
         DateTime firstSeenUtc, DateTime lastSeenUtc, bool online, string status, long uptimeSeconds,
-        double workingSetInicialMb, double workingSetAtualMb, double workingSetPicoMb,
-        double privateInicialMb, double privateAtualMb, double privatePicoMb,
-        double managedHeapAtualMb, double managedHeapPicoMb,
-        int handlesInicial, int handlesAtual, int handlesPico,
+        double workingSetInicialMb, double workingSetAtualMb,
+        double workingSetPicoSessaoMb, double workingSetPicoHistoricoMb,
+        double privateInicialMb, double privateAtualMb, double privatePicoSessaoMb,
+        double managedHeapAtualMb, double managedHeapPicoSessaoMb,
+        int handlesInicial, int handlesAtual, int handlesPicoSessao,
         int threads, int gdiObjects, int userObjects, double cpuPercent, double readMBs, double writeMBs,
-        int logQueueAtual, int logQueuePico, long callsSinceStartup,
+        int logQueueAtual, int logQueuePicoSessao, long callsSinceStartup,
         double crescimentoRamMb, double crescimentoPrivateMb, int crescimentoHandles,
         double? mbPor100Chamadas, double? handlesPor100Chamadas,
         int incidentCount, string lastOperation);
@@ -223,17 +304,21 @@ public static class DiagnosticsEndpoints
             appVersion: inst.AppVersion, firstSeenUtc: inst.FirstSeenUtc, lastSeenUtc: inst.LastSeenUtc,
             online: online, status: ClassificarStatus(wsAtual, online), uptimeSeconds: latest?.UptimeSeconds ?? 0,
             workingSetInicialMb: Math.Round(wsIni, 1), workingSetAtualMb: Math.Round(wsAtual, 1),
-            workingSetPicoMb: Math.Round(Math.Max(r?.PicoWorkingSetMb ?? 0, inst.PicoWorkingSetMb), 1),
+            // Sessão atual: só o que essa sessão realmente viveu — nunca contaminado por sessões
+            // anteriores. Histórico: inst.PicoWorkingSetMb, preservado como está desde sempre
+            // (nunca resetado, nunca apagado) — ver comentário no registro de PostHeartbeat.
+            workingSetPicoSessaoMb: Math.Round(r?.PicoWorkingSetMb ?? wsAtual, 1),
+            workingSetPicoHistoricoMb: Math.Round(inst.PicoWorkingSetMb, 1),
             privateInicialMb: Math.Round(privIni, 1), privateAtualMb: Math.Round(privAtual, 1),
-            privatePicoMb: Math.Round(r?.PicoPrivateMb ?? privAtual, 1),
+            privatePicoSessaoMb: Math.Round(r?.PicoPrivateMb ?? privAtual, 1),
             managedHeapAtualMb: Math.Round(latest?.ManagedHeapMb ?? inst.UltimoManagedHeapMb, 1),
-            managedHeapPicoMb: Math.Round(r?.PicoManagedHeapMb ?? 0, 1),
-            handlesInicial: handlesIni, handlesAtual: handlesAtual, handlesPico: Math.Max(r?.PicoHandles ?? 0, inst.UltimoHandleCount),
+            managedHeapPicoSessaoMb: Math.Round(r?.PicoManagedHeapMb ?? 0, 1),
+            handlesInicial: handlesIni, handlesAtual: handlesAtual, handlesPicoSessao: r?.PicoHandles ?? handlesAtual,
             threads: latest?.ThreadCount ?? inst.UltimoThreadCount, gdiObjects: latest?.GdiObjectCount ?? 0,
             userObjects: latest?.UserObjectCount ?? 0, cpuPercent: latest?.CpuPercent ?? inst.UltimoCpuPercent,
             readMBs: Math.Round((latest?.ReadBytesPerSecond ?? 0) / 1024.0 / 1024.0, 2),
             writeMBs: Math.Round((latest?.WriteBytesPerSecond ?? 0) / 1024.0 / 1024.0, 2),
-            logQueueAtual: latest?.LogQueueCount ?? 0, logQueuePico: r?.PicoLogQueue ?? 0,
+            logQueueAtual: latest?.LogQueueCount ?? 0, logQueuePicoSessao: r?.PicoLogQueue ?? 0,
             callsSinceStartup: callsAtual,
             crescimentoRamMb: Math.Round(crescimentoRam, 1), crescimentoPrivateMb: Math.Round(crescimentoPrivate, 1),
             crescimentoHandles: crescimentoHandles, mbPor100Chamadas: mbPor100, handlesPor100Chamadas: handlesPor100,
@@ -281,6 +366,21 @@ public static class DiagnosticsEndpoints
             .Take(50)
             .ToListAsync();
 
+        // v2.4.4 — sinaliza quais incidentes têm detalhe de exceção disponível (ver
+        // GET /incidents/{id}/detail), sem trazer o detalhe inteiro (stack/mensagem) nesta
+        // lista — evita payload grande quando há muitos incidentes.
+        var idsComDetalhe = (await db.DiagnosticExceptionDetails
+            .Where(d => d.InstallationId == id)
+            .Select(d => d.IncidentId)
+            .ToListAsync()).ToHashSet();
+        var incidentesComFlag = incidentes.Select(i => new
+        {
+            i.Id, i.InstallationId, i.Ramal, i.AppVersion, i.TimestampUtc, i.Evento, i.DuracaoMs, i.Detalhe,
+            i.WorkingSetMb, i.PrivateBytesMb, i.HandleCount, i.ThreadCount, i.CpuPercent, i.CallsSinceStartup,
+            i.LastOperation,
+            temDetalheExcecao = idsComDetalhe.Contains(i.Id),
+        }).ToList();
+
         var findings = await db.DiagnosticFindings
             .Where(f => f.InstallationId == id)
             .OrderByDescending(f => f.StartedUtc)
@@ -310,7 +410,7 @@ public static class DiagnosticsEndpoints
         {
             installation = projecao,
             resumo = resumoTexto,
-            incidentesRecentes = incidentes,
+            incidentesRecentes = incidentesComFlag,
             diagnosticos = findings,
         });
     }
@@ -431,6 +531,105 @@ public static class DiagnosticsEndpoints
         if (finding == null)
             return Results.Ok(new { mensagem = "Nenhum diagnóstico (finding) registrado para esta instalação ainda.", finding = (object?)null });
         return Results.Ok(await MontarDetalheFindingAsync(finding, db));
+    }
+
+    // ── GET /api/diagnostics/installations/{id}/exceptions?dias=7 — v2.4.4 ────────────
+    // Lista as exceções detalhadas (UNOBSERVED_EXCEPTION com DiagnosticExceptionDetail)
+    // desta instalação — pensado para o fluxo "investigue o incidente do ramal X": traz
+    // tipo/mensagem/stack/origem/captureSource sem precisar cruzar manualmente incident+detail.
+
+    private static async Task<IResult> GetInstallationExceptions(string id, int? dias, WavenDbContext db)
+    {
+        var desde = DateTime.UtcNow.AddDays(-(dias is > 0 and <= 90 ? dias.Value : 30));
+        var detalhes = await db.DiagnosticExceptionDetails
+            .Where(d => d.InstallationId == id && d.TimestampUtc >= desde)
+            .OrderByDescending(d => d.TimestampUtc)
+            .Take(100)
+            .ToListAsync();
+        if (detalhes.Count == 0) return Results.Ok(new { total = 0, exceptions = Array.Empty<object>() });
+
+        var incidentIds = detalhes.Select(d => d.IncidentId).ToList();
+        var incidentes = await db.DiagnosticIncidents
+            .Where(i => incidentIds.Contains(i.Id))
+            .ToDictionaryAsync(i => i.Id);
+
+        var resultado = detalhes.Select(d => new
+        {
+            incident = incidentes.TryGetValue(d.IncidentId, out var inc) ? inc : null,
+            detalhe = d,
+        });
+        return Results.Ok(new { total = detalhes.Count, exceptions = resultado });
+    }
+
+    // ── GET /api/diagnostics/incidents/{id}/detail — v2.4.4 ────────────────────────────
+    // Detalhe completo de UM incidente: o registro em si, o DiagnosticExceptionDetail (se
+    // houver) e a correlação de métricas antes/depois (item 7 do pedido) — handles/threads/
+    // WorkingSet/Private nos instantes -1 amostra, no incidente, +1min, +5min, +15min.
+    // Calculada sob demanda a partir dos snapshots já existentes — nenhuma coluna nova,
+    // nenhum job agendado. NÃO classifica o padrão como leak confirmado — só expõe os
+    // números pra quem for investigar decidir.
+
+    private static async Task<IResult> GetIncidentDetail(long id, WavenDbContext db)
+    {
+        var incidente = await db.DiagnosticIncidents.FindAsync(id);
+        if (incidente == null) return Results.NotFound();
+
+        var detalheExcecao = await db.DiagnosticExceptionDetails
+            .Where(d => d.IncidentId == id)
+            .FirstOrDefaultAsync();
+
+        var correlacao = await MontarCorrelacaoAsync(db, incidente.InstallationId, incidente.TimestampUtc);
+
+        return Results.Ok(new
+        {
+            incidente,
+            detalheExcecao,
+            correlacao,
+        });
+    }
+
+    private sealed record PontoCorrelacao(string offset, DateTime? timestampUtc, double? workingSetMb,
+        double? privateBytesMb, double? managedHeapMb, int? handleCount, int? threadCount, string? lastOperation);
+
+    // Pega o snapshot mais próximo de cada offset em relação ao incidente. "antes" busca o
+    // snapshot imediatamente anterior (não um offset fixo) porque é o baseline mais honesto
+    // pra comparação; os demais buscam o mais próximo do alvo dentro de uma tolerância de
+    // metade do intervalo de heartbeat (~30s) pra não pegar um ponto de outra sessão/gap.
+    private static async Task<List<PontoCorrelacao>> MontarCorrelacaoAsync(WavenDbContext db, string installationId, DateTime incidenteUtc)
+    {
+        var janela = await db.DiagnosticSnapshots
+            .Where(s => s.InstallationId == installationId &&
+                        s.TimestampUtc >= incidenteUtc.AddMinutes(-5) && s.TimestampUtc <= incidenteUtc.AddMinutes(20))
+            .OrderBy(s => s.TimestampUtc)
+            .ToListAsync();
+
+        PontoCorrelacao Ponto(string offset, DateTime alvo, TimeSpan tolerancia)
+        {
+            var maisProximo = janela
+                .Select(s => (snap: s, dist: (s.TimestampUtc - alvo).Duration()))
+                .Where(x => x.dist <= tolerancia)
+                .OrderBy(x => x.dist)
+                .FirstOrDefault();
+            if (maisProximo.snap == null) return new PontoCorrelacao(offset, null, null, null, null, null, null, null);
+            var s = maisProximo.snap;
+            return new PontoCorrelacao(offset, s.TimestampUtc, s.WorkingSetMb, s.PrivateBytesMb, s.ManagedHeapMb,
+                s.HandleCount, s.ThreadCount, s.LastOperation);
+        }
+
+        var antes = janela.Where(s => s.TimestampUtc < incidenteUtc).OrderByDescending(s => s.TimestampUtc).FirstOrDefault();
+        var pontoAntes = antes == null
+            ? new PontoCorrelacao("antes", null, null, null, null, null, null, null)
+            : new PontoCorrelacao("antes", antes.TimestampUtc, antes.WorkingSetMb, antes.PrivateBytesMb,
+                antes.ManagedHeapMb, antes.HandleCount, antes.ThreadCount, antes.LastOperation);
+
+        return new List<PontoCorrelacao>
+        {
+            pontoAntes,
+            Ponto("no_incidente", incidenteUtc, TimeSpan.FromSeconds(45)),
+            Ponto("+1min", incidenteUtc.AddMinutes(1), TimeSpan.FromSeconds(30)),
+            Ponto("+5min", incidenteUtc.AddMinutes(5), TimeSpan.FromSeconds(30)),
+            Ponto("+15min", incidenteUtc.AddMinutes(15), TimeSpan.FromSeconds(30)),
+        };
     }
 
     private static async Task<object> MontarDetalheFindingAsync(DiagnosticFinding finding, WavenDbContext db)
@@ -597,8 +796,10 @@ public static class DiagnosticsEndpoints
             incidentesRecentes = incidentes24h,
             topRam = instalacoes.OrderByDescending(i => i.UltimoWorkingSetMb).Take(5)
                 .Select(i => new { i.Id, i.Ramal, i.UltimoWorkingSetMb }),
-            topPicoRam = instalacoes.OrderByDescending(i => i.PicoWorkingSetMb).Take(5)
-                .Select(i => new { i.Id, i.Ramal, i.PicoWorkingSetMb }),
+            // Explicitamente histórico (todas as sessões já vividas) — nunca confundir com pico
+            // da sessão atual de cada instalação, que fica em GetInstallations/GetInstallationSummary.
+            topPicoHistoricoRam = instalacoes.OrderByDescending(i => i.PicoWorkingSetMb).Take(5)
+                .Select(i => new { i.Id, i.Ramal, picoHistoricoMb = i.PicoWorkingSetMb }),
             topChamadas = instalacoes.OrderByDescending(i => i.UltimoCallsSinceStartup).Take(5)
                 .Select(i => new { i.Id, i.Ramal, i.UltimoCallsSinceStartup }),
             suspeitasManaged = Suspeitas("MANAGED_GROWTH_SUSPECT"),

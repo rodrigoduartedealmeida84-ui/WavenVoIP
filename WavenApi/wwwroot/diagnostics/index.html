@@ -150,10 +150,10 @@
       <div class="tablewrap"><table id="tbl">
         <thead><tr>
           <th></th><th>Instalação</th><th>Ramal</th><th>Versão</th><th>Últ. heartbeat</th>
-          <th>Chamadas</th><th>RAM atual</th><th>Pico RAM</th><th>Private</th><th>Heap</th>
+          <th>Chamadas</th><th>RAM atual</th><th>Pico sessão</th><th title="Maior valor já visto nesta instalação, em QUALQUER sessão/versão — pode ser bem mais antigo que a sessão atual">Pico histórico ⓘ</th><th>Private</th><th>Heap</th>
           <th>Handles</th><th>LogQueue</th><th>CPU</th><th>Causa / Classificação</th><th></th>
         </tr></thead>
-        <tbody id="tbody"><tr><td colspan="15" class="empty">Carregando…</td></tr></tbody>
+        <tbody id="tbody"><tr><td colspan="16" class="empty">Carregando…</td></tr></tbody>
       </table></div>
     </section>
 
@@ -317,7 +317,7 @@ function renderCards(){
 function renderTabela(){
   const tbody = document.getElementById('tbody');
   if(instalacoes.length === 0){
-    tbody.innerHTML = '<tr><td colspan="15" class="empty">Nenhuma instalação reportou heartbeat ainda.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="16" class="empty">Nenhuma instalação reportou heartbeat ainda.</td></tr>';
     return;
   }
   tbody.innerHTML = instalacoes.map(i => {
@@ -325,12 +325,19 @@ function renderTabela(){
       const nome = i.machineAlias && i.machineAlias.length ? i.machineAlias : i.machineId;
       const findingAberto = findingsAbertos.find(f => f.installationId === i.id);
       const causa = findingAberto ? (findingAberto.classifications || findingAberto.probableCause || '') : '';
+      // Destaca visualmente quando o pico histórico é bem maior que o da sessão atual —
+      // deixa óbvio de relance que aquele número é de outra sessão/versão, não de agora.
+      const historicoMuitoMaior = (i.workingSetPicoHistoricoMb || 0) > Math.max(500, (i.workingSetPicoSessaoMb || 0) * 1.5);
+      const picoHistoricoCell = historicoMuitoMaior
+        ? `<span class="badge ATENCAO" title="Pico histórico de outra sessão — não é o pico da sessão atual (${i.appVersion || '?'})">${fmtMbGb(i.workingSetPicoHistoricoMb)} (antigo)</span>`
+        : fmtMbGb(i.workingSetPicoHistoricoMb);
       return `<tr>
         <td><span class="dot ${i.status}"></span><span class="badge ${i.status}">${i.status}</span></td>
         <td>${nome}</td><td>${i.ramal || '—'}</td><td>${i.appVersion || '—'}</td><td>${fmtHora(i.lastSeenUtc)}</td>
         <td class="tabnum">${iv(i.callsSinceStartup)}</td>
         <td class="tabnum">${fmtMbGb(i.workingSetAtualMb)}</td>
-        <td class="tabnum">${fmtMbGb(i.workingSetPicoMb)}</td>
+        <td class="tabnum">${fmtMbGb(i.workingSetPicoSessaoMb)}</td>
+        <td class="tabnum">${picoHistoricoCell}</td>
         <td class="tabnum">${fmtMbGb(i.privateAtualMb)}</td>
         <td class="tabnum">${fmtMbGb(i.managedHeapAtualMb)}</td>
         <td class="tabnum">${iv(i.handlesAtual)}</td>
@@ -343,7 +350,7 @@ function renderTabela(){
       console.error('Falha ao renderizar linha', i && i.id, e);
       return `<tr style="background:#fdf1d8"><td colspan="5"><span class="badge ATENCAO">ERRO</span> ${(i&&(i.machineAlias||i.machineId))||'?'}</td>
         <td class="tabnum">${iv(i&&i.callsSinceStartup)}</td><td class="tabnum">${fmtMbGb(i&&i.workingSetAtualMb)}</td>
-        <td colspan="2"></td><td class="tabnum">${iv(i&&i.handlesAtual)}</td><td colspan="2"></td>
+        <td colspan="3"></td><td class="tabnum">${iv(i&&i.handlesAtual)}</td><td colspan="2"></td>
         <td class="tabnum">${n(i&&i.cpuPercent,1)}%</td><td colspan="2">erro de exibição — ver console</td></tr>`;
     }
   }).join('');
@@ -396,22 +403,27 @@ async function abrirDetalhe(id){
     `installationId: ${inst.id} · versão ${inst.appVersion} · <span class="badge ${inst.status}">${inst.status}</span> · ` +
     `primeiro heartbeat ${fmtHora(inst.firstSeenUtc)} · último ${fmtHora(inst.lastSeenUtc)} · uptime ${Math.floor(inst.uptimeSeconds/3600)}h${Math.floor((inst.uptimeSeconds%3600)/60)}m`;
 
+  // v2.4.4 — pico SEMPRE rotulado explicitamente sessão vs histórico (bug antigo: um único
+  // "pico" misturava os dois, então a sessão 2.4.3 de um ramal podia mostrar o pico de
+  // gigabytes de uma sessão 2.4.2 anterior como se fosse dela). Nunca mistura os dois números.
   document.getElementById('detResumoKv').innerHTML = kv([
-    ['RAM inicial', fmtMbGb(inst.workingSetInicialMb)], ['RAM atual', fmtMbGb(inst.workingSetAtualMb)], ['RAM pico', fmtMbGb(inst.workingSetPicoMb)],
-    ['Private inicial', fmtMbGb(inst.privateInicialMb)], ['Private atual', fmtMbGb(inst.privateAtualMb)], ['Private pico', fmtMbGb(inst.privatePicoMb)],
-    ['Managed Heap atual', fmtMbGb(inst.managedHeapAtualMb)], ['Managed Heap pico', fmtMbGb(inst.managedHeapPicoMb)],
-    ['Δ RAM', sinal(inst.crescimentoRamMb)+n(inst.crescimentoRamMb)+' MB'], ['Δ Private', sinal(inst.crescimentoPrivateMb)+n(inst.crescimentoPrivateMb)+' MB'],
+    ['RAM inicial (sessão atual)', fmtMbGb(inst.workingSetInicialMb)], ['RAM atual', fmtMbGb(inst.workingSetAtualMb)],
+    ['🔵 Pico da SESSÃO ATUAL', fmtMbGb(inst.workingSetPicoSessaoMb)],
+    ['⚪ Pico HISTÓRICO (todas as sessões)', fmtMbGb(inst.workingSetPicoHistoricoMb)],
+    ['Private inicial', fmtMbGb(inst.privateInicialMb)], ['Private atual', fmtMbGb(inst.privateAtualMb)], ['Private pico (sessão)', fmtMbGb(inst.privatePicoSessaoMb)],
+    ['Managed Heap atual', fmtMbGb(inst.managedHeapAtualMb)], ['Managed Heap pico (sessão)', fmtMbGb(inst.managedHeapPicoSessaoMb)],
+    ['Δ RAM (sessão)', sinal(inst.crescimentoRamMb)+n(inst.crescimentoRamMb)+' MB'], ['Δ Private (sessão)', sinal(inst.crescimentoPrivateMb)+n(inst.crescimentoPrivateMb)+' MB'],
   ]);
   document.getElementById('detRecursosKv').innerHTML = kv([
-    ['Handles inicial', iv(inst.handlesInicial)], ['Handles atual', iv(inst.handlesAtual)], ['Handles pico', iv(inst.handlesPico)],
-    ['Δ Handles', sinal(inst.crescimentoHandles)+iv(inst.crescimentoHandles)],
+    ['Handles inicial', iv(inst.handlesInicial)], ['Handles atual', iv(inst.handlesAtual)], ['Handles pico (sessão)', iv(inst.handlesPicoSessao)],
+    ['Δ Handles (sessão)', sinal(inst.crescimentoHandles)+iv(inst.crescimentoHandles)],
     ['Threads', iv(inst.threads)], ['GDI Objects', iv(inst.gdiObjects)], ['USER Objects', iv(inst.userObjects)],
     ['Handles / 100 chamadas', inst.handlesPor100Chamadas != null ? n(inst.handlesPor100Chamadas,1) : '—'],
   ]);
   document.getElementById('detAtividadeKv').innerHTML = kv([
     ['Chamadas desde início', iv(inst.callsSinceStartup)], ['CPU', n(inst.cpuPercent,1)+'%'],
     ['Read MB/s', n(inst.readMBs,2)], ['Write MB/s', n(inst.writeMBs,2)],
-    ['LogQueue atual', fmtBig(inst.logQueueAtual)], ['LogQueue pico', fmtBig(inst.logQueuePico)],
+    ['LogQueue atual', fmtBig(inst.logQueueAtual)], ['LogQueue pico (sessão)', fmtBig(inst.logQueuePicoSessao)],
     ['Última operação', inst.lastOperation || '—'], ['MB / 100 chamadas', inst.mbPor100Chamadas != null ? n(inst.mbPor100Chamadas,1) : '—'],
   ]);
 
@@ -465,12 +477,59 @@ async function abrirDetalhe(id){
 
   document.getElementById('detIncidents').innerHTML = (!data.incidentesRecentes || data.incidentesRecentes.length === 0)
     ? '<div class="empty">Nenhum incidente.</div>'
-    : data.incidentesRecentes.slice(0,20).map(i => `<div class="finding-row">
-        <span>${fmtHora(i.timestampUtc)} · <b>${i.evento}</b> · ${i.detalhe || ''}</span>
-        <span class="status-pill">${fmtMbGb(i.workingSetMb)}</span>
+    : data.incidentesRecentes.slice(0,20).map(i => `<div class="finding-row" style="flex-direction:column;align-items:stretch">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span>${fmtHora(i.timestampUtc)} · <b>${i.evento}</b> · ${i.detalhe || ''}</span>
+          <span style="display:flex;gap:8px;align-items:center">
+            <span class="status-pill">${fmtMbGb(i.workingSetMb)}</span>
+            ${i.temDetalheExcecao ? `<button class="ghost small" onclick="verDetalheExcecao(${i.id}, this)">Ver exceção</button>` : ''}
+          </span>
+        </div>
+        <div id="excDetail-${i.id}" style="display:none;margin-top:6px"></div>
       </div>`).join('');
 
   await carregarSerieTemporal(id, periodoAtual);
+}
+
+// v2.4.4 — instrumentação de UNOBSERVED_EXCEPTION: mostra tipo/mensagem/stack/origem/
+// captureSource + a correlação de métricas antes/+1min/+5min/+15min do incidente
+// (item 6/7 do pedido — "Claude, investigue o incidente do ramal X" usa este mesmo endpoint).
+async function verDetalheExcecao(incidentId, btn){
+  const el = document.getElementById('excDetail-' + incidentId);
+  if(el.style.display === 'block'){ el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  el.innerHTML = '<div class="empty">Carregando…</div>';
+  try{
+    const data = await apiGet('/api/diagnostics/incidents/' + incidentId + '/detail');
+    const d = data.detalheExcecao;
+    if(!d){ el.innerHTML = '<div class="empty">Sem detalhe de exceção para este incidente.</div>'; return; }
+    const corr = (data.correlacao || []).map(p => `
+      <tr><td>${p.offset}</td><td>${p.timestampUtc ? fmtHora(p.timestampUtc) : '—'}</td>
+      <td class="tabnum">${p.workingSetMb!=null ? fmtMbGb(p.workingSetMb) : '—'}</td>
+      <td class="tabnum">${p.handleCount!=null ? iv(p.handleCount) : '—'}</td>
+      <td class="tabnum">${p.threadCount!=null ? iv(p.threadCount) : '—'}</td>
+      <td>${p.lastOperation || '—'}</td></tr>`).join('');
+    el.innerHTML = `
+      <div class="invest-box">
+        <div class="kv-grid">
+          <div class="kv"><div class="k">Tipo</div><div class="v" style="font-size:12px">${d.exceptionType || '—'}</div></div>
+          <div class="kv"><div class="k">Origem (contexto)</div><div class="v" style="font-size:12px">${d.origem || '—'}</div></div>
+          <div class="kv"><div class="k">Capturado via</div><div class="v" style="font-size:12px">${d.captureSource || '—'}</div></div>
+        </div>
+        <p style="margin:8px 0 4px"><b>Mensagem:</b> ${d.exceptionMessage || '—'}</p>
+        ${d.innerExceptionType ? `<p style="margin:4px 0"><b>Inner:</b> ${d.innerExceptionType} — ${d.innerExceptionMessage||''}</p>` : ''}
+        <p style="margin:4px 0"><b>Thread/Task:</b> ${d.threadId ?? '—'} / ${d.taskId ?? '—'}</p>
+        <pre style="white-space:pre-wrap;font-size:11px;background:#f4f5f7;padding:8px;border-radius:6px;max-height:180px;overflow:auto">${(d.stackTraceTop||'—')}</pre>
+        <div class="warn-note">Isto é evidência bruta capturada no cliente — não é causa confirmada automaticamente. Cruzar com o código-fonte antes de concluir.</div>
+      </div>
+      <div class="tablewrap" style="margin-top:8px"><table style="font-size:12px">
+        <thead><tr><th>Offset</th><th>Horário</th><th>Working Set</th><th>Handles</th><th>Threads</th><th>Última operação</th></tr></thead>
+        <tbody>${corr || '<tr><td colspan="6" class="empty">Sem snapshots na janela.</td></tr>'}</tbody>
+      </table></div>
+    `;
+  } catch(e) {
+    el.innerHTML = '<div class="empty">Falha ao carregar: ' + e.message + '</div>';
+  }
 }
 
 function kv(pares){

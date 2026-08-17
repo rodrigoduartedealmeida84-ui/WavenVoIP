@@ -729,8 +729,15 @@ namespace WavenVoIP.Views
             }
         }
 
+        // v2.4.4 — catalogado como PARCIALMENTE PROTEGIDO: o corpo principal de
+        // TentarSincronizarGoogleSilenciosoAsync tem catch(Exception), mas os
+        // Dispatcher.Invoke(...) chamados de DENTRO desses próprios catch (ex.: linhas
+        // 772-781, 796, 803-812) não têm proteção interna — se algum deles falhar (ex.:
+        // controle nulo/janela fechada), a exceção escapa do catch e fica sem tratamento.
+        // FireAndForget aqui é só rede de segurança de instrumentação — não corrige/altera
+        // esse comportamento (aguardando evidência real antes de mexer, conforme pedido).
         private void GoogleSyncTimer_Tick(object? sender, EventArgs e)
-            => _ = Task.Run(TentarSincronizarGoogleSilenciosoAsync);
+            => Task.Run(TentarSincronizarGoogleSilenciosoAsync).FireAndForget("GoogleSyncTimer_Tick");
 
         // v2.4.0 — investigação de desempenho/429: guard de reentrância (evita sync sobreposta se
         // uma anterior ainda estiver rodando) + a falha "Temporaria" (ex.: 429 TooManyRequests)
@@ -1119,7 +1126,9 @@ namespace WavenVoIP.Views
             var contatos = ContatoStorageService.Carregar();
             contatos.RemoveAll(c => c.Nome == contato.Nome && c.Numero == contato.Numero && c.Observacao == contato.Observacao);
             ContatoStorageService.Salvar(contatos);
-            _ = Task.Run(() => Services.CompanyContactsService.MarcarExcluidoNoExport(contato.Numero));
+            // v2.4.4 — catalogado como NÃO PROTEGIDO (sem try/catch nenhum).
+            Task.Run(() => Services.CompanyContactsService.MarcarExcluidoNoExport(contato.Numero))
+                .FireAndForget("BtnExcluirContatoShell.MarcarExcluidoNoExport");
             AtualizarContatosShell();
         }
 
@@ -1280,7 +1289,8 @@ namespace WavenVoIP.Views
             if (string.IsNullOrWhiteSpace(contactId)) return; // contato não sincronizado com API ainda
 
             var ramal = cfg.Ramal;
-            _ = Task.Run(async () =>
+            // v2.4.4 — catalogado como NÃO PROTEGIDO (sem try/catch nenhum no corpo).
+            Task.Run(async () =>
             {
                 bool ok;
                 if (adicionar)
@@ -1304,7 +1314,7 @@ namespace WavenVoIP.Views
                 {
                     Services.LogHelper.Info($"API_CONTACT_FAVORITE_UPDATED | id={contactId} ramal={ramal} favorito={adicionar}");
                 }
-            });
+            }).FireAndForget("EnviarFavoritoApiAsync");
         }
 
         private void BtnExportarContatosEmpresa_Click(object sender, RoutedEventArgs e)
@@ -3437,7 +3447,8 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
                 _autoJoinFired = true;
                 var salaAutoJoin = sala;
                 var confWin = _conferenceControlWindow;
-                _ = Task.Run(async () =>
+                // v2.4.4 — catalogado como NÃO PROTEGIDO (sem try/catch no corpo).
+                Task.Run(async () =>
                 {
                     await Task.Delay(2500);
                     RegistrarUiDiagnostico($"CONF AUTO_JOIN INICIO sala={salaAutoJoin}");
@@ -3446,7 +3457,7 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
                     Dispatcher.Invoke(() => confWin?.AtualizarStatus(joinOk
                         ? $"Host unido à sala {salaAutoJoin} automaticamente."
                         : $"Auto-join falhou: {_sipService.LastConferenceError}"));
-                });
+                }).FireAndForget("ConferenciaAutoJoin");
             }
 
             if (mostrarMensagem)

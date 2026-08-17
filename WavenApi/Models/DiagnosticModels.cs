@@ -104,6 +104,42 @@ public class DiagnosticIncident
     public string LastOperation  { get; set; } = "IDLE";
 }
 
+// ── v2.4.4 — detalhe de exceção, 1:1 opcional com um DiagnosticIncident ────────
+// Só existe quando o cliente conseguiu capturar tipo/mensagem/stack (hoje: eventos
+// UNOBSERVED_EXCEPTION capturados via TaskScheduler.UnobservedTaskException ou via
+// o helper FireAndForget). Tabela nova e aditiva — nunca altera DiagnosticIncident.
+public class DiagnosticExceptionDetail
+{
+    public long   Id             { get; set; }
+    public long   IncidentId     { get; set; } // FK lógica para DiagnosticIncident.Id
+    public string InstallationId { get; set; } = string.Empty;
+    public DateTime TimestampUtc { get; set; }
+
+    // Contexto funcional (qual rotina/método originou) vs mecanismo de captura —
+    // ver comentário em CaptureSourceValues abaixo.
+    public string  Origem        { get; set; } = string.Empty;
+    public string  CaptureSource { get; set; } = string.Empty;
+
+    public string  ExceptionType         { get; set; } = string.Empty;
+    public string  ExceptionMessage      { get; set; } = string.Empty;
+    public string? InnerExceptionType    { get; set; }
+    public string? InnerExceptionMessage { get; set; }
+    public string  StackTraceTop         { get; set; } = string.Empty; // já sanitizado pelo cliente; servidor trunca de novo por segurança
+
+    public int? ThreadId { get; set; }
+    public int? TaskId   { get; set; }
+}
+
+// Valores esperados de CaptureSource — string livre no banco (não enum) para não
+// exigir migração se surgir um novo mecanismo de captura no futuro.
+public static class CaptureSourceValues
+{
+    public const string FireAndForget = "FIRE_AND_FORGET";  // helper .FireAndForget() observou no momento real da falha
+    public const string UnobservedTask = "UNOBSERVED_TASK";  // TaskScheduler.UnobservedTaskException (pode ter atraso do GC)
+    public const string Dispatcher     = "DISPATCHER";       // AppDomain/DispatcherUnhandledException
+    public const string Other          = "OTHER";
+}
+
 // ── DTOs de request (nomes em PascalCase — binding do minimal API é
 // case-insensitive, então o cliente envia PascalCase/camelCase indiferentemente) ──
 
@@ -128,5 +164,11 @@ public record DiagnosticEventRequest(
     string InstallationId, string MachineId, string AppVersion, string Ramal, DateTime TimestampUtc,
     string Evento, double? DuracaoMs, string? Detalhe,
     double WorkingSetMb, double PrivateBytesMb, int HandleCount, int ThreadCount, double CpuPercent,
-    long CallsSinceStartup, string? LastOperation
+    long CallsSinceStartup, string? LastOperation,
+    // v2.4.4 — detalhe de exceção, tudo opcional/nulo para manter compatibilidade com
+    // clientes antigos (< 2.4.4) que nunca vão enviar estes campos.
+    string? Origem = null, string? CaptureSource = null,
+    string? ExceptionType = null, string? ExceptionMessage = null,
+    string? InnerExceptionType = null, string? InnerExceptionMessage = null,
+    string? StackTraceTop = null, int? ExceptionThreadId = null, int? ExceptionTaskId = null
 );

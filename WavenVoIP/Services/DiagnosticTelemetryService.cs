@@ -271,8 +271,23 @@ namespace WavenVoIP.Services
 
                 if (e.Message.StartsWith("TASK_UNOBSERVED_EXCEPTION", StringComparison.Ordinal))
                 {
+                    // v2.4.0 (App.xaml.cs) → TaskScheduler.UnobservedTaskException. Só dispara
+                    // quando o GC coleta a task faltosa — pode ser bem depois da falha real (ver
+                    // item 3 do pedido de instrumentação v2.4.4). É a rede de segurança pra
+                    // qualquer fire-and-forget que ainda não passou pelo helper FireAndForget.
                     Interlocked.Increment(ref _unobservedExceptionCount);
-                    _ = EnviarIncidenteAsync("UNOBSERVED_EXCEPTION", detalhe: "task_unobserved_exception");
+                    _ = EnviarIncidenteDetalhadoAsync("UNOBSERVED_EXCEPTION", "task_unobserved_exception",
+                        origem: "(desconhecida — capturada via TaskScheduler, sem call-site)",
+                        captureSource: "UNOBSERVED_TASK", ex: e.Exception);
+                }
+                else if (e.Message.StartsWith("FIRE_AND_FORGET_FAULTED", StringComparison.Ordinal))
+                {
+                    // v2.4.4 — FireAndForgetExtensions.FireAndForget() observou a falha no momento
+                    // real em que ela ocorreu (não no GC). Extrai a origem embutida na mensagem
+                    // pelo próprio helper (ver DiagnosticTelemetryService.ExtrairOrigem).
+                    Interlocked.Increment(ref _unobservedExceptionCount);
+                    _ = EnviarIncidenteDetalhadoAsync("UNOBSERVED_EXCEPTION", "fire_and_forget_faulted",
+                        origem: ExtrairOrigem(e.Message), captureSource: "FIRE_AND_FORGET", ex: e.Exception);
                 }
 
                 if (e.Level == LogLevel.ERROR)
@@ -288,6 +303,50 @@ namespace WavenVoIP.Services
         {
             var m = Regex.Match(msg, @"duracao_ms=(\d+(\.\d+)?)");
             return m.Success && double.TryParse(m.Groups[1].Value, out var v) ? v : 0;
+        }
+
+        // Extrai o "origem=..." embutido pelo FireAndForgetExtensions na mensagem de log
+        // (ex.: "FIRE_AND_FORGET_FAULTED | origem=GoogleSyncTimer_Tick").
+        private static string ExtrairOrigem(string msg)
+        {
+            var m = Regex.Match(msg, @"origem=(.+)$");
+            return m.Success ? m.Groups[1].Value.Trim() : "(origem desconhecida)";
+        }
+
+        // ── Sanitização de exceção (item 2 do pedido v2.4.4) ────────────────────────
+        // Nunca deixa passar: caminho absoluto do usuário (embute o username do Windows),
+        // sequência de dígitos no formato de telefone BR (10-13 dígitos — cobre com/sem 9º
+        // dígito e com/sem código do país). Mensagens de exceção .NET normalmente já não
+        // carregam dado de negócio (nome/endereço/conteúdo de chamada) — isto é defesa em
+        // profundidade, não uma suposição de que o código de negócio nunca vá construir uma
+        // exceção com uma string interpolada contendo um número.
+        private static readonly Regex RegexCaminhoUsuario  = new(@"[A-Za-z]:\\Users\\[^\\]+\\?", RegexOptions.Compiled);
+        private static readonly Regex RegexPossivelTelefone = new(@"\b\d{10,13}\b", RegexOptions.Compiled);
+
+        private static string SanitizarTexto(string? texto, int maxChars)
+        {
+            if (string.IsNullOrWhiteSpace(texto)) return "";
+            var s = RegexCaminhoUsuario.Replace(texto, @"C:\Users\<user>\");
+            s = RegexPossivelTelefone.Replace(s, "<num>");
+            return s.Length > maxChars ? s[..maxChars] : s;
+        }
+
+        // Mantém só as primeiras linhas (frames mais relevantes — normalmente onde a falha
+        // realmente aconteceu) e troca o caminho absoluto de cada " in C:\...\Arquivo.cs:line N"
+        // por só "Arquivo.cs:line N" — preserva Classe.Método (já vem antes do " in ") e a
+        // linha, mas nunca o caminho de disco (que embutiria o nome de usuário do Windows).
+        private static readonly Regex RegexStackLinhaArquivo = new(@"\s+in\s+.*[\\/]([^\\/]+\.cs:line \d+)", RegexOptions.Compiled);
+        private const int MaxFramesStackTrace = 6;
+
+        private static string SanitizarStackTrace(string? stack, int maxChars)
+        {
+            if (string.IsNullOrWhiteSpace(stack)) return "";
+            var linhas = stack
+                .Split('\n')
+                .Take(MaxFramesStackTrace)
+                .Select(l => RegexStackLinhaArquivo.Replace(l.Trim(), " in $1"));
+            var resultado = string.Join(" | ", linhas);
+            return SanitizarTexto(resultado, maxChars);
         }
 
         private void RegistrarErroERoEstourarBurstSeNecessario()
@@ -310,11 +369,15 @@ namespace WavenVoIP.Services
         {
             if (_cts.IsCancellationRequested) return;
             if (Interlocked.CompareExchange(ref _tickEmAndamento, 1, 0) != 0) return;
+            // v2.4.4 — catalogado como fire-and-forget NÃO PROTEGIDO (try/finally sem catch):
+            // se HeartbeatAsync() deixar escapar algo não previsto, agora é observado e logado
+            // no instante real da falha, em vez de só aparecer (sem contexto nenhum) quando o
+            // GC coletar esta Task. Não muda o comportamento do heartbeat em si.
             Task.Run(async () =>
             {
                 try { await HeartbeatAsync().ConfigureAwait(false); }
                 finally { Interlocked.Exchange(ref _tickEmAndamento, 0); }
-            }, _cts.Token);
+            }, _cts.Token).FireAndForget("DiagnosticTelemetryService.OnTick");
         }
 
         private async Task HeartbeatAsync()
@@ -477,6 +540,16 @@ namespace WavenVoIP.Services
         // ── Envio de incidente (imediato, com cooldown por tipo + rate limit global) ──
 
         private async Task EnviarIncidenteAsync(string evento, double? duracaoMs = null, string detalhe = "")
+            => await EnviarIncidenteInternoAsync(evento, duracaoMs, detalhe, origem: null, captureSource: null, ex: null).ConfigureAwait(false);
+
+        // v2.4.4 — mesma infraestrutura (cooldown/rate-limit/fila offline) de EnviarIncidenteAsync,
+        // mas anexa o detalhe sanitizado da exceção quando disponível (item 2 do pedido). Só usado
+        // hoje para UNOBSERVED_EXCEPTION (via TaskScheduler ou via FireAndForgetExtensions).
+        private async Task EnviarIncidenteDetalhadoAsync(string evento, string detalhe, string origem, string captureSource, Exception? ex)
+            => await EnviarIncidenteInternoAsync(evento, duracaoMs: null, detalhe, origem, captureSource, ex).ConfigureAwait(false);
+
+        private async Task EnviarIncidenteInternoAsync(string evento, double? duracaoMs, string detalhe,
+            string? origem, string? captureSource, Exception? ex)
         {
             try
             {
@@ -512,6 +585,22 @@ namespace WavenVoIP.Services
                     CallsSinceStartup = Interlocked.Read(ref _callsEnded),
                     LastOperation  = _lastOperation,
                 };
+
+                if (ex != null)
+                {
+                    payload.Origem        = SanitizarTexto(origem, 200);
+                    payload.CaptureSource = captureSource;
+                    payload.ExceptionType = SanitizarTexto(ex.GetType().FullName, 200);
+                    payload.ExceptionMessage = SanitizarTexto(ex.Message, 500);
+                    if (ex.InnerException != null)
+                    {
+                        payload.InnerExceptionType    = SanitizarTexto(ex.InnerException.GetType().FullName, 200);
+                        payload.InnerExceptionMessage = SanitizarTexto(ex.InnerException.Message, 500);
+                    }
+                    payload.StackTraceTop     = SanitizarStackTrace(ex.StackTrace, 1500);
+                    payload.ExceptionThreadId = Environment.CurrentManagedThreadId;
+                    payload.ExceptionTaskId   = Task.CurrentId;
+                }
 
                 var ok = await EnviarAsync(url, token, "/api/diagnostics/event", payload).ConfigureAwait(false);
                 if (!ok) EnfileirarOffline("event", payload);

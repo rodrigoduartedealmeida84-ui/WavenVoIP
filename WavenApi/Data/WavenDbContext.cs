@@ -9,10 +9,11 @@ public class WavenDbContext(DbContextOptions<WavenDbContext> options) : DbContex
     public DbSet<Favorito> Favoritos => Set<Favorito>();
     public DbSet<CompanyConfigEntry> CompanyConfig => Set<CompanyConfigEntry>();
 
-    public DbSet<DiagnosticInstallation> DiagnosticInstallations => Set<DiagnosticInstallation>();
-    public DbSet<DiagnosticSnapshot>     DiagnosticSnapshots     => Set<DiagnosticSnapshot>();
-    public DbSet<DiagnosticIncident>     DiagnosticIncidents     => Set<DiagnosticIncident>();
-    public DbSet<DiagnosticFinding>      DiagnosticFindings      => Set<DiagnosticFinding>();
+    public DbSet<DiagnosticInstallation>    DiagnosticInstallations    => Set<DiagnosticInstallation>();
+    public DbSet<DiagnosticSnapshot>        DiagnosticSnapshots        => Set<DiagnosticSnapshot>();
+    public DbSet<DiagnosticIncident>        DiagnosticIncidents        => Set<DiagnosticIncident>();
+    public DbSet<DiagnosticFinding>         DiagnosticFindings         => Set<DiagnosticFinding>();
+    public DbSet<DiagnosticExceptionDetail> DiagnosticExceptionDetails => Set<DiagnosticExceptionDetail>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -70,6 +71,13 @@ public class WavenDbContext(DbContextOptions<WavenDbContext> options) : DbContex
             e.HasIndex(d => new { d.InstallationId, d.NormalizedUtc });
             e.HasIndex(d => d.Status);
             e.HasIndex(d => d.StartedUtc);
+        });
+
+        modelBuilder.Entity<DiagnosticExceptionDetail>(e =>
+        {
+            e.HasKey(d => d.Id);
+            e.HasIndex(d => d.IncidentId);
+            e.HasIndex(d => new { d.InstallationId, d.TimestampUtc });
         });
     }
 }

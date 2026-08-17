@@ -17,6 +17,13 @@ namespace WavenVoIP.Services
         public string   Channel   { get; init; } = "";
         public string   Caller    { get; init; } = "";
         public string   Message   { get; init; } = "";
+
+        // v2.4.4 — carrega a Exception original (quando Error(msg, ex) foi chamado) até os
+        // assinantes de LogWritten, sem mudar o formato de texto gravado em disco (esse
+        // continua igual). Hoje só DiagnosticTelemetryService usa isto, para extrair
+        // tipo/mensagem/inner/stack de UNOBSERVED_EXCEPTION sem precisar reparsear a
+        // string formatada.
+        public Exception? Exception { get; init; }
     }
 
     /// <summary>
@@ -144,7 +151,7 @@ namespace WavenVoIP.Services
             => Append("ui_flow", LogLevel.WARN, caller, msg);
 
         internal static void Error(string msg, Exception? ex = null, [CallerMemberName] string caller = "")
-            => Append("ui_flow", LogLevel.ERROR, caller, ex == null ? msg : $"{msg} | {ex.GetType().Name}: {ex.Message}");
+            => Append("ui_flow", LogLevel.ERROR, caller, ex == null ? msg : $"{msg} | {ex.GetType().Name}: {ex.Message}", ex);
 
         internal static void Sip(string msg, LogLevel level = LogLevel.INFO, [CallerMemberName] string caller = "")
             => Append("sip_signal", level, caller, msg);
@@ -173,7 +180,7 @@ namespace WavenVoIP.Services
 
         // ── Internal ─────────────────────────────────────────────────────────────
 
-        private static void Append(string channel, LogLevel level, string caller, string msg)
+        private static void Append(string channel, LogLevel level, string caller, string msg, Exception? ex = null)
         {
             // ERRORs always written regardless of enable flags
             if (!IsEnabled && level != LogLevel.ERROR) return;
@@ -205,7 +212,8 @@ namespace WavenVoIP.Services
                     Level     = level,
                     Channel   = channel,
                     Caller    = caller,
-                    Message   = msg.TrimEnd()
+                    Message   = msg.TrimEnd(),
+                    Exception = ex,
                 });
             }
             catch { }

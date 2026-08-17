@@ -100,6 +100,19 @@ namespace WavenVoIP.Models
         public double CpuPercent     { get; set; }
         public long   CallsSinceStartup { get; set; }
         public string LastOperation  { get; set; } = "IDLE";
+
+        // v2.4.4 — detalhe de exceção (sanitizado), preenchido só para eventos de exceção
+        // (UNOBSERVED_EXCEPTION hoje). Tudo opcional/nulo nos demais eventos — ver
+        // DiagnosticTelemetryService.MontarDetalheExcecao para sanitização/truncamento.
+        public string? Origem                { get; set; } // contexto funcional (qual rotina/timer originou)
+        public string? CaptureSource         { get; set; } // FIRE_AND_FORGET | UNOBSERVED_TASK | DISPATCHER | OTHER
+        public string? ExceptionType         { get; set; }
+        public string? ExceptionMessage      { get; set; }
+        public string? InnerExceptionType    { get; set; }
+        public string? InnerExceptionMessage { get; set; }
+        public string? StackTraceTop         { get; set; }
+        public int?    ExceptionThreadId     { get; set; }
+        public int?    ExceptionTaskId       { get; set; }
     }
 
     // Fila offline local, tamanho máximo — nunca cresce indefinidamente

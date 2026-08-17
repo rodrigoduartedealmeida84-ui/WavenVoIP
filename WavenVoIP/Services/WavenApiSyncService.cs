@@ -45,11 +45,15 @@ namespace WavenVoIP.Services
         {
             if (_cts.IsCancellationRequested) return;
             if (Interlocked.CompareExchange(ref _syncEmAndamento, 1, 0) != 0) return;
+            // v2.4.4 — catalogado como fire-and-forget NÃO PROTEGIDO (try/finally sem catch):
+            // qualquer exceção não tratada dentro de SincronizarAsync() (rede, JSON, I/O de
+            // state file) escapava silenciosa até o GC coletar esta Task. Agora observada no
+            // momento real da falha. Comportamento do sync em si não muda.
             Task.Run(async () =>
             {
                 try   { await SincronizarAsync().ConfigureAwait(false); }
                 finally { Interlocked.Exchange(ref _syncEmAndamento, 0); }
-            }, _cts.Token);
+            }, _cts.Token).FireAndForget("WavenApiSyncService.OnTick");
         }
 
         // ── Sync principal ────────────────────────────────────────────────────
