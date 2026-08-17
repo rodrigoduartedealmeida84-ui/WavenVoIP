@@ -1,7 +1,7 @@
 {
-    "versao":  "2.4.3",
-    "zip":  "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.4.3/WavenVoIP.zip",
-    "sha256":  "214ef4b949164fbccaba0ed28ffb5f2bd4d816a6e81f39998b98b0021157bd57",
-    "data":  "2026-08-15",
-    "notas":  "WavenVoIP v2.4.3 - Correcao de vazamento de memoria gerenciado confirmado em producao (fila interna de log sem limite). Fila de log agora tem capacidade maxima. Reducao de volume de log repetitivo na sincronizacao de CDR. Preserva integralmente audio, favoritos e Diagnostico Remoto das versoes anteriores."
+    "versao":  "2.4.4",
+    "zip":  "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.4.4/WavenVoIP.zip",
+    "sha256":  "94125b25eac7941588ce351065c17443e5ccde320423ab2c4874e433546db563",
+    "data":  "2026-08-17",
+    "notas":  "WavenVoIP v2.4.4 - Instrumentacao de diagnostico remoto (versao sem correcao funcional). Captura detalhada e sanitizada de UNOBSERVED_EXCEPTION (tipo, mensagem, inner exception, stack resumido, thread/task, origem). Painel separa pico de RAM da sessao atual do pico historico. Preserva integralmente SIP, audio, discador, CDR, Google Sync, Favoritos, Historico, WhatsApp e AMI."
 }
