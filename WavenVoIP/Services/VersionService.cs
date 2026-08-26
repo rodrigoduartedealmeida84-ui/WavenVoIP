@@ -4,15 +4,19 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "2.4.4";
+        public const string Versao  = "2.4.5";
         public const string NomeApp = "WavenVoIP";
 
-        public static readonly DateTime DataBuild = new DateTime(2026, 8, 17);
+        public static readonly DateTime DataBuild = new DateTime(2026, 8, 26);
 
         public static string VersaoCompleta => $"{NomeApp} v{Versao}";
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v2.4.5 — Remocao do bloqueio anti-spam de template WhatsApp (26/08/2026)\n" +
+            "• [FIX] Removido o bloqueio que impedia reenviar o template iniciar_conversa para o mesmo numero antes de 5 minutos (\"Template ja enviado recentemente para este cliente\") — agora o usuario pode reenviar imediatamente ao mesmo cliente quando precisar\n" +
+            "• [SAFE] Nenhuma alteracao em token, URL da API, integracao Waven Chat, SIP, audio, discador, CDR, Google Sync, Favoritos, Historico ou AMI\n" +
+            "\n" +
             "v2.4.4 — Instrumentacao de diagnostico remoto (17/08/2026)\n" +
             "• [NEW] Diagnostico Remoto: exceptions UNOBSERVED_EXCEPTION agora capturam tipo, mensagem, inner exception, stack resumido, thread/task e origem funcional (tudo sanitizado: sem caminho de usuario, sem numero de telefone, sem credenciais) — antes so um texto fixo generico chegava ao servidor\n" +
             "• [NEW] Helper interno FireAndForget observa as tasks de segundo plano de maior risco (sync com Waven API, o proprio heartbeat de diagnostico, sync do Google, exclusao/favoritar contato, auto-join de conferencia) no momento real da falha, nao so quando o coletor de lixo do .NET decide agir — sem mudar o comportamento de nenhuma dessas rotinas\n" +

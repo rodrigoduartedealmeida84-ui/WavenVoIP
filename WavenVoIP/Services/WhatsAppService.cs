@@ -79,15 +79,6 @@ namespace WavenVoIP.Services
                 return resultado;
             }
 
-            // Anti-spam: bloqueia se mesmo número recebeu template nos últimos 5 minutos
-            if (WhatsAppLogService.EnviadoRecentementeParaNumero(numeroNormalizado, 5))
-            {
-                resultado.Bloqueado = true;
-                resultado.Debug = "Template já enviado recentemente para este cliente.";
-                LogHelper.WhatsApp($"WABA_TEMPLATE_BLOCKED | numero={numeroNormalizado}");
-                return resultado;
-            }
-
             var endpoint = config.ApiUrl.TrimEnd('/') + "/template";
             var tokenMascarado = Mascarar(config.BearerToken);
 

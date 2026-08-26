@@ -1,7 +1,7 @@
 {
-    "versao":  "2.4.4",
-    "zip":  "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.4.4/WavenVoIP.zip",
-    "sha256":  "94125b25eac7941588ce351065c17443e5ccde320423ab2c4874e433546db563",
-    "data":  "2026-08-17",
+    "versao":  "2.4.5",
+    "zip":  "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.4.5/WavenVoIP.zip",
+    "sha256":  "a51630f9a4f86f9829cdfe31a137b22ff17fef4c361242d755cf58200712d209",
+    "data":  "2026-08-26",
     "notas":  "WavenVoIP v2.4.4 - Instrumentacao de diagnostico remoto (versao sem correcao funcional). Captura detalhada e sanitizada de UNOBSERVED_EXCEPTION (tipo, mensagem, inner exception, stack resumido, thread/task, origem). Painel separa pico de RAM da sessao atual do pico historico. Preserva integralmente SIP, audio, discador, CDR, Google Sync, Favoritos, Historico, WhatsApp e AMI."
 }
