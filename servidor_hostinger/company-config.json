@@ -1,5 +1,5 @@
 {
-  "versaoConfig": "1.0.4",
+  "versaoConfig": "1.0.5",
   "whatsapp": {
     "apiUrl": "https://api.wavenchat.com.br/v2/api/external/c7fc6fed-42d0-4a9b-a92b-adc9e9be4a17",
     "bearerToken": "ba83413219e0953ea82f71c66f9981a8363e8dba4ac2b501b9058e0956c48124",
