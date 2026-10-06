@@ -97,13 +97,11 @@
                                            HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#16A34A"/>
                             </Border>
                             <StackPanel Grid.Column="1">
-                                <TextBlock Text="iniciar_conversa" FontSize="15" FontWeight="Bold" Foreground="#1E293B"/>
-                                <TextBlock Text="Categoria: MARKETING  •  Idioma: pt_BR  •  Status: APROVADO" FontSize="12"
+                                <TextBlock Text="atendimento" FontSize="15" FontWeight="Bold" Foreground="#1E293B"/>
+                                <TextBlock Text="Categoria: UTILIDADE  •  Idioma: pt_BR  •  Status: APROVADO" FontSize="12"
                                            Foreground="#16A34A" FontWeight="SemiBold" Margin="0,4,0,0"/>
-                                <TextBlock Text="Botão: Iniciar Conversa (QUICK_REPLY)" FontSize="12"
-                                           Foreground="#0369A1" FontWeight="SemiBold" Margin="0,4,0,0"/>
                                 <TextBlock FontSize="12" Foreground="#64748B" Margin="0,6,0,0" TextWrapping="Wrap"
-                                           Text="O cliente receberá as boas-vindas da Almeida Gás com o botão 'Iniciar Conversa'. Aguarde a resposta para continuar o atendimento."/>
+                                           Text="O cliente receberá o aviso de atendimento em andamento com o botão para continuar. Aguarde a resposta para continuar o atendimento."/>
                             </StackPanel>
                         </Grid>
                     </StackPanel>
@@ -131,13 +129,7 @@
                                     </Border.Effect>
                                     <StackPanel>
                                         <TextBlock TextWrapping="Wrap" FontSize="13" Foreground="#111B21" LineHeight="19">
-                                            <Run Text="👋 "/><Bold>Olá! Seja bem-vindo(a) à Almeida Gás!</Bold><Run Text=" 💙"/>
-                                            <LineBreak/><LineBreak/>
-                                            <Run Text="Seu atendimento foi iniciado com a nossa equipe."/>
-                                            <LineBreak/><LineBreak/>
-                                            <Run Text="👇 Para continuarmos, basta clicar no botão "/><Bold>"Iniciar Conversa"</Bold><Run Text=" logo abaixo."/>
-                                            <LineBreak/><LineBreak/>
-                                            <Run Text="💬 Será um prazer atender você! 😊"/>
+                                            <Run Text="💬 Você tem um atendimento em andamento. 👇 Toque abaixo para continuar."/>
                                         </TextBlock>
                                         <TextBlock Text="12:00" FontSize="10" Foreground="#8696A0" HorizontalAlignment="Right" Margin="0,6,0,0"/>
                                     </StackPanel>
@@ -152,7 +144,7 @@
                                     <Border BorderBrush="#E9EDEF" BorderThickness="0,1,0,0" Padding="12,9">
                                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                                             <TextBlock Text="↩" FontSize="13" Foreground="#00A5F4" Margin="0,0,8,0" VerticalAlignment="Center"/>
-                                            <TextBlock Text="Iniciar Conversa" FontSize="13" FontWeight="SemiBold" Foreground="#00A5F4"/>
+                                            <TextBlock Text="Continuar Atendimento" FontSize="13" FontWeight="SemiBold" Foreground="#00A5F4"/>
                                         </StackPanel>
                                     </Border>
                                 </Border>

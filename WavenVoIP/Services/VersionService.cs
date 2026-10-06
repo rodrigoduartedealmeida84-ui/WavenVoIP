@@ -4,15 +4,21 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "2.4.5";
+        public const string Versao  = "2.4.6";
         public const string NomeApp = "WavenVoIP";
 
-        public static readonly DateTime DataBuild = new DateTime(2026, 8, 26);
+        public static readonly DateTime DataBuild = new DateTime(2026, 10, 6);
 
         public static string VersaoCompleta => $"{NomeApp} v{Versao}";
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v2.4.6 — Template WhatsApp de utilidade 'atendimento' (06/10/2026)\n" +
+            "• [NEW] Template WABA padrao trocado: iniciar_conversa (MARKETING) → atendimento (UTILIDADE, pt_BR, APROVADO, botao 'Continuar Atendimento') — reduz o custo das conversas iniciadas pelo WavenVoIP\n" +
+            "• [UI] Tela de envio do WhatsApp atualizada: cartao do template e previa da mensagem mostram o novo texto e o botao 'Continuar Atendimento'\n" +
+            "• [IMPROVE] Log do WhatsApp agora registra o nome e o idioma do template enviado\n" +
+            "• [SAFE] Nenhuma alteracao em token, URL da API, integracao Waven Chat, escolha de canal, SIP, audio, discador, CDR, Google Sync, Favoritos, Historico ou AMI\n" +
+            "\n" +
             "v2.4.5 — Remocao do bloqueio anti-spam de template WhatsApp (26/08/2026)\n" +
             "• [FIX] Removido o bloqueio que impedia reenviar o template iniciar_conversa para o mesmo numero antes de 5 minutos (\"Template ja enviado recentemente para este cliente\") — agora o usuario pode reenviar imediatamente ao mesmo cliente quando precisar\n" +
             "• [SAFE] Nenhuma alteracao em token, URL da API, integracao Waven Chat, SIP, audio, discador, CDR, Google Sync, Favoritos, Historico ou AMI\n" +

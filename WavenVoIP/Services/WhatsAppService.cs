@@ -10,6 +10,12 @@ namespace WavenVoIP.Services
 {
     public static class WhatsAppService
     {
+        // Template WABA usado para pedir que o cliente inicie/continue a conversa.
+        // "atendimento" = UTILITY, pt_BR, APROVADO (Template ID 2121957131733113) —
+        // substitui o "iniciar_conversa" (MARKETING) para reduzir o custo por envio.
+        public const string TemplateNome   = "atendimento";
+        public const string TemplateIdioma = "pt_BR";
+
         public static string RemoverPrefixoRota(string telefone)
         {
             var n = SomenteDigitos(telefone);
@@ -47,7 +53,7 @@ namespace WavenVoIP.Services
         }
 
         /// <summary>
-        /// Envia template WABA iniciar_conversa via API oficial Waven Chat.
+        /// Envia template WABA atendimento (UTILITY, pt_BR) via API oficial Waven Chat.
         /// Retorna Bloqueado=true se anti-spam (mesmo número nos últimos 5 min).
         /// </summary>
         public static async Task<WhatsAppResultado> EnviarTemplateWabaAsync(
@@ -84,6 +90,7 @@ namespace WavenVoIP.Services
 
             LogHelper.WhatsApp(
                 $"WABA_TEMPLATE_SEND_START | numero={numeroNormalizado} " +
+                $"template={TemplateNome} idioma={TemplateIdioma} " +
                 $"endpoint={endpoint} token={tokenMascarado}");
 
             var payload = new
@@ -97,8 +104,8 @@ namespace WavenVoIP.Services
                     type = "template",
                     template = new
                     {
-                        name = "iniciar_conversa",
-                        language = new { code = "pt_BR" }
+                        name = TemplateNome,
+                        language = new { code = TemplateIdioma }
                     }
                 }
             };
@@ -120,10 +127,10 @@ namespace WavenVoIP.Services
 
                 if (resultado.Sucesso)
                     LogHelper.WhatsApp(
-                        $"WABA_TEMPLATE_SEND_SUCCESS | numero={numeroNormalizado} http={resultado.HttpStatusCode}");
+                        $"WABA_TEMPLATE_SEND_SUCCESS | numero={numeroNormalizado} template={TemplateNome} idioma={TemplateIdioma} http={resultado.HttpStatusCode}");
                 else
                     LogHelper.WhatsApp(
-                        $"WABA_TEMPLATE_SEND_FAIL | numero={numeroNormalizado} http={resultado.HttpStatusCode} resposta={resultado.RespostaBruta}");
+                        $"WABA_TEMPLATE_SEND_FAIL | numero={numeroNormalizado} template={TemplateNome} idioma={TemplateIdioma} http={resultado.HttpStatusCode} resposta={resultado.RespostaBruta}");
             }
             catch (TaskCanceledException)
             {
@@ -143,7 +150,7 @@ namespace WavenVoIP.Services
                 TipoEvento    = tipoEvento,
                 ExternalKey   = externalKey,
                 Numero        = numeroNormalizado,
-                Mensagem      = "template:iniciar_conversa",
+                Mensagem      = "template:" + TemplateNome,
                 HttpStatusCode = resultado.HttpStatusCode,
                 RespostaApi   = resultado.RespostaBruta,
                 Debug         = resultado.Debug,
@@ -155,7 +162,7 @@ namespace WavenVoIP.Services
 
         /// <summary>
         /// Mantido para compatibilidade com telas de configuração e teste.
-        /// Ignora o parâmetro mensagem e usa o template WABA iniciar_conversa.
+        /// Ignora o parâmetro mensagem e usa o template WABA atendimento.
         /// </summary>
         public static Task<WhatsAppResultado> EnviarMensagemAsync(
             string telefone, string mensagem, string tipoEvento = "manual", string? externalKey = null)
