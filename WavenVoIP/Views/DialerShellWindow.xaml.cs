@@ -1640,7 +1640,10 @@ namespace WavenVoIP.Views
                     return;
                 }
 
-                var itens = await Task.Run(() => IssabelCdrService.SincronizarAsync(config, diasOverride ?? config.HistoricoRetencaoDias));
+                // Sync manual (não silencioso = botão "Atualizar CDR"/reconexão) sempre baixa a
+                // janela inteira; os ciclos automáticos usam o incremental.
+                var itens = await Task.Run(() => IssabelCdrService.SincronizarAsync(
+                    config, diasOverride ?? config.HistoricoRetencaoDias, forcarCompleto: !silencioso));
                 var novos = HistoricoStorageService.MesclarCdr(itens);
                 var gravacoes = itens.Count(i => !string.IsNullOrWhiteSpace(i.GravacaoUrl));
                 RegistrarUiDiagnostico($"CDR_SYNC_DONE chamadas={itens.Count} novas={novos} gravacoes={gravacoes}");
@@ -2497,6 +2500,25 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
                     origemSaida = DialPlanService.NomeSaida(saida.Value);
                     numeroFinal = DialPlanService.AplicarRegraDeDiscagem(numeroDigitado, saida.Value);
                     RegistrarUiDiagnostico($"NUMERO FINAL numeroDigitado={numeroDigitado} numeroFinal={numeroFinal} saida={origemSaida}");
+
+                    // DDD inexistente quase sempre é dígito faltando/trocado na digitação: não disca
+                    // sem o operador confirmar (vale para seletor, retorno do Histórico e Contatos).
+                    // numeroFinal de chamada externa é sempre <dígito da rota> + <número nacional>.
+                    var nacional = numeroFinal.Substring(1);
+                    if (PhoneNumberNormalizer.TemDddInexistente(nacional))
+                    {
+                        RegistrarUiDiagnostico($"DDD_INEXISTENTE numeroDigitado={numeroDigitado} numeroFinal={numeroFinal} ddd={PhoneNumberNormalizer.ExtrairDdd(nacional)}");
+                        var resposta = MessageBox.Show(
+                            $"O DDD {PhoneNumberNormalizer.ExtrairDdd(nacional)} não existe.\n\n" +
+                            $"Número: {PhoneNumberNormalizer.FormatarNacional(nacional)}\n\n" +
+                            "Confira se falta ou sobra algum dígito. Deseja discar mesmo assim?",
+                            "Waven VoIP", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+                        if (resposta != MessageBoxResult.Yes)
+                        {
+                            RegistrarUiDiagnostico($"DDD_INEXISTENTE_CANCELADO numeroFinal={numeroFinal}");
+                            return;
+                        }
+                    }
                 }
 
                 RegistrarUiDiagnostico($"ABRINDO CALLWINDOW numeroFinal={numeroFinal} origem={origemSaida}");

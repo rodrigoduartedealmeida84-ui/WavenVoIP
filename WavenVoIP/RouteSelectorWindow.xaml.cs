@@ -12,6 +12,16 @@ namespace WavenVoIP
             InitializeComponent();
             var numeroTratado = DialPlanService.RemoverDuplicacaoSequencial(numeroDigitado);
             txtNumeroOriginal.Text = $"Número digitado: {numeroTratado}";
+
+            // Mostra o destino como será discado (já sem prefixo de rota/DDI e com o 9º dígito),
+            // com o DDD separado, para o operador conferir antes de escolher a saída.
+            var nacional = DialPlanService.NumeroNacionalParaDiscagem(numeroTratado);
+            txtNumeroFinal.Text = $"Será discado: {Services.PhoneNumberNormalizer.FormatarNacional(nacional)}";
+            if (Services.PhoneNumberNormalizer.TemDddInexistente(nacional))
+            {
+                txtAvisoDdd.Text = $"DDD {Services.PhoneNumberNormalizer.ExtrairDdd(nacional)} não existe — confira o número.";
+                txtAvisoDdd.Visibility = Visibility.Visible;
+            }
         }
 
         private void Operadora_Click(object sender, RoutedEventArgs e)

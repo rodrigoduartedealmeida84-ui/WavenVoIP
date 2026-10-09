@@ -200,11 +200,23 @@ namespace WavenVoIP.Services
         // ── Fase 2: CDR ──────────────────────────────────────────────────────────
 
         public static async Task<List<Models.ApiCdrRow>?> GetCdrCallsAsync(string ramal, int dias)
+            => (await GetCdrAsync(ramal, dias, null).ConfigureAwait(false))?.Calls;
+
+        /// <summary>URL base atual da Waven API — identifica de qual servidor veio um cache.</summary>
+        internal static string UrlAtual() => ObterConfig().url;
+
+        /// <summary>
+        /// Consulta o CDR. Com <paramref name="desde"/> (o serverTime da resposta anterior) a
+        /// API devolve só os grupos de chamada alterados desde então; sem ele, a janela inteira.
+        /// </summary>
+        public static async Task<Models.ApiCdrResponse?> GetCdrAsync(string ramal, int dias, string? desde)
         {
             var (url, token) = ObterConfig();
             if (string.IsNullOrWhiteSpace(url)) return null;
 
             var uri = $"{url}/api/cdr/calls?ramal={Uri.EscapeDataString(ramal)}&dias={dias}";
+            if (!string.IsNullOrWhiteSpace(desde))
+                uri += $"&desde={Uri.EscapeDataString(desde)}";
             try
             {
                 using var req = CriarRequest(HttpMethod.Get, uri, token);
@@ -216,7 +228,8 @@ namespace WavenVoIP.Services
                 }
                 var json = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
                 var result = JsonSerializer.Deserialize<Models.ApiCdrResponse>(json, _jsonOpts);
-                return result?.Calls;
+                if (result != null) result.TamanhoBytes = json.Length;
+                return result;
             }
             catch (Exception ex) { Log($"API_CDR_QUERY_ERROR | {ex.Message}"); return null; }
         }

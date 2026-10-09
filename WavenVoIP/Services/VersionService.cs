@@ -4,15 +4,23 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "2.4.6";
+        public const string Versao  = "2.4.7";
         public const string NomeApp = "WavenVoIP";
 
-        public static readonly DateTime DataBuild = new DateTime(2026, 10, 6);
+        public static readonly DateTime DataBuild = new DateTime(2026, 10, 9);
 
         public static string VersaoCompleta => $"{NomeApp} v{Versao}";
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v2.4.7 — Historico incremental e validacao de DDD (09/10/2026)\n" +
+            "• [PERF] Historico/CDR via Waven API agora e incremental: a janela completa e baixada uma vez e os ciclos seguintes trazem so as chamadas novas (resposta de ~100 bytes em vez de ~200 KB a cada 2-5 s)\n" +
+            "• [SAFE] Download completo continua na primeira sincronizacao, no botao 'Atualizar CDR', apos qualquer falha da API e a cada 10 minutos (reconciliacao); compativel com Waven API antiga\n" +
+            "• [NEW] Validacao de DDD antes de discar: se o DDD do numero nao existe, o WavenVoIP mostra o numero e pede confirmacao em vez de discar direto\n" +
+            "• [FIX] O nono digito nao e mais acrescentado automaticamente quando o DDD nao existe (isso disfarcava numero digitado com um digito a menos)\n" +
+            "• [UI] Janela 'Escolha a saida' mostra o numero que sera discado, com o DDD separado, e alerta quando o DDD nao existe\n" +
+            "• [SAFE] Nenhuma alteracao em SIP, audio, regras de classificacao do CDR, Contatos, Favoritos, Filas, WhatsApp, Google Sync ou Auto Update. DDI 55, DDD 55 e prefixos de rota preservados\n" +
+            "\n" +
             "v2.4.6 — Template WhatsApp de utilidade 'atendimento' (06/10/2026)\n" +
             "• [NEW] Template WABA padrao trocado: iniciar_conversa (MARKETING) → atendimento (UTILIDADE, pt_BR, APROVADO, botao 'Continuar Atendimento') — reduz o custo das conversas iniciadas pelo WavenVoIP\n" +
             "• [UI] Tela de envio do WhatsApp atualizada: cartao do template e previa da mensagem mostram o novo texto e o botao 'Continuar Atendimento'\n" +

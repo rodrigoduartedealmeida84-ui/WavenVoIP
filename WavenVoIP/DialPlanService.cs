@@ -77,6 +77,18 @@ namespace WavenVoIP
             return ((int)saida).ToString() + numeroLimpo;
         }
 
+        /// <summary>
+        /// Número nacional que <see cref="AplicarRegraDeDiscagem"/> vai discar depois do prefixo
+        /// de rota (mesma sequência: tira o prefixo salvo, normaliza DDI/9º dígito). Usado para
+        /// mostrar e validar o destino ANTES de discar.
+        /// </summary>
+        public static string NumeroNacionalParaDiscagem(string numero)
+        {
+            var n = NormalizarNumero(numero);
+            if (string.IsNullOrWhiteSpace(n) || EhRamalInterno(n)) return n;
+            return Services.PhoneNumberNormalizer.NormalizeBrazilPhone(RemoverPrefixoDeRota(n));
+        }
+
         public static bool TemPrefixoDeRota(string numero)
         {
             var n = NormalizarNumero(numero);

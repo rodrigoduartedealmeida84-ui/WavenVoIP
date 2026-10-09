@@ -74,6 +74,14 @@ namespace WavenVoIP.Models
     public class ApiCdrResponse
     {
         [JsonPropertyName("calls")] public List<ApiCdrRow> Calls { get; set; } = new();
+
+        // Campos da sincronização incremental — ausentes numa Waven API antiga (ficam no
+        // default e o cliente trata toda resposta como consulta completa).
+        [JsonPropertyName("incremental")] public bool   Incremental { get; set; }
+        [JsonPropertyName("serverTime")]  public string ServerTime  { get; set; } = string.Empty;
+        [JsonPropertyName("windowStart")] public string WindowStart { get; set; } = string.Empty;
+
+        [JsonIgnore] public int TamanhoBytes { get; set; }
     }
 
     // ── Fase 3: AMI via API ───────────────────────────────────────────────────

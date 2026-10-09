@@ -7,7 +7,7 @@ using WavenApi.Models;
 
 namespace WavenApi.Endpoints;
 
-public static class AmiEndpoints
+public static partial class AmiEndpoints
 {
     // Cache de direção por Linkedid — preserva Saída/Entrada durante toda a chamada.
     // Chave = Linkedid (ambos os lados do bridge compartilham o mesmo Linkedid).
@@ -46,12 +46,15 @@ public static class AmiEndpoints
             return Results.Problem("AMI nao configurado no servidor.", statusCode: 503);
         }
 
-        logger.LogInformation("API_AMI_CONNECT_START | host={Host}:{Port}", o.Host, o.Port);
-
         try
         {
-            var ramais = await BuscarRamaisAmiAsync(o, logger);
-            logger.LogInformation("API_AMI_CONNECT_OK | extensions={Count}", ramais.Count);
+            var (ramais, doCache) = await _cacheExtensions.ObterAsync(TtlCadastro, () =>
+            {
+                logger.LogInformation("API_AMI_CONNECT_START | host={Host}:{Port}", o.Host, o.Port);
+                return BuscarRamaisAmiAsync(o, logger);
+            });
+            if (!doCache)
+                logger.LogInformation("API_AMI_CONNECT_OK | extensions={Count}", ramais.Count);
             return Results.Ok(ramais);
         }
         catch (Exception ex)
@@ -72,16 +75,22 @@ public static class AmiEndpoints
         if (string.IsNullOrWhiteSpace(o.User))
             return Results.Problem("AMI nao configurado no servidor.", statusCode: 503);
 
-        logger.LogInformation("API_AMI_PEERS_START | host={Host}:{Port}", o.Host, o.Port);
         try
         {
-            var peers = await BuscarStatusPeersAsync(o, logger);
-            var online    = peers.Count(p => p.Status == "online");
-            var emLigacao = peers.Count(p => p.Status is "emligacao" or "tocando" or "chamando");
-            var offline   = peers.Count(p => p.Status == "offline");
-            logger.LogInformation(
-                "API_AMI_PEERS_OK | total={Total} online={Online} emLigacao={EmLigacao} offline={Offline}",
-                peers.Count, online, emLigacao, offline);
+            var (peers, doCache) = await _cachePeers.ObterAsync(TtlAoVivo, () =>
+            {
+                logger.LogInformation("API_AMI_PEERS_START | host={Host}:{Port}", o.Host, o.Port);
+                return BuscarStatusPeersAsync(o, logger);
+            });
+            if (!doCache)
+            {
+                var online    = peers.Count(p => p.Status == "online");
+                var emLigacao = peers.Count(p => p.Status is "emligacao" or "tocando" or "chamando");
+                var offline   = peers.Count(p => p.Status == "offline");
+                logger.LogInformation(
+                    "API_AMI_PEERS_OK | total={Total} online={Online} emLigacao={EmLigacao} offline={Offline}",
+                    peers.Count, online, emLigacao, offline);
+            }
             return Results.Ok(peers);
         }
         catch (Exception ex)
@@ -102,11 +111,15 @@ public static class AmiEndpoints
         if (string.IsNullOrWhiteSpace(o.User))
             return Results.Problem("AMI nao configurado no servidor.", statusCode: 503);
 
-        logger.LogInformation("API_AMI_QUEUES_START | host={Host}:{Port}", o.Host, o.Port);
         try
         {
-            var filas = await BuscarStatusFilasAsync(o, logger);
-            logger.LogInformation("API_AMI_QUEUES_OK | total={Total}", filas.Count);
+            var (filas, doCache) = await _cacheFilas.ObterAsync(TtlAoVivo, () =>
+            {
+                logger.LogInformation("API_AMI_QUEUES_START | host={Host}:{Port}", o.Host, o.Port);
+                return BuscarStatusFilasAsync(o, logger);
+            });
+            if (!doCache)
+                logger.LogInformation("API_AMI_QUEUES_OK | total={Total}", filas.Count);
             return Results.Ok(filas);
         }
         catch (Exception ex)
@@ -118,30 +131,16 @@ public static class AmiEndpoints
 
     // ── BuscarStatusFilasAsync ────────────────────────────────────────────────
 
-    private static async Task<List<AmiQueue>> BuscarStatusFilasAsync(
-        WavenApiOptions.AmiOptions o, ILogger logger)
+    private static Task<List<AmiQueue>> BuscarStatusFilasAsync(
+        WavenApiOptions.AmiOptions o, ILogger logger) =>
+        ComSessaoAmiAsync(o, logger, stream => BuscarStatusFilasNaSessaoAsync(stream, logger));
+
+    private static async Task<List<AmiQueue>> BuscarStatusFilasNaSessaoAsync(
+        NetworkStream stream, ILogger logger)
     {
-        using var client = new TcpClient();
-        var cto = new CancellationTokenSource(o.ConnectTimeoutMs);
-        await client.ConnectAsync(o.Host, o.Port, cto.Token);
-        client.ReceiveTimeout = 12000;
-        client.SendTimeout    = 5000;
-        using var stream = client.GetStream();
-
-        await LerDisponivelAsync(stream, 700);
-
-        await EnviarAsync(stream,
-            $"Action: Login\r\nUsername: {o.User}\r\nSecret: {o.Password}\r\n" +
-            "Events: off\r\nActionID: WAVEN_LOGIN\r\n\r\n");
-        var login = await LerAteAsync(stream, "ActionID: WAVEN_LOGIN", 5000);
-        if (login.IndexOf("Success", StringComparison.OrdinalIgnoreCase) < 0)
-            throw new InvalidOperationException("AMI recusou login — verifique usuario, senha e permissoes.");
-
         // QueueStatus retorna QueueParams + QueueMember + QueueEntry por fila
         await EnviarAsync(stream, "Action: QueueStatus\r\nActionID: WAVEN_QUEUES\r\n\r\n");
-        var queuesRaw = await LerAteAsync(stream, "QueueStatusComplete", 10000);
-
-        await EnviarAsync(stream, "Action: Logoff\r\nActionID: WAVEN_LOGOFF\r\n\r\n");
+        var queuesRaw = await LerRespostaAsync(stream, "WAVEN_QUEUES", "QueueStatusComplete", 10000);
 
         var filas = new Dictionary<string, AmiQueue>(StringComparer.OrdinalIgnoreCase);
 
@@ -256,31 +255,19 @@ public static class AmiEndpoints
 
     // ── BuscarStatusPeersAsync ────────────────────────────────────────────────
 
-    private static async Task<List<AmiPeer>> BuscarStatusPeersAsync(
-        WavenApiOptions.AmiOptions o, ILogger logger)
+    private static Task<List<AmiPeer>> BuscarStatusPeersAsync(
+        WavenApiOptions.AmiOptions o, ILogger logger) =>
+        ComSessaoAmiAsync(o, logger, stream => BuscarStatusPeersNaSessaoAsync(stream, logger));
+
+    private static async Task<List<AmiPeer>> BuscarStatusPeersNaSessaoAsync(
+        NetworkStream stream, ILogger logger)
     {
         var result = new Dictionary<string, AmiPeer>(StringComparer.OrdinalIgnoreCase);
-
-        using var client = new TcpClient();
-        var cto = new CancellationTokenSource(o.ConnectTimeoutMs);
-        await client.ConnectAsync(o.Host, o.Port, cto.Token);
-        client.ReceiveTimeout = 8000;
-        client.SendTimeout    = 5000;
-        using var stream = client.GetStream();
-
-        await LerDisponivelAsync(stream, 700);
-
-        await EnviarAsync(stream,
-            $"Action: Login\r\nUsername: {o.User}\r\nSecret: {o.Password}\r\n" +
-            "Events: off\r\nActionID: WAVEN_LOGIN\r\n\r\n");
-        var login = await LerAteAsync(stream, "ActionID: WAVEN_LOGIN", 5000);
-        if (login.IndexOf("Success", StringComparison.OrdinalIgnoreCase) < 0)
-            throw new InvalidOperationException("AMI recusou login — verifique usuario, senha e permissoes.");
 
         var nomes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         await EnviarAsync(stream,
             "Action: Command\r\nCommand: database show AMPUSER\r\nActionID: WAVEN_AMPUSER\r\n\r\n");
-        var ampuser = await LerAteAsync(stream, "--END COMMAND--", 7000);
+        var ampuser = await LerRespostaAsync(stream, "WAVEN_AMPUSER", null, 7000);
         foreach (Match m in Regex.Matches(ampuser, @"/AMPUSER/(?<r>\d{2,6})/cidname\s*:\s*(?<n>.+)"))
         {
             var r = m.Groups["r"].Value.Trim();
@@ -289,7 +276,7 @@ public static class AmiEndpoints
         }
 
         await EnviarAsync(stream, "Action: SIPpeers\r\nActionID: WAVEN_SIPPEERS\r\n\r\n");
-        var peersRaw = await LerAteAsync(stream, "PeerlistComplete", 7000);
+        var peersRaw = await LerRespostaAsync(stream, "WAVEN_SIPPEERS", "PeerlistComplete", 7000);
         foreach (var bloco in SepararEventos(peersRaw))
         {
             if ((ObterCampo(bloco, "Event") ?? "").IndexOf("PeerEntry", StringComparison.OrdinalIgnoreCase) < 0) continue;
@@ -307,7 +294,7 @@ public static class AmiEndpoints
         }
 
         await EnviarAsync(stream, "Action: PJSIPShowEndpoints\r\nActionID: WAVEN_PJSIP\r\n\r\n");
-        var pjsipRaw = await LerAteAsync(stream, "EndpointListComplete", 7000);
+        var pjsipRaw = await LerRespostaAsync(stream, "WAVEN_PJSIP", "EndpointListComplete", 7000);
         foreach (var bloco in SepararEventos(pjsipRaw))
         {
             if ((ObterCampo(bloco, "Event") ?? "").IndexOf("EndpointList", StringComparison.OrdinalIgnoreCase) < 0) continue;
@@ -343,7 +330,7 @@ public static class AmiEndpoints
         }
 
         await EnviarAsync(stream, "Action: CoreShowChannels\r\nActionID: WAVEN_CHANNELS\r\n\r\n");
-        var channelsRaw = await LerAteAsync(stream, "CoreShowChannelsComplete", 7000);
+        var channelsRaw = await LerRespostaAsync(stream, "WAVEN_CHANNELS", "CoreShowChannelsComplete", 7000);
         int canaisAtivos = 0;
 
         // Passo 1: coletar TODOS os canais (extensões + troncos) com Uniqueid e Linkedid
@@ -637,7 +624,6 @@ public static class AmiEndpoints
         logger.LogInformation("CHANNELS_TOTAL | ativos={C} cache_vivos={V} cache_removidos={R}",
             canaisAtivos, _dirCache.Count, staleEntries.Count);
 
-        await EnviarAsync(stream, "Action: Logoff\r\nActionID: WAVEN_LOGOFF\r\n\r\n");
         return result.Values.OrderBy(p => p.Ramal).ToList();
     }
 
@@ -721,37 +707,23 @@ public static class AmiEndpoints
 
     // ── BuscarRamaisAmiAsync (/api/ami/extensions) ───────────────────────────
 
-    private static async Task<List<AmiExtension>> BuscarRamaisAmiAsync(
-        WavenApiOptions.AmiOptions o, ILogger logger)
+    private static Task<List<AmiExtension>> BuscarRamaisAmiAsync(
+        WavenApiOptions.AmiOptions o, ILogger logger) =>
+        ComSessaoAmiAsync(o, logger, BuscarRamaisNaSessaoAsync);
+
+    private static async Task<List<AmiExtension>> BuscarRamaisNaSessaoAsync(NetworkStream stream)
     {
         var resultado = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        using var client = new TcpClient();
-        var ct = new CancellationTokenSource(o.ConnectTimeoutMs);
-        await client.ConnectAsync(o.Host, o.Port, ct.Token);
-        client.ReceiveTimeout = 7000;
-        client.SendTimeout    = 5000;
-        using var stream = client.GetStream();
-
-        await LerDisponivelAsync(stream, 700);
-        await EnviarAsync(stream,
-            $"Action: Login\r\nUsername: {o.User}\r\nSecret: {o.Password}\r\n" +
-            "Events: off\r\nActionID: WAVEN_LOGIN\r\n\r\n");
-        var login = await LerAteAsync(stream, "ActionID: WAVEN_LOGIN", 5000);
-        if (login.IndexOf("Success", StringComparison.OrdinalIgnoreCase) < 0)
-            throw new InvalidOperationException("AMI recusou login — verifique usuario, senha e permissoes.");
-
         await EnviarAsync(stream,
             "Action: Command\r\nCommand: database show AMPUSER\r\nActionID: WAVEN_AMPUSER\r\n\r\n");
-        ParseDatabaseAmpuser(await LerAteAsync(stream, "--END COMMAND--", 7000), resultado);
+        ParseDatabaseAmpuser(await LerRespostaAsync(stream, "WAVEN_AMPUSER", null, 7000), resultado);
 
         await EnviarAsync(stream, "Action: SIPpeers\r\nActionID: WAVEN_SIPPEERS\r\n\r\n");
-        ParseSipPeers(await LerAteAsync(stream, "PeerlistComplete", 7000), resultado);
+        ParseSipPeers(await LerRespostaAsync(stream, "WAVEN_SIPPEERS", "PeerlistComplete", 7000), resultado);
 
         await EnviarAsync(stream, "Action: PJSIPShowEndpoints\r\nActionID: WAVEN_PJSIP\r\n\r\n");
-        ParsePjsipEndpoints(await LerAteAsync(stream, "EndpointListComplete", 7000), resultado);
-
-        await EnviarAsync(stream, "Action: Logoff\r\nActionID: WAVEN_LOGOFF\r\n\r\n");
+        ParsePjsipEndpoints(await LerRespostaAsync(stream, "WAVEN_PJSIP", "EndpointListComplete", 7000), resultado);
 
         return resultado
             .Where(kv => EhRamalValido(kv.Key))

@@ -215,8 +215,10 @@ namespace WavenVoIP.Services
 
         // ── Main sync ──────────────────────────────────────────────────────────────
 
+        // forcarCompleto: baixa a janela inteira de CDR da Waven API em vez do incremental
+        // (botão "Atualizar CDR"). Sem efeito no modo de conexão direta ao MySQL.
         public static async Task<List<HistoricoLigacaoItem>> SincronizarAsync(
-            SipConfig config, int diasRetencao = 7)
+            SipConfig config, int diasRetencao = 7, bool forcarCompleto = false)
         {
             Log("CDR_SYNC_START");
             Log("HISTORY_REFRESH_START");
@@ -236,8 +238,9 @@ namespace WavenVoIP.Services
                     !string.IsNullOrWhiteSpace(config.WavenApiToken))
                 {
                     Log($"CLIENT_CDR_USING_API | ramal={config.Ramal} dias={diasRetencao}");
-                    var apiRows = await WavenApiService.GetCdrCallsAsync(config.Ramal, diasRetencao)
-                                                       .ConfigureAwait(false);
+                    var apiRows = await CdrApiIncrementalService
+                        .ObterLinhasAsync(config.Ramal, diasRetencao, forcarCompleto)
+                        .ConfigureAwait(false);
                     if (apiRows == null)
                     {
                         Log("API_CDR_QUERY_ERROR | falha ao buscar CDR via API");

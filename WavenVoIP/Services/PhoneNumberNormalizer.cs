@@ -33,11 +33,63 @@ namespace WavenVoIP.Services
             // Remove prefixo 55 em números 12-13 dígitos sem prefixo de rota
             digits = RemoverPrefixo55SeBrasileiro(digits);
 
-            // Adiciona nono dígito: DDD(2) + 8 dígitos celular antigo
-            if (digits.Length == 10 && !digits.StartsWith("0") && IsCelularSemNono(digits))
+            // Adiciona nono dígito: DDD(2) + 8 dígitos celular antigo.
+            // Só com DDD existente: completar o 9 num DDD que não existe (ex.: "2597268679",
+            // digitado com um dígito a menos) disfarçava o erro de digitação como um celular
+            // aparentemente válido — "25997268679".
+            if (digits.Length == 10 && !digits.StartsWith("0") && IsCelularSemNono(digits) &&
+                DddExiste(digits.Substring(0, 2)))
                 digits = digits.Substring(0, 2) + "9" + digits.Substring(2);
 
             return digits;
+        }
+
+        // ── DDD ───────────────────────────────────────────────────────────────────
+
+        // DDDs em uso no Brasil (plano de numeração da Anatel).
+        private static readonly System.Collections.Generic.HashSet<string> _dddsBrasil = new()
+        {
+            "11","12","13","14","15","16","17","18","19",
+            "21","22","24","27","28",
+            "31","32","33","34","35","37","38",
+            "41","42","43","44","45","46","47","48","49",
+            "51","53","54","55",
+            "61","62","63","64","65","66","67","68","69",
+            "71","73","74","75","77","79",
+            "81","82","83","84","85","86","87","88","89",
+            "91","92","93","94","95","96","97","98","99"
+        };
+
+        public static bool DddExiste(string ddd) => ddd != null && _dddsBrasil.Contains(ddd);
+
+        /// <summary>
+        /// DDD de um número nacional já sem prefixo de rota e sem DDI (10 ou 11 dígitos, não
+        /// iniciado por 0). Vazio quando o número não tem esse formato (ramal, 0800, número
+        /// local sem DDD, internacional) — nesses casos não há DDD para validar.
+        /// </summary>
+        public static string ExtrairDdd(string numeroNacional)
+        {
+            var d = SomenteDigitos(numeroNacional);
+            return (d.Length == 10 || d.Length == 11) && d[0] != '0' ? d.Substring(0, 2) : string.Empty;
+        }
+
+        /// <summary>True quando o número tem formato nacional com DDD e esse DDD não existe.</summary>
+        public static bool TemDddInexistente(string numeroNacional)
+        {
+            var ddd = ExtrairDdd(numeroNacional);
+            return ddd.Length == 2 && !DddExiste(ddd);
+        }
+
+        /// <summary>
+        /// Formata um número nacional para conferência visual: "(55) 99726-8679" ou
+        /// "(66) 3199-8716". Qualquer outro formato volta só com os dígitos.
+        /// </summary>
+        public static string FormatarNacional(string numeroNacional)
+        {
+            var d = SomenteDigitos(numeroNacional);
+            if (ExtrairDdd(d).Length == 0) return d;
+            var local = d.Substring(2);
+            return $"({d.Substring(0, 2)}) {local.Substring(0, local.Length - 4)}-{local.Substring(local.Length - 4)}";
         }
 
         // Number as it will actually be dialed: mesma normalização de NormalizeBrazilPhone
