@@ -1,7 +1,7 @@
 {
-    "versao": "2.4.6",
-    "zip": "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.4.6/WavenVoIP.zip",
-    "sha256": "e8b3b5488ff36069033d99cbbadc2b72656d80cd251d6315d465bbfd1e046a27",
-    "data": "2026-10-06",
-    "notas": "WavenVoIP v2.4.6 - Template WhatsApp de utilidade 'atendimento'. O template WABA padrao passa de iniciar_conversa (MARKETING) para atendimento (UTILIDADE, pt_BR, botao 'Continuar Atendimento'), reduzindo o custo das conversas iniciadas pelo WavenVoIP. Tela de envio e previa atualizadas; log registra o template enviado. Preserva integralmente token, URL da API, integracao Waven Chat, SIP, audio, discador, CDR, Google Sync, Favoritos, Historico e AMI."
+    "versao": "2.4.7",
+    "zip": "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.4.7/WavenVoIP.zip",
+    "sha256": "8580dc3646f3f7067add3608cb2a60739f6fed828e7f5320f7b672a36013a4e8",
+    "data": "2026-10-09",
+    "notas": "WavenVoIP v2.4.7 - Historico incremental e validacao de DDD. O historico/CDR via Waven API passa a baixar so as chamadas novas (download completo na primeira sincronizacao, no botao Atualizar CDR, apos falha da API e a cada 10 minutos). Antes de discar, o DDD e validado: DDD inexistente pede confirmacao e nao recebe mais o nono digito automatico; a janela Escolha a saida mostra o numero que sera discado. Preserva integralmente SIP, audio, regras do CDR, Contatos, Favoritos, Filas, WhatsApp, Google Sync e Auto Update."
 }
