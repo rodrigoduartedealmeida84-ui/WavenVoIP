@@ -112,7 +112,17 @@ namespace WavenVoIP.Services
                 if ((int)resp.StatusCode == 409)
                 {
                     Log($"API_CONTACT_DUPLICATE | numero={numero}");
-                    return (true, null, "Duplicado");
+                    // v2.5.0 — a API devolve o contato que já existe: sem aproveitá-lo, o contato
+                    // local ficava sem vínculo e nunca era sincronizado com os outros computadores.
+                    WavenApiContact? existente = null;
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(json);
+                        if (doc.RootElement.TryGetProperty("contact", out var ce))
+                            existente = JsonSerializer.Deserialize<WavenApiContact>(ce.GetRawText(), _jsonOpts);
+                    }
+                    catch { }
+                    return (true, existente, "Duplicado");
                 }
                 return (false, null, $"HTTP {(int)resp.StatusCode}");
             }
@@ -415,6 +425,123 @@ namespace WavenVoIP.Services
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────
+
+        // ── v2.5.0: Puxar ligação ───────────────────────────────────────────────
+
+        /// Canais ativos no PABX via /api/ami/calls. httpStatus 404 = API ainda sem o endpoint.
+        public static async Task<(List<Models.CanalAtivo>? canais, int httpStatus, string erro)> GetAmiCallsAsync()
+        {
+            var (url, token) = ObterConfig();
+            if (string.IsNullOrWhiteSpace(url)) return (null, 0, "URL da Waven API não configurada");
+            try
+            {
+                using var req  = CriarRequest(HttpMethod.Get, $"{url}/api/ami/calls", token);
+                using var resp = await _http.SendAsync(req).ConfigureAwait(false);
+                int code = (int)resp.StatusCode;
+                if (!resp.IsSuccessStatusCode) return (null, code, $"HTTP {code}");
+                var json = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
+                var list = JsonSerializer.Deserialize<List<Models.CanalAtivo>>(json, _jsonOpts);
+                return (list ?? new(), code, string.Empty);
+            }
+            catch (Exception ex) { return (null, 0, ex.Message); }
+        }
+
+        /// v2.5.0 — continuações da gravação de uma ligação (arquivo, data yyyy-MM-dd). Vazio quando não há.
+        public static async Task<List<(string arquivo, string data)>> GetPartesGravacaoAsync(string linkedid, DateTime dia)
+        {
+            var lista = new List<(string, string)>();
+            var (url, token) = ObterConfig();
+            if (string.IsNullOrWhiteSpace(url) || string.IsNullOrWhiteSpace(linkedid)) return lista;
+            try
+            {
+                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(4));
+                using var req = CriarRequest(HttpMethod.Get, $"{url}/api/cdr/recording-parts?linkedid={Uri.EscapeDataString(linkedid)}&date={dia:yyyy-MM-dd}", token);
+                using var resp = await _http.SendAsync(req, cts.Token).ConfigureAwait(false);
+                if (!resp.IsSuccessStatusCode) return lista;
+                using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync().ConfigureAwait(false));
+                if (doc.RootElement.TryGetProperty("files", out var fs) && fs.ValueKind == JsonValueKind.Array)
+                    foreach (var f in fs.EnumerateArray())
+                    {
+                        var nome = f.TryGetProperty("file", out var n) ? n.GetString() ?? "" : "";
+                        var data = f.TryGetProperty("date", out var d) ? d.GetString() ?? "" : "";
+                        if (nome.Length > 0 && nome == System.IO.Path.GetFileName(nome)) lista.Add((nome, data));
+                    }
+            }
+            catch { }
+            return lista;
+        }
+
+        /// v2.5.0 — este ramal pode usar "Remover atendente"? (false também quando a API ainda não tem a função)
+        public static async Task<bool> PodeRemoverAtendenteAsync(string ramal)
+        {
+            var (url, token) = ObterConfig();
+            if (string.IsNullOrWhiteSpace(url)) return false;
+            try
+            {
+                using var req = CriarRequest(HttpMethod.Get, $"{url}/api/ami/conference/permission?ramal={Uri.EscapeDataString(ramal)}", token);
+                using var resp = await _http.SendAsync(req).ConfigureAwait(false);
+                if (!resp.IsSuccessStatusCode) return false;
+                using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync().ConfigureAwait(false));
+                return doc.RootElement.TryGetProperty("podeRemover", out var p) && p.GetBoolean();
+            }
+            catch { return false; }
+        }
+
+        /// v2.5.0 — tira um atendente da ligação em conferência deste ramal (/api/ami/conference/remove).
+        public static async Task<(bool ok, string mensagem)> RemoverAtendenteAsync(string ramalSolicitante, string ramalAlvo)
+        {
+            var (url, token) = ObterConfig();
+            if (string.IsNullOrWhiteSpace(url)) return (false, "URL da Waven API não configurada");
+            try
+            {
+                using var req = CriarRequest(HttpMethod.Post, $"{url}/api/ami/conference/remove", token, new { ramalSolicitante, ramalAlvo });
+                using var resp = await _http.SendAsync(req).ConfigureAwait(false);
+                int code = (int)resp.StatusCode;
+                var json = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
+                Log($"API_AMI_CONF_REMOVE_RESPONSE | httpStatus={code}");
+                if (code == 404 || code == 405) return (false, "A Waven API ainda não tem a função de remover atendente.");
+                try
+                {
+                    using var doc = JsonDocument.Parse(json);
+                    var r = doc.RootElement;
+                    if (r.TryGetProperty("ok", out var okEl) && r.TryGetProperty("mensagem", out var msgEl))
+                        return (okEl.GetBoolean(), msgEl.GetString() ?? string.Empty);
+                    if (r.TryGetProperty("detail", out var det)) return (false, det.GetString() ?? $"HTTP {code}");
+                }
+                catch { }
+                return (false, $"Resposta inesperada da API (HTTP {code}).");
+            }
+            catch (Exception ex) { return (false, ex.Message); }
+        }
+
+        /// Pede à API para assumir uma chamada no ramal informado (/api/ami/pickup).
+        public static async Task<(bool? ok, string mensagem, int httpStatus)> PostAmiPickupAsync(
+            string canalCliente, string linkedid, string ramal, string nome, string numero, string sala = "800")
+        {
+            var (url, token) = ObterConfig();
+            if (string.IsNullOrWhiteSpace(url)) return (null, "URL da Waven API não configurada", 0);
+            try
+            {
+                using var req = CriarRequest(HttpMethod.Post, $"{url}/api/ami/pickup", token,
+                    new { canalCliente, linkedid, ramal, nome, numero, sala });
+                using var resp = await _http.SendAsync(req).ConfigureAwait(false);
+                int code = (int)resp.StatusCode;
+                var json = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
+                Log($"API_AMI_PICKUP_RESPONSE | httpStatus={code}");
+                if (code == 404 || code == 405) return (null, "A Waven API ainda não tem a função de puxar ligação.", code);
+                try
+                {
+                    using var doc = JsonDocument.Parse(json);
+                    var r = doc.RootElement;
+                    if (r.TryGetProperty("ok", out var okEl) && r.TryGetProperty("mensagem", out var msgEl))
+                        return (okEl.GetBoolean(), msgEl.GetString() ?? string.Empty, code);
+                    if (r.TryGetProperty("detail", out var det)) return (false, det.GetString() ?? $"HTTP {code}", code);
+                }
+                catch { }
+                return (false, $"Resposta inesperada da API (HTTP {code}).", code);
+            }
+            catch (Exception ex) { return (null, ex.Message, 0); }
+        }
 
         private static async Task<(bool ok, string message)> ParseTesteResponseAsync(
             HttpResponseMessage resp, string endpoint)

@@ -15,7 +15,7 @@
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
                     <Border x:Name="borderAvatar" Width="58" Height="58" CornerRadius="29"
-                            Background="#6366F1" Margin="0,0,16,0" VerticalAlignment="Center">
+                            Background="#7C3AED" Margin="0,0,16,0" VerticalAlignment="Center">
                         <TextBlock x:Name="txtAvatar" Text="?" FontSize="24" FontWeight="Bold"
                                    Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Border>
@@ -53,14 +53,14 @@
                 <Grid Margin="0,14,0,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="12"/>
+                        <ColumnDefinition Width="22"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
                     <!-- Chamada original (em espera) -->
                     <Border Grid.Column="0" Background="#F1F5F9" CornerRadius="12" Padding="12,10">
                         <StackPanel>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
-                                <TextBlock Text="⏸" FontSize="13" Margin="0,0,6,0"
+                                <TextBlock Text="&#xE769;" FontFamily="Segoe MDL2 Assets" FontSize="11" Margin="0,0,7,0"
                                            Foreground="#6B7280" VerticalAlignment="Center"/>
                                 <TextBlock Text="Chamada original" FontSize="12" FontWeight="SemiBold"
                                            Foreground="#374151" VerticalAlignment="Center"/>
@@ -70,20 +70,20 @@
                         </StackPanel>
                     </Border>
                     <!-- Arrow -->
-                    <TextBlock Grid.Column="1" Text="→" FontSize="16" Foreground="#9CA3AF"
+                    <TextBlock Grid.Column="1" Text="&#xE72A;" FontFamily="Segoe MDL2 Assets" FontSize="10" Foreground="#9CA3AF"
                                HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     <!-- Destino (chamada de transferência) -->
-                    <Border Grid.Column="2" Background="#EEF2FF" CornerRadius="12" Padding="12,10"
-                            BorderBrush="#C7D2FE" BorderThickness="1">
+                    <Border Grid.Column="2" Background="#F5F3FF" CornerRadius="12" Padding="12,10"
+                            BorderBrush="#DDD6FE" BorderThickness="1">
                         <StackPanel>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
-                                <Ellipse Width="8" Height="8" Fill="#6366F1"
+                                <Ellipse Width="8" Height="8" Fill="#7C3AED"
                                          Margin="0,0,7,0" VerticalAlignment="Center"/>
                                 <TextBlock Text="Destino" FontSize="12" FontWeight="SemiBold"
-                                           Foreground="#3730A3" VerticalAlignment="Center"/>
+                                           Foreground="#5B21B6" VerticalAlignment="Center"/>
                             </StackPanel>
                             <TextBlock x:Name="txtDestinoCard" Text=""
-                                       FontSize="12" Foreground="#4338CA" TextTrimming="CharacterEllipsis"/>
+                                       FontSize="12" Foreground="#6D28D9" TextTrimming="CharacterEllipsis"/>
                         </StackPanel>
                     </Border>
                 </Grid>
@@ -160,7 +160,7 @@
                     <Button Grid.Row="2" Grid.Column="0" Height="40" Margin="0,0,6,0"
                             Style="{StaticResource SecondaryButtonStyle}"
                             Click="BtnEstrela_Click" ToolTip="Enviar tecla * via DTMF">
-                        <TextBlock Text="Enviar  ✱" FontSize="12" HorizontalAlignment="Center"/>
+                        <TextBlock Text="Enviar tecla *" FontSize="12" HorizontalAlignment="Center"/>
                     </Button>
 
                     <!-- Fechar (cinza) -->

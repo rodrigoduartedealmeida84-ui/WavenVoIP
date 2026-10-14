@@ -65,9 +65,9 @@
     </Window.Resources>
 
     <Border Margin="8" CornerRadius="22" Background="White" BorderBrush="#E2E8F0" BorderThickness="1">
-        <Border.Effect>
+        <Grid><Border Margin="0" CornerRadius="22" Background="White" IsHitTestVisible="False"><Border.Effect>
             <DropShadowEffect BlurRadius="24" ShadowDepth="4" Opacity="0.2"/>
-        </Border.Effect>
+        </Border.Effect></Border>
         <Grid Margin="28,22,28,22">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
@@ -149,5 +149,5 @@
                 <Button x:Name="btnSalvar" Grid.Column="2" Content="Salvar contato" Style="{StaticResource BtnPrimary}" Click="BtnSalvar_Click"/>
             </Grid>
         </Grid>
-    </Border>
+    </Grid></Border>
 </Window>

@@ -10,9 +10,9 @@
         ResizeMode="CanMinimize">
     <Grid Background="{StaticResource WindowBgBrush}" Margin="22">
         <Border CornerRadius="28" Background="#FDFDFE" BorderBrush="#E7EAF3" BorderThickness="1">
-            <Border.Effect>
+            <Grid><Border Margin="0" CornerRadius="28" Background="#FDFDFE" IsHitTestVisible="False"><Border.Effect>
                 <DropShadowEffect BlurRadius="22" ShadowDepth="0" Opacity="0.10"/>
-            </Border.Effect>
+            </Border.Effect></Border>
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="0.95*"/>
@@ -29,9 +29,9 @@
                             <Border CornerRadius="20" Padding="0" Margin="0,0,0,22"
                                     Background="White" BorderBrush="#E2D9FF" BorderThickness="1"
                                     ClipToBounds="True" Width="220" Height="80">
-                                <Border.Effect>
+                                <Grid><Border Margin="0" CornerRadius="20" Background="White" IsHitTestVisible="False"><Border.Effect>
                                     <DropShadowEffect BlurRadius="18" ShadowDepth="2" Opacity="0.12" Color="#7C3AED"/>
-                                </Border.Effect>
+                                </Border.Effect></Border>
                                 <Image Source="Assets/Brand/waven_logo_dark.png"
                                        Stretch="Uniform"
                                        RenderTransformOrigin="0.5,0.5"
@@ -41,7 +41,7 @@
                                 <ScaleTransform ScaleX="2.2" ScaleY="2.2"/>
                             </Image.RenderTransform>
                         </Image>
-                            </Border>
+                            </Grid></Border>
                             <TextBlock Text="Softphone corporativo conectado ao Issabel" Margin="0,8,0,0" FontSize="15" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
                             <Border Margin="0,24,0,0" Padding="14" CornerRadius="18" Background="#FFFFFF" BorderBrush="#E8E2FF" BorderThickness="1">
                                 <StackPanel>
@@ -128,6 +128,6 @@
                     </StackPanel>
                 </Grid>
             </Grid>
-        </Border>
+        </Grid></Border>
     </Grid>
 </Window>

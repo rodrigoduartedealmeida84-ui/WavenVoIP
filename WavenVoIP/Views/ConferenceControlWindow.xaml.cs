@@ -1,50 +1,53 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Threading;
 using WavenVoIP.Models;
 using WavenVoIP.Services;
 using WavenVoIP;
 
 namespace WavenVoIP.Views
 {
+    // v2.5.0 — tela de conferência compacta: os ramais online aparecem direto (nome, número,
+    // livre/ocupado, em tempo real); um clique seleciona e "Adicionar" confirma (ou dois cliques
+    // no ramal). Contatos externos ficam atrás do botão "Buscar Contato". Os participantes
+    // mostram, em tempo real, quem já está na sala.
     public partial class ConferenceControlWindow : Window
     {
-        public sealed class ParticipantItem
+        public sealed class ParticipantItem : INotifyPropertyChanged
         {
-            public string Numero { get; set; } = string.Empty;
-            public string Status { get; set; } = string.Empty;
+            private static readonly Brush _verde = Congelar(34, 197, 94), _vermelho = Congelar(239, 68, 68), _ambar = Congelar(245, 158, 11), _cinza = Congelar(148, 163, 184);
+            private static Brush Congelar(byte r, byte g, byte b) { var br = new SolidColorBrush(Color.FromRgb(r, g, b)); br.Freeze(); return br; }
 
-            public string Iniciais
-            {
-                get
-                {
-                    var n = Numero.Trim();
-                    if (n.Length == 0) return "?";
-                    var c = n[0];
-                    return char.IsLetter(c) ? char.ToUpper(c).ToString() : "#";
-                }
-            }
+            private string _status = string.Empty, _exibicao = string.Empty;
+            public string Numero { get; set; } = string.Empty;       // identificador usado nos comandos (mutar/remover)
+            public bool NaSala { get; set; }
+            public bool JaEsteveNaSala { get; set; }
+            public string Exibicao { get => string.IsNullOrEmpty(_exibicao) ? Numero : _exibicao; set { _exibicao = value; On(); } }
+            public string Status { get => _status; set { if (_status != value) { _status = value; On(); On(nameof(BrushStatus)); } } }
 
-            public System.Windows.Media.Brush BrushAvatar =>
-                new System.Windows.Media.SolidColorBrush(
-                    System.Windows.Media.Color.FromRgb(99, 102, 241));
-
-            public System.Windows.Media.Brush BrushStatus
+            public Brush BrushStatus
             {
                 get
                 {
                     var s = (Status ?? string.Empty).ToLowerInvariant();
-                    if (s.Contains("atend") || s.Contains("conectad") || s.Contains("em chamada"))
-                        return new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(34, 197, 94));
-                    if (s.Contains("ocup") || s.Contains("falha") || s.Contains("erro") || s.Contains("removend"))
-                        return new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(239, 68, 68));
-                    return new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(245, 158, 11));
+                    if (s.Contains("na conferência") || s.Contains("atendeu") || s.Contains("conectad") || s.Contains("em chamada")) return _verde;
+                    if (s.Contains("saiu")) return _cinza;
+                    if (s.Contains("ocup") || s.Contains("falha") || s.Contains("erro") || s.Contains("removend") || s.Contains("cancelad")) return _vermelho;
+                    return _ambar;
                 }
             }
+
+            public event PropertyChangedEventHandler? PropertyChanged;
+            private void On([CallerMemberName] string? n = null) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(n));
         }
 
         public Func<string, string, Task<bool>>? OnAddParticipantAsync;
@@ -53,14 +56,21 @@ namespace WavenVoIP.Views
         public Action<string>? OnRemoveRequested;
         public Func<string, Task<bool>>? OnJoinCurrentCallAsync;
         public Action<bool>? OnMuteHostRequested;
+        // Quem está na sala agora (ramais e números chamados) — consultado a cada 3 s com a janela aberta.
+        public Func<Task<IReadOnlyList<string>>>? OnListarPresencaAsync;
+
+        private static readonly Brush _verde = Congelar(21, 128, 61), _verdeF = Congelar(220, 252, 231);
+        private static readonly Brush _ambar = Congelar(180, 83, 9), _ambarF = Congelar(254, 243, 199);
+        private static readonly Brush _roxo = Congelar(124, 58, 237), _cinza = Congelar(107, 114, 128);
+        private static Brush Congelar(byte r, byte g, byte b) { var br = new SolidColorBrush(Color.FromRgb(r, g, b)); br.Freeze(); return br; }
 
         private readonly ObservableCollection<ParticipantItem> _participantes = new();
-        private System.Collections.Generic.List<Contato> _contatos = new();
-        private bool _hostMudo;
-
-        // Mute mic icon paths
-        private const string MicOnPath = "M12,2A3,3 0 0,1 15,5V11A3,3 0 0,1 12,14A3,3 0 0,1 9,11V5A3,3 0 0,1 12,2M19,11C19,14.53 16.39,17.44 13,17.93V21H11V17.93C7.61,17.44 5,14.53 5,11H7A5,5 0 0,0 12,16A5,5 0 0,0 17,11H19Z";
-        private const string MicOffPath = "M19,11H17.3C17.3,14 14.76,16.1 12,16.1C9.24,16.1 6.7,14 6.7,11H5C5,14.41 7.72,17.23 11,17.72V21H13V17.72C16.28,17.23 19,14.41 19,11M4.27,3L3,4.27L9,10.27V11A3,3 0 0,0 12,14A3,3 0 0,0 12.28,13.97L14.5,16.2C13.74,16.61 12.9,16.9 12,16.9C9.24,16.9 6.7,14.8 6.7,12H5C5,15.41 7.72,18.23 11,18.72V22H13V18.72C14.22,18.54 15.35,18.06 16.3,17.37L19.73,20.8L21,19.53L4.27,3M15,11A3,3 0 0,0 12,8A3,3 0 0,0 11.37,8.06L15,11.7V11Z";
+        private readonly ObservableCollection<EscolherDestinoWindow.RamalCard> _ramais = new();
+        private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(1) };
+        private readonly string _meuRamal;
+        private List<Contato>? _contatos;
+        private bool _hostMudo, _lendoPresenca, _ignorarTexto;
+        private int _ticks;
 
         public ConferenceControlWindow(string salaPadrao)
         {
@@ -68,8 +78,25 @@ namespace WavenVoIP.Views
             txtSala.Text = string.IsNullOrWhiteSpace(salaPadrao) ? "800" : salaPadrao;
             txtSalaVisual.Text = txtSala.Text;
             lstParticipantes.ItemsSource = _participantes;
-            CarregarContatos();
-            txtDestino.Focus();
+            listaRamais.ItemsSource = _ramais;
+            _participantes.CollectionChanged += (_, _) => AtualizarContagem();
+
+            string meu = string.Empty;
+            try { var cfg = SipConfig.CarregarSalva(); meu = (string.IsNullOrWhiteSpace(cfg?.Ramal) ? cfg?.Login : cfg?.Ramal) ?? string.Empty; } catch { }
+            _meuRamal = meu.Trim();
+
+            var area = SystemParameters.WorkArea;
+            if (Width > area.Width - 24) Width = Math.Max(MinWidth, area.Width - 24);
+            if (Height > area.Height - 24) Height = Math.Max(MinHeight, area.Height - 24);
+
+            _timer.Tick += async (_, _) =>
+            {
+                AtualizarRamais();
+                if (_ticks % 3 == 0) await AtualizarPresencaAsync();
+            };
+            Loaded += (_, _) => { AtualizarRamais(); _timer.Start(); };
+            Closed += (_, _) => _timer.Stop();
+            AtualizarContagem();
         }
 
         public void AtualizarStatus(string mensagem)
@@ -77,76 +104,186 @@ namespace WavenVoIP.Views
             if (txtStatus != null) txtStatus.Text = mensagem;
         }
 
+        private void AtualizarContagem()
+        {
+            try
+            {
+                txtQtdParticipantes.Text = _participantes.Count.ToString();
+                txtSemParticipantes.Visibility = _participantes.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            }
+            catch { }
+        }
+
+        // ── Ramais online (mesma fonte do Dashboard: monitor de ramais via Waven API/AMI) ──
+        private void AtualizarRamais()
+        {
+            try
+            {
+                var svc = AmiMonitorService.Current;
+                if (svc == null)
+                {
+                    txtSemRamais.Text = "Monitor de ramais indisponível. Digite o ramal abaixo.";
+                    txtSemRamais.Visibility = Visibility.Visible;
+                    return;
+                }
+                if (_ticks++ % 3 == 0) { try { svc.ForcePoll(); } catch { } }
+
+                var online = svc.Ramais
+                    .Where(r => EscolherDestinoWindow.EhOnline(r.Status) && !string.Equals(r.Ramal, _meuRamal, StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(r => r.Status == StatusRamal.Online ? 0 : 1).ThenBy(r => r.Ramal)
+                    .ToList();
+
+                foreach (var velho in _ramais.Where(c => online.All(o => o.Ramal != c.Ramal)).ToList())
+                    _ramais.Remove(velho);
+
+                for (int i = 0; i < online.Count; i++)
+                {
+                    var r = online[i];
+                    var card = _ramais.FirstOrDefault(c => c.Ramal == r.Ramal);
+                    if (card == null) { card = new EscolherDestinoWindow.RamalCard { Ramal = r.Ramal }; _ramais.Add(card); }
+                    var (texto, livre) = EscolherDestinoWindow.Situacao(r.Status);
+                    card.Nome = string.IsNullOrWhiteSpace(r.Nome) ? $"Ramal {r.Ramal}" : r.Nome;
+                    card.StatusTexto = texto; card.Livre = livre;
+                    card.Cor = livre ? _verde : _ambar; card.CorFundo = livre ? _verdeF : _ambarF;
+                    var atual = _ramais.IndexOf(card);
+                    if (atual != i && i < _ramais.Count) _ramais.Move(atual, i);
+                }
+
+                txtSemRamais.Text = "Nenhum outro ramal online no momento.";
+                txtSemRamais.Visibility = _ramais.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+                var livres = _ramais.Count(c => c.Livre);
+                txtAoVivo.Text = svc.Conectado ? $"ao vivo · {livres} livre(s) de {_ramais.Count}" : "sem conexão com o monitor";
+            }
+            catch { }
+        }
+
+        private void Ramal_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.Tag is not EscolherDestinoWindow.RamalCard card) return;
+            _ignorarTexto = true; txtDestino.Text = card.Ramal; _ignorarTexto = false;
+            foreach (var c in _ramais) c.Selecionado = c.Ramal == card.Ramal;
+            txtStatus.Text = $"{card.Nome} ({card.Ramal}) selecionado — clique em Adicionar.";
+            if (e.ClickCount >= 2) BtnAdicionar_Click(sender, e);
+        }
+
+        private void TxtDestino_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            txtDicaDestino.Visibility = txtDestino.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+            if (_ignorarTexto) return;
+            foreach (var c in _ramais) c.Selecionado = false;
+        }
+
+        private void TxtDestino_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Enter) { e.Handled = true; BtnAdicionar_Click(sender, e); }
+        }
+
+        // ── Presença em tempo real ───────────────────────────────────────────────
+        private static string Digitos(string s) => new string((s ?? string.Empty).Where(char.IsDigit).ToArray());
+
+        internal static bool MesmoParticipante(string numeroItem, string identificadorNaSala)
+        {
+            var a = Digitos(numeroItem); var b = Digitos(identificadorNaSala);
+            if (a.Length == 0 || b.Length == 0) return false;
+            if (a == b) return true;
+            // número externo: a sala guarda o número com o prefixo de rota e o item pode estar sem ele
+            return a.Length >= 8 && b.Length >= 8 && (a.EndsWith(b) || b.EndsWith(a));
+        }
+
+        private async Task AtualizarPresencaAsync()
+        {
+            if (_lendoPresenca || OnListarPresencaAsync == null || _participantes.Count == 0) return;
+            _lendoPresenca = true;
+            try
+            {
+                var naSala = await OnListarPresencaAsync();
+                if (naSala == null) return;
+                foreach (var p in _participantes)
+                {
+                    bool presente = naSala.Any(id => MesmoParticipante(p.Numero, id));
+                    if (presente && !p.NaSala) { p.NaSala = true; p.JaEsteveNaSala = true; p.Status = "Na conferência"; }
+                    else if (!presente && p.NaSala) { p.NaSala = false; p.Status = "Saiu da conferência"; }
+                }
+            }
+            catch { }
+            finally { _lendoPresenca = false; }
+        }
+
         public void AdicionarOuAtualizarParticipante(string numero, string status)
         {
-            var numDisplay = PhoneNumberNormalizer.NormalizeForDisplay(
-                DialPlanService.RemoverPrefixoDeRota(numero ?? string.Empty));
-            if (string.IsNullOrWhiteSpace(numDisplay)) numDisplay = numero ?? string.Empty;
-
-            var nomeContato = ContatoStorageService.ResolverNomePorNumero(numero ?? string.Empty);
-            var exibicao = string.Equals(nomeContato, numero, StringComparison.OrdinalIgnoreCase)
-                ? numDisplay
-                : $"{nomeContato} ({numDisplay})";
-
-            var existing = _participantes.FirstOrDefault(p =>
-                p.Numero == exibicao || p.Numero == numero || p.Numero == numDisplay);
-            if (existing != null)
-                existing.Status = status;
-            else
-                _participantes.Add(new ParticipantItem { Numero = exibicao, Status = status });
-            lstParticipantes.Items.Refresh();
+            var existing = _participantes.FirstOrDefault(p => MesmoParticipante(p.Numero, numero ?? string.Empty) || p.Numero == numero);
+            if (existing != null) existing.Status = status;
+            else _participantes.Add(new ParticipantItem { Numero = numero ?? string.Empty, Exibicao = NomeDe(numero ?? string.Empty), Status = status });
         }
 
-        private void CarregarContatos()
+        private string NomeDe(string numero)
         {
-            try { _contatos = ContatoStorageService.Carregar(); } catch { _contatos = new(); }
-            AtualizarListaContatos();
-        }
-
-        private void AtualizarListaContatos()
-        {
-            var busca = txtBuscaContato?.Text?.Trim().ToLowerInvariant() ?? string.Empty;
-            var lista = string.IsNullOrWhiteSpace(busca)
-                ? _contatos
-                : _contatos.Where(c => (c.Nome ?? "").ToLowerInvariant().Contains(busca) || (c.Numero ?? "").Contains(busca)).ToList();
-            lstContatos.ItemsSource = lista;
-        }
-
-        private void TxtBuscaContato_TextChanged(object sender, TextChangedEventArgs e) => AtualizarListaContatos();
-
-        private void SelecionarContato_Click(object sender, RoutedEventArgs e)
-        {
-            if (sender is FrameworkElement fe && fe.Tag is string numero)
+            try
             {
-                var numNorm = PhoneNumberNormalizer.NormalizeForDial(numero);
-                if (!string.Equals(numNorm, numero, StringComparison.Ordinal))
-                    LogHelper.Write($"CONFERENCE_NUMBER_NORMALIZED origem=selecionar entrada={numero} saida={numNorm}");
-                txtDestino.Text = numNorm;
-                txtDestino.Focus();
-                txtDestino.CaretIndex = txtDestino.Text.Length;
+                var ramal = _ramais.FirstOrDefault(c => c.Ramal == numero);
+                if (ramal != null) return $"{ramal.Nome} ({ramal.Ramal})";
+                var numDisplay = PhoneNumberNormalizer.NormalizeForDisplay(DialPlanService.RemoverPrefixoDeRota(numero));
+                if (string.IsNullOrWhiteSpace(numDisplay)) numDisplay = numero;
+                var nome = ContatoStorageService.ResolverNomePorNumero(numero);
+                return string.Equals(nome, numero, StringComparison.OrdinalIgnoreCase) ? numDisplay : $"{nome} ({numDisplay})";
             }
+            catch { return numero; }
+        }
+
+        // ── Buscar contato externo ───────────────────────────────────────────────
+        private async void BtnBuscarContato_Click(object sender, RoutedEventArgs e)
+        {
+            var abrir = painelContatos.Visibility != Visibility.Visible;
+            painelContatos.Visibility = abrir ? Visibility.Visible : Visibility.Collapsed;
+            if (!abrir) return;
+            if (_contatos == null)
+            {
+                try { _contatos = await Task.Run(() => ContatoStorageService.Carregar()); } catch { _contatos = new List<Contato>(); }
+            }
+            FiltrarContatos();
+            txtBuscaContato.Focus();
+        }
+
+        private void TxtBuscaContato_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            txtDicaBusca.Visibility = txtBuscaContato.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+            FiltrarContatos();
+        }
+
+        private void FiltrarContatos()
+        {
+            if (_contatos == null) return;
+            var busca = txtBuscaContato.Text.Trim();
+            IEnumerable<Contato> q = _contatos.Where(c => !string.IsNullOrWhiteSpace(c.Numero));
+            if (busca.Length > 0)
+                q = q.Where(c => (c.Nome ?? "").Contains(busca, StringComparison.OrdinalIgnoreCase) || (c.Numero ?? "").Contains(busca));
+            lstContatos.ItemsSource = q.OrderBy(c => c.Nome).Take(60).ToList();
+        }
+
+        private void LstContatos_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (lstContatos.SelectedItem is not Contato c || string.IsNullOrWhiteSpace(c.Numero)) return;
+            var numNorm = PhoneNumberNormalizer.NormalizeForDial(c.Numero);
+            if (!string.Equals(numNorm, c.Numero, StringComparison.Ordinal))
+                LogHelper.Write($"CONFERENCE_NUMBER_NORMALIZED origem=selecionar entrada={c.Numero} saida={numNorm}");
+            txtDestino.Text = numNorm;
+            txtStatus.Text = $"{c.Nome} selecionado — clique em Adicionar.";
         }
 
         private void LstContatos_MouseDoubleClick(object sender, MouseButtonEventArgs e)
         {
-            if (lstContatos.SelectedItem is Contato c && !string.IsNullOrWhiteSpace(c.Numero))
-            {
-                var numNorm = PhoneNumberNormalizer.NormalizeForDial(c.Numero);
-                if (!string.Equals(numNorm, c.Numero, StringComparison.Ordinal))
-                    LogHelper.Write($"CONFERENCE_NUMBER_NORMALIZED origem=double_click entrada={c.Numero} saida={numNorm}");
-                txtDestino.Text = numNorm;
-                txtDestino.Focus();
-                txtDestino.CaretIndex = txtDestino.Text.Length;
-            }
+            if (lstContatos.SelectedItem is Contato) BtnAdicionar_Click(sender, e);
         }
 
+        // ── Adicionar ────────────────────────────────────────────────────────────
         private async void BtnAdicionar_Click(object sender, RoutedEventArgs e)
         {
+            if (btnAdicionar != null && !btnAdicionar.IsEnabled) return;
             var destino = txtDestino.Text?.Trim() ?? string.Empty;
             var sala = txtSala.Text?.Trim() ?? "800";
             if (string.IsNullOrWhiteSpace(destino))
             {
-                txtStatus.Text = "Digite ou selecione um ramal/número para adicionar.";
+                txtStatus.Text = "Escolha um ramal ou digite um número para adicionar.";
                 return;
             }
 
@@ -159,17 +296,17 @@ namespace WavenVoIP.Views
 
             var item = new ParticipantItem
             {
-                Numero = destino!,
-                Status = ehInterno ? "Discando ramal interno..." : "Abrindo seletor de rota..."
+                Numero = destino,
+                Exibicao = NomeDe(destino),
+                Status = ehInterno ? "Chamando ramal…" : "Escolhendo a rota…"
             };
             _participantes.Add(item);
-            lstParticipantes.Items.Refresh();
 
-            txtStatus.Text = ehInterno
-                ? $"Discando ramal {destino}..."
-                : $"Abrindo seletor de rota para {destino}...";
+            txtStatus.Text = ehInterno ? $"Chamando o ramal {destino}…" : $"Escolha a rota para {destino}…";
 
             txtDestino.Clear();
+            foreach (var c in _ramais) c.Selecionado = false;
+            painelContatos.Visibility = Visibility.Collapsed;
 
             bool ok = false;
             string erro = string.Empty;
@@ -187,82 +324,63 @@ namespace WavenVoIP.Views
 
             if (ok)
             {
-                item.Status = "Chamada enviada — aguardando participante atender.";
-                txtStatus.Text = $"Participante {destino} → sala {sala}. Aguardando atender.";
+                if (!item.NaSala) item.Status = "Chamando…";
+                txtStatus.Text = $"{item.Exibicao} foi chamado para a sala {sala}.";
             }
             else
             {
-                item.Status = string.IsNullOrWhiteSpace(erro)
-                    ? "Cancelado ou não enviado."
-                    : "Erro: " + erro;
+                item.Status = string.IsNullOrWhiteSpace(erro) ? "Cancelado ou não enviado" : "Erro: " + erro;
                 txtStatus.Text = string.IsNullOrWhiteSpace(erro)
-                    ? $"Participante {destino} não foi enviado (seleção cancelada ou falha AMI)."
+                    ? $"{item.Exibicao} não foi adicionado (seleção cancelada ou sala indisponível)."
                     : item.Status;
             }
 
-            lstParticipantes.Items.Refresh();
             if (btnAdicionar != null) btnAdicionar.IsEnabled = true;
         }
 
-        private void BtnAtualizar_Click(object sender, RoutedEventArgs e)
+        private async void BtnAtualizar_Click(object sender, RoutedEventArgs e)
         {
             try { OnRefreshRequested?.Invoke(); } catch { }
-            txtStatus.Text = "Atualização solicitada.";
+            try { AmiMonitorService.Current?.ForcePoll(); } catch { }
+            await AtualizarPresencaAsync();
+            txtStatus.Text = "Ramais e participantes atualizados.";
         }
 
         private void BtnMuteHost_Click(object sender, RoutedEventArgs e)
         {
             _hostMudo = !_hostMudo;
-            try
-            {
-                var icon = btnMuteHost?.Template?.FindName("pathMuteHostIcon", btnMuteHost) as System.Windows.Shapes.Path;
-                if (icon != null)
-                    icon.Data = System.Windows.Media.Geometry.Parse(_hostMudo ? MicOffPath : MicOnPath);
-            }
-            catch { }
-            if (btnMuteHost != null)
-                btnMuteHost.Background = _hostMudo
-                    ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(107, 114, 128))
-                    : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(99, 102, 241));
-            if (txtHostStatus != null)
-                txtHostStatus.Text = _hostMudo ? "Microfone MUDO" : "Microfone ativo";
+            btnMuteHost.Content = _hostMudo ? "" : "";
+            btnMuteHost.Background = _hostMudo ? _cinza : _roxo;
+            txtHostStatus.Text = _hostMudo ? "Silenciado" : "Ativo";
             try { OnMuteHostRequested?.Invoke(_hostMudo); } catch { }
         }
-
-        private void BtnSairConferencia_Click(object sender, RoutedEventArgs e) => Close();
 
         private void BtnMutarSelecionado_Click(object sender, RoutedEventArgs e)
         {
             if (sender is not FrameworkElement fe || fe.Tag is not string numero) return;
             var item = _participantes.FirstOrDefault(p => p.Numero == numero);
             try { OnMuteRequested?.Invoke(numero); } catch { }
-            if (item != null)
-            {
-                item.Status = "Comando mute enviado.";
-                lstParticipantes.Items.Refresh();
-            }
+            if (item != null) txtStatus.Text = $"Pedido para silenciar {item.Exibicao} enviado.";
         }
 
         private void BtnRemoverSelecionado_Click(object sender, RoutedEventArgs e)
         {
             if (sender is not FrameworkElement fe || fe.Tag is not string numero) return;
             var item = _participantes.FirstOrDefault(p => p.Numero == numero);
-            try { OnRemoveRequested?.Invoke(numero); } catch { }
-            if (item != null)
+            // quem nunca chegou a ser chamado/entrar sai da lista na hora
+            if (item != null && !item.NaSala && (item.Status.StartsWith("Cancelado") || item.Status.StartsWith("Erro") || item.Status.StartsWith("Saiu")))
             {
-                item.Status = "Removendo...";
-                lstParticipantes.Items.Refresh();
+                _participantes.Remove(item);
+                return;
             }
+            try { OnRemoveRequested?.Invoke(numero); } catch { }
+            if (item != null) item.Status = "Removendo…";
         }
 
         public void MarcarParticipanteRemovido(string numero)
         {
             var item = _participantes.FirstOrDefault(p => p.Numero == numero);
-            if (item != null)
-            {
-                _participantes.Remove(item);
-                lstParticipantes.Items.Refresh();
-            }
+            if (item != null) _participantes.Remove(item);
         }
 
         private void BtnFechar_Click(object sender, RoutedEventArgs e) => Close();

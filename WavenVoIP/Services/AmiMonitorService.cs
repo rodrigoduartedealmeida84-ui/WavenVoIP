@@ -34,6 +34,7 @@ namespace WavenVoIP.Services
         }
 
         public static void PararCurrent() { _current?.Stop(); _current = null; }
+        public static void ForcarLeituraAtual() { try { _current?.ForcePoll(); } catch { } }
 
         // ── Public state ──────────────────────────────────────────────────────
         public ObservableCollection<RamalStatusItem> Ramais { get; } = new();
@@ -122,6 +123,7 @@ namespace WavenVoIP.Services
                     if (p != null)
                     {
                         peers = p;
+                        foreach (var x in peers) x.Status = NormalizarStatusPeer(x);
                         int cOnline  = peers.Count(x => x.Status == "online");
                         int cEmLig   = peers.Count(x => x.Status is "emligacao" or "tocando" or "chamando");
                         int cOffline = peers.Count(x => x.Status == "offline");
@@ -348,6 +350,31 @@ namespace WavenVoIP.Services
                     _pollTrigger.Wait(0);
             }
             catch (OperationCanceledException) { }
+        }
+
+        // v2.5.0 — ramais PJSIP (série 9000): o Asterisk informa o estado como "Not in use",
+        // "In use", "Ringing"... (com espaços) e a API só reconhece a forma com "_", devolvendo
+        // "indisponivel" para um ramal registrado e livre. Aqui o estado é lido do rawStatus
+        // ("PJSIP|DS=<estado>|Contacts=<contatos>"), sem depender de mudança na API.
+        internal static string NormalizarStatusPeer(Models.ApiAmiPeer p)
+        {
+            var status = (p.Status ?? string.Empty).ToLowerInvariant();
+            if (status != "indisponivel" && status != "desconhecido") return status;
+            var raw = p.RawStatus ?? string.Empty;
+            if (!raw.StartsWith("PJSIP|", StringComparison.OrdinalIgnoreCase)) return status;
+
+            string ds = string.Empty, contatos = string.Empty;
+            foreach (var parte in raw.Split('|'))
+            {
+                if (parte.StartsWith("DS=", StringComparison.OrdinalIgnoreCase)) ds = parte.Substring(3).Trim().ToLowerInvariant();
+                else if (parte.StartsWith("Contacts=", StringComparison.OrdinalIgnoreCase)) contatos = parte.Substring(9).Trim();
+            }
+            if (contatos.Length == 0 || ds.Length == 0 || ds.Contains("unavailable") || ds.Contains("invalid")) return "offline";
+            ds = ds.Replace('_', ' ');
+            if (ds.Contains("not in use")) return "online";
+            if (ds.Contains("ring")) return "tocando";
+            if (ds.Contains("in use") || ds.Contains("busy") || ds.Contains("hold")) return "emligacao";
+            return status;
         }
 
         private static StatusRamal MapearStatusApi(string s) => s?.ToLowerInvariant() switch

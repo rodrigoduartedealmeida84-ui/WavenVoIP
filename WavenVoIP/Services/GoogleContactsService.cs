@@ -86,6 +86,19 @@ namespace WavenVoIP.Services
             }
             catch (Exception ex)
             {
+                // v2.5.0 — falha de rede ao renovar o token (ex.: computador voltando da suspensão,
+                // sem DNS por alguns segundos) NÃO é token inválido. Antes virava "acesso revogado":
+                // aviso de reconectar na tela e a sincronização com o Google parava de vez.
+                // Erro de autenticação de verdade (invalid_grant etc.) continua devolvendo null.
+                var semRede = false;
+                for (var e = ex; e != null && !semRede; e = e.InnerException)
+                    semRede = e is System.Net.Http.HttpRequestException or System.Net.Sockets.SocketException
+                                or TimeoutException or OperationCanceledException;
+                if (semRede)
+                {
+                    LogHelper.Info($"[GOOGLE_TOKEN_REFRESH_SEM_REDE] {ex.Message}");
+                    throw;
+                }
                 LogHelper.Info($"[GOOGLE_TOKEN_INVALID] Falha ao carregar/renovar token: {ex.Message}");
                 return null;
             }
@@ -112,7 +125,7 @@ namespace WavenVoIP.Services
             do
             {
                 var request = service.People.Connections.List("people/me");
-                request.PersonFields = "names,phoneNumbers";
+                request.PersonFields = "names,phoneNumbers,metadata";
                 request.PageSize     = 1000;
                 if (pageToken != null) request.PageToken = pageToken;
 
@@ -137,7 +150,7 @@ namespace WavenVoIP.Services
                                 Numero          = numero,
                                 Observacao      = "Google Contacts",
                                 FonteGoogle     = true,
-                                AtualizadoEm    = DateTime.Now,
+                                AtualizadoEm    = DataDeAlteracao(person),   // data real da última alteração no Google
                                 GoogleContactId = person.ResourceName // ex: "people/c1234567890"
                             });
                         }
@@ -168,7 +181,7 @@ namespace WavenVoIP.Services
             do
             {
                 var request = service.People.Connections.List("people/me");
-                request.PersonFields = "names,phoneNumbers";
+                request.PersonFields = "names,phoneNumbers,metadata";
                 request.PageSize = 1000;
                 if (pageToken != null) request.PageToken = pageToken;
 
@@ -193,7 +206,8 @@ namespace WavenVoIP.Services
                                 Numero = numero,
                                 Observacao = "Google Contacts",
                                 FonteGoogle = true,
-                                AtualizadoEm = DateTime.Now
+                                AtualizadoEm = DataDeAlteracao(person),
+                                GoogleContactId = person.ResourceName
                             });
                         }
                     }
@@ -216,6 +230,100 @@ namespace WavenVoIP.Services
                 return JsonSerializer.Deserialize<List<Contato>>(json) ?? new List<Contato>();
             }
             catch { return new List<Contato>(); }
+        }
+
+        // v2.5.0 — data da última alteração do contato NO GOOGLE (antes era gravado "agora" a cada
+        // sincronização, o que impedia saber qual lado tinha o nome mais recente).
+        private static DateTime? DataDeAlteracao(Google.Apis.PeopleService.v1.Data.Person person)
+        {
+            try
+            {
+                DateTime? maior = null;
+                foreach (var s in person.Metadata?.Sources ?? new List<Google.Apis.PeopleService.v1.Data.Source>())
+                {
+                    var t = s.UpdateTimeDateTimeOffset?.UtcDateTime;
+                    if (t != null && (maior == null || t > maior)) maior = t;
+                }
+                return maior;
+            }
+            catch { return null; }
+        }
+
+        private static bool TemEscopoDeEscrita(UserCredential? credential)
+        {
+            var escopos = (credential?.Token?.Scope ?? string.Empty).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            return escopos.Any(e => string.Equals(e, PeopleServiceService.ScopeConstants.Contacts, StringComparison.OrdinalIgnoreCase));
+        }
+
+        /// O WavenVoIP pode alterar contatos no Google? (a conexão padrão é só de leitura)
+        public static async Task<bool> TemPermissaoDeEscritaAsync(CancellationToken ct = default)
+        {
+            try { return TemEscopoDeEscrita(await ObterCredencialSilenciosamente(ct)); } catch { return false; }
+        }
+
+        /// Pede ao usuário, no navegador, a permissão de edição dos contatos do Google.
+        public static async Task<bool> AutorizarEscritaAsync(CancellationToken ct = default)
+        {
+            try
+            {
+                await LimparTokenAsync();
+                await using var stream = new FileStream(_credentialsPath, FileMode.Open, FileAccess.Read);
+                var secrets = await GoogleClientSecrets.FromStreamAsync(stream, ct);
+                Directory.CreateDirectory(_tokenPath);
+                LogHelper.Info("[GOOGLE_LOGIN_STARTED_BY_USER] AutorizarEscritaAsync (permissao de edicao de contatos)");
+                var cred = await GoogleWebAuthorizationBroker.AuthorizeAsync(
+                    secrets.Secrets, new[] { PeopleServiceService.ScopeConstants.Contacts }, "user", ct, new FileDataStore(_tokenPath, true));
+                var ok = TemEscopoDeEscrita(cred);
+                LogHelper.Info($"GOOGLE_WRITE_SCOPE_GRANTED={ok}");
+                return ok;
+            }
+            catch (Exception ex)
+            {
+                LogHelper.Info($"GOOGLE_WRITE_SCOPE_FAILED | {ex.Message}");
+                return false;
+            }
+        }
+
+        /// Altera o nome de um contato no Google. motivo: "" (ok), "sem_token", "sem_permissao", "erro: ...".
+        public static async Task<(bool ok, string motivo)> AtualizarNomeAsync(string resourceName, string novoNome, CancellationToken ct = default)
+        {
+            try
+            {
+                var credential = await ObterCredencialSilenciosamente(ct);
+                if (credential == null) return (false, "sem_token");
+                if (!TemEscopoDeEscrita(credential)) return (false, "sem_permissao");
+
+                var service = new PeopleServiceService(new BaseClientService.Initializer
+                {
+                    HttpClientInitializer = credential,
+                    ApplicationName       = _appName
+                });
+                var get = service.People.Get(resourceName);
+                get.PersonFields = "names,metadata";
+                var person = await get.ExecuteAsync(ct);
+                var atual = person.Names?.FirstOrDefault()?.DisplayName?.Trim() ?? string.Empty;
+                if (string.Equals(atual, novoNome.Trim(), StringComparison.Ordinal)) return (true, string.Empty);
+
+                person.Names = new List<Google.Apis.PeopleService.v1.Data.Name>
+                {
+                    new Google.Apis.PeopleService.v1.Data.Name { GivenName = novoNome.Trim(), UnstructuredName = novoNome.Trim() }
+                };
+                var upd = service.People.UpdateContact(person, resourceName);
+                upd.UpdatePersonFields = "names";
+                await upd.ExecuteAsync(ct);
+                LogHelper.Info($"GOOGLE_CONTACT_RENAMED | resourceName={resourceName} de={atual} para={novoNome}");
+                return (true, string.Empty);
+            }
+            catch (Google.GoogleApiException gex) when ((int)gex.HttpStatusCode == 403)
+            {
+                LogHelper.Info($"GOOGLE_CONTACT_RENAME_DENIED | resourceName={resourceName}");
+                return (false, "sem_permissao");
+            }
+            catch (Exception ex)
+            {
+                LogHelper.Info($"GOOGLE_CONTACT_RENAME_FAILED | resourceName={resourceName} error={ex.Message}");
+                return (false, "erro: " + ex.Message);
+            }
         }
 
         /// Exclui um contato do Google Contacts pelo resourceName (ex: "people/c1234").

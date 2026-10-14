@@ -7,6 +7,9 @@ namespace WavenVoIP.Models
         public int Recebidas { get; set; }
         public int Realizadas { get; set; }
         public int Perdidas { get; set; }
+        // v2.5.0 — Perdidas = tocou até o fim sem atendimento; os outros dois são contados à parte
+        public int ClienteDesistiu { get; set; }
+        public int AbandonoFila { get; set; }
         public int TotalAtendimentos { get; set; }
         public string TempoMedio { get; set; } = "—";
         public int Gravacoes { get; set; }

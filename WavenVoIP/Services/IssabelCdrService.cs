@@ -217,11 +217,32 @@ namespace WavenVoIP.Services
 
         // forcarCompleto: baixa a janela inteira de CDR da Waven API em vez do incremental
         // (botão "Atualizar CDR"). Sem efeito no modo de conexão direta ao MySQL.
+        // v2.5.0 — desempenho: o ciclo automático reprocessava o CDR inteiro (agrupamento,
+        // classificação, reconciliação) a cada 2–3 s mesmo sem nenhuma linha nova. Quando as
+        // linhas recebidas são idênticas às do ciclo anterior, devolve o resultado já calculado
+        // (por no máximo 15 s) e sinaliza em UltimoSyncSemMudanca para o chamador não refazer nada.
+        private static readonly object _cacheSyncLock = new();
+        private static List<HistoricoLigacaoItem>? _cacheSync;
+        private static int _cacheSyncAssinatura;
+        private static DateTime _cacheSyncEm = DateTime.MinValue;
+        public static bool UltimoSyncSemMudanca { get; private set; }
+
+        private static int AssinaturaLinhas(List<CdrChamada> linhas, int dias)
+        {
+            var h = new HashCode();
+            h.Add(dias); h.Add(linhas.Count);
+            foreach (var l in linhas)
+            {
+                h.Add(l.UniqueId); h.Add(l.Disposition); h.Add(l.Duration); h.Add(l.BillSec);
+                h.Add(l.RecordingFile); h.Add(l.DstChannel); h.Add(l.LastApp);
+            }
+            return h.ToHashCode();
+        }
+
         public static async Task<List<HistoricoLigacaoItem>> SincronizarAsync(
             SipConfig config, int diasRetencao = 7, bool forcarCompleto = false)
         {
-            Log("CDR_SYNC_START");
-            Log("HISTORY_REFRESH_START");
+            UltimoSyncSemMudanca = false;
             var resultado = new List<HistoricoLigacaoItem>();
 
             // v2.3.6 — medição de tempo por estágio (investigação de travamentos reportados após
@@ -237,7 +258,6 @@ namespace WavenVoIP.Services
                     !string.IsNullOrWhiteSpace(config.WavenApiUrl) &&
                     !string.IsNullOrWhiteSpace(config.WavenApiToken))
                 {
-                    Log($"CLIENT_CDR_USING_API | ramal={config.Ramal} dias={diasRetencao}");
                     var apiRows = await CdrApiIncrementalService
                         .ObterLinhasAsync(config.Ramal, diasRetencao, forcarCompleto)
                         .ConfigureAwait(false);
@@ -246,7 +266,6 @@ namespace WavenVoIP.Services
                         Log("API_CDR_QUERY_ERROR | falha ao buscar CDR via API");
                         return resultado;
                     }
-                    Log($"API_CDR_QUERY_OK | rows={apiRows.Count}");
                     linhas = apiRows.Select(r => new CdrChamada
                     {
                         CallDate      = r.CallDate,
@@ -270,8 +289,18 @@ namespace WavenVoIP.Services
                 {
                     linhas = await BuscarLinhasCdrAsync(config, diasRetencao);
                 }
+                var assinaturaLinhas = AssinaturaLinhas(linhas, diasRetencao);
+                lock (_cacheSyncLock)
+                {
+                    if (!forcarCompleto && _cacheSync != null && assinaturaLinhas == _cacheSyncAssinatura &&
+                        DateTime.UtcNow - _cacheSyncEm < TimeSpan.FromSeconds(15))
+                    {
+                        UltimoSyncSemMudanca = true;
+                        return new List<HistoricoLigacaoItem>(_cacheSync);
+                    }
+                }
+                Log("CDR_SYNC_START");
                 Log($"CDR_ROWS_FOUND quantidade={linhas.Count}");
-                Log($"HISTORY_CDR_READ quantidade={linhas.Count} dias={diasRetencao}");
                 Log($"CDR_SYNC_TIMING estagio=download ms={swEstagio.ElapsedMilliseconds} linhas={linhas.Count}");
                 swEstagio.Restart();
 
@@ -324,6 +353,10 @@ namespace WavenVoIP.Services
                 var todosModoRamais = string.Equals(config.HistoricoModoExibicao, "TodosRamais",
                     StringComparison.OrdinalIgnoreCase);
 
+                // v2.5.0 — discagens diretas de ramal, para reconhecer o "retorno da própria
+                // ligação" (ver EhRetornoDaPropriaLigacao).
+                var saidasDiretas = ListarSaidasDiretas(grupos);
+
                 foreach (var grupo in grupos)
                 {
                     var linkedIds   = string.Join(",", grupo.Select(r => r.LinkedId).Distinct());
@@ -372,6 +405,19 @@ namespace WavenVoIP.Services
                     var ramalAtendeu = (registrosPorAgente.Count > 0 ? registrosPorAgente : registrosAtendidosReais)
                         .Select(r => ExtrairRamalAtendente(r, ramaisConhecidos))
                         .FirstOrDefault(r => !string.IsNullOrWhiteSpace(r)) ?? string.Empty;
+
+                    // v2.5.0 — ninguém atendeu além do próprio PABX (URA/anúncio)? Só vale quando
+                    // nenhum ramal foi identificado como atendente.
+                    var atendimentoAutomatico = string.IsNullOrWhiteSpace(ramalAtendeu)
+                        ? IdentificarAtendimentoAutomatico(registrosAtendidosReais)
+                        : string.Empty;
+
+                    // Fora do horário que terminou na caixa postal: quem ouve o anúncio até o fim
+                    // cai em ext-local,vmu400 e o CDR fica com UMA linha "VoiceMail 400@default,u"
+                    // (o anúncio some da linha). Essas linhas não entram em registrosAtendidosReais.
+                    if (string.IsNullOrEmpty(atendimentoAutomatico) && !foiAtendidaGlobalmente && foiParaCaixaPostal &&
+                        grupo.Any(r => EhVoicemail(r) && EhDestinoForaDoHorario(r)))
+                        atendimentoAutomatico = "ForaHorario";
 
                     if (ehAlvo)
                         Log($"  CDR_RESULT foiAtendida={foiAtendidaGlobalmente} caixaPostal={foiParaCaixaPostal} ramalAtendeu={ramalAtendeu}");
@@ -539,6 +585,17 @@ namespace WavenVoIP.Services
                     LogDetalhado($"OUTBOUND_ATTEMPT_DURATION uid={cdr.UniqueId} linkedid={cdr.LinkedId} ringDurationSeg={duracaoToqueGrupoSeg}");
 
                     var tipo          = ClassificarChamada(cdr, ehOrigemPrincipal, foiAtendidaGlobalmente, foiParaCaixaPostal, duracaoToqueGrupoSeg);
+
+                    // v2.5.0 — a "entrada" é a ponta de volta de uma ligação que o próprio ramal está
+                    // fazendo para uma linha da empresa: não existe cliente e não é chamada perdida.
+                    // O registro é mantido (é uma ligação real no Asterisk), só não conta como perdida.
+                    if (!ehOrigemPrincipal && !foiAtendidaGlobalmente && !foiParaCaixaPostal &&
+                        EhRetornoDaPropriaLigacao(grupo, saidasDiretas))
+                    {
+                        Log($"CDR_SELF_CALL_RETURN linkedids={linkedIds} tipoOriginal={tipo} -> evento_tecnico");
+                        tipo = TipoHistoricoLigacao.Recebida;
+                        atendimentoAutomatico = "RetornoProprio";
+                    }
                     var numeroExterno = ObterNumeroExterno(cdr, ramal);
                     var duracaoFmt    = FormatarDuracao(cdr.BillSec > 0 ? cdr.BillSec : cdr.Duration);
                     // v2.3.6 — propagado da entrada local durante a reconciliação abaixo, se o
@@ -865,6 +922,10 @@ namespace WavenVoIP.Services
                         RamalOrigem     = string.IsNullOrWhiteSpace(srcRamal)  ? chRamal    : srcRamal,
                         RamalDestino    = string.IsNullOrWhiteSpace(dstRamal)  ? dstChRamal : dstRamal,
                         RamalAtendeu    = ramalAtendeu,
+                        AtendimentoAutomatico = tipo == TipoHistoricoLigacao.Recebida ||
+                                                (tipo == TipoHistoricoLigacao.CaixaPostal && atendimentoAutomatico == "ForaHorario")
+                            ? atendimentoAutomatico : string.Empty,
+                        MotivoPerdida   = tipo == TipoHistoricoLigacao.Perdida ? MotivoDaPerdida(grupo) : string.Empty,
                         GravacaoArquivo = recordingFile,
                         GravacaoUrl     = gravacaoUrl,
                         FonteCdr        = true,
@@ -910,6 +971,12 @@ namespace WavenVoIP.Services
                 Log($"CDR_SYNC_DONE chamadas={resultado.Count} gravacoes={totalGravacoes}");
                 Log($"HISTORY_REFRESH_OK total={resultado.Count}");
                 Log($"CDR_SYNC_TIMING estagio=TOTAL ms={swTotal.ElapsedMilliseconds}");
+                lock (_cacheSyncLock)
+                {
+                    _cacheSync = new List<HistoricoLigacaoItem>(resultado);
+                    _cacheSyncAssinatura = assinaturaLinhas;
+                    _cacheSyncEm = DateTime.UtcNow;
+                }
             }
             catch (Exception ex)
             {
@@ -962,6 +1029,7 @@ namespace WavenVoIP.Services
                     var b = itens[j];
                     if (removidos.Contains(b.Id)) continue;
                     if (a.Tipo != b.Tipo) continue;
+                    if (SaoLigacoesDistintasPorLinkedId(a, b)) continue;
 
                     // Only look within a 2-minute window (ramal/trunk rows are milliseconds apart)
                     var diffSec = Math.Abs((a.DataHora - b.DataHora).TotalSeconds);
@@ -1125,6 +1193,10 @@ namespace WavenVoIP.Services
                          string.Equals(outro.OrigemSaida, "Queue", StringComparison.OrdinalIgnoreCase));
                     if (!elegivelParaSupressao) continue;
 
+                    // v2.5.0 — perdida com linkedid próprio é uma ligação real que ninguém atendeu;
+                    // o retorno atendido minutos depois é OUTRA ligação e não a apaga.
+                    if (SaoLigacoesDistintasPorLinkedId(atendida, outro)) continue;
+
                     var numOutro = numeros[outro.Id];
                     if (!string.Equals(numAtendida, numOutro, StringComparison.OrdinalIgnoreCase)) continue;
 
@@ -1157,6 +1229,7 @@ namespace WavenVoIP.Services
                 {
                     var b = restantesPerdidas[j];
                     if (removidos.Contains(b.Id)) continue;
+                    if (SaoLigacoesDistintasPorLinkedId(a, b)) continue;
                     var numB = numeros[b.Id];
                     if (!string.Equals(numA, numB, StringComparison.OrdinalIgnoreCase)) continue;
 
@@ -1325,6 +1398,23 @@ namespace WavenVoIP.Services
             var linkedidsNovo      = string.Join(",", grupoNovo.Select(r => r.LinkedId).Distinct());
             LogDetalhado($"CDR_GROUP_MERGE_CHECK existente={linkedidsExistente} novo={linkedidsNovo}");
 
+            // v2.5.0 — o linkedid do Asterisk É a identidade da chamada: todas as pernas de uma
+            // mesma ligação (tronco, URA, fila, cada tentativa de toque, transferência) carregam o
+            // mesmo linkedid e já foram agrupadas no passo 1. Dois grupos com linkedid próprio são
+            // duas ligações reais, mesmo vindas do mesmo número com segundos de intervalo (cliente
+            // que cai na URA e liga de novo, que ouve o anúncio e retorna, que desliga e rediscou).
+            // Medido no CDR real de produção (12/09–12/10/2026, 1996 linhas, 625 linkedids): os 45
+            // pares que esta fusão juntava eram TODOS ligações distintas, cada uma com seu próprio
+            // canal de entrada — nenhum era perna solta de fila. A fusão por número+janela fica
+            // só para quando falta o identificador (fonte de CDR antiga, sem coluna linkedid) ou
+            // quando os dois grupos compartilham literalmente o mesmo canal real.
+            if (GrupoTemLinkedIdReal(grupoExistente) && GrupoTemLinkedIdReal(grupoNovo) &&
+                !GruposCompartilhamCanalReal(grupoExistente, grupoNovo))
+            {
+                LogDetalhado($"CDR_GROUP_MERGE_BLOCKED_DISTINCT_LINKEDID existente={linkedidsExistente} novo={linkedidsNovo}");
+                return false;
+            }
+
             if (EhGrupoOutboundDireto(grupoExistente) && EhGrupoOutboundDireto(grupoNovo))
             {
                 LogDetalhado($"CDR_GROUP_MERGE_BLOCKED_OUTBOUND existente={linkedidsExistente} novo={linkedidsNovo} " +
@@ -1335,6 +1425,90 @@ namespace WavenVoIP.Services
             LogDetalhado($"CDR_GROUP_MERGE_ALLOWED existente={linkedidsExistente} novo={linkedidsNovo}");
             return true;
         }
+
+        // ── Retorno da própria ligação ─────────────────────────────────────────────
+        //
+        // Caso real (20/09/2026, ramal 100): o operador disca, por uma linha WhatsApp da empresa,
+        // para um número que TAMBÉM é uma linha ligada ao PABX com DID direto para o próprio
+        // ramal. A ligação sai pelo tronco e, ~8 s depois, volta pelo tronco como uma entrada
+        // "de" a linha da empresa para o ramal que está ocupado discando: toca 0–1 s e cai
+        // (NO ANSWER). No Asterisk são dois linkedids — uma ligação de saída e a sua própria
+        // ponta de volta — e o Histórico mostrava a volta como chamada perdida de um cliente.
+        //
+        // Só é considerado retorno quando TUDO confere: a entrada não foi atendida por ninguém,
+        // quem "liga" é exatamente o número que o ramal está apresentando numa discagem direta
+        // em andamento (ou iniciada há poucos segundos), e essa entrada tocou nesse mesmo ramal.
+        // Qualquer outra entrada não atendida continua sendo Perdida.
+        private sealed record SaidaDireta(string Ramal, string NumeroApresentado, DateTime Inicio, DateTime Fim);
+
+        private static string Ultimos10Digitos(string? numero)
+        {
+            var d = new string((numero ?? string.Empty).Where(char.IsDigit).ToArray());
+            return d.Length > 10 ? d.Substring(d.Length - 10) : d;
+        }
+
+        private static List<SaidaDireta> ListarSaidasDiretas(List<List<CdrChamada>> grupos)
+        {
+            var saidas = new List<SaidaDireta>();
+            foreach (var g in grupos)
+            foreach (var r in g)
+            {
+                if (!string.Equals((r.DContext ?? string.Empty).Trim(), "from-internal", StringComparison.OrdinalIgnoreCase)) continue;
+                if ((r.Channel ?? string.Empty).StartsWith("Local/", StringComparison.OrdinalIgnoreCase)) continue;
+                var ramal = ExtrairRamal(r.Channel ?? string.Empty);
+                var apresentado = Ultimos10Digitos(r.Src);
+                if (string.IsNullOrWhiteSpace(ramal) || apresentado.Length < 10) continue; // Src = ramal: sem linha externa apresentada
+                saidas.Add(new SaidaDireta(ramal, apresentado, r.CallDate, r.CallDate.AddSeconds(Math.Max(r.Duration, r.BillSec))));
+            }
+            return saidas;
+        }
+
+        private static bool EhRetornoDaPropriaLigacao(List<CdrChamada> grupo, List<SaidaDireta> saidas)
+        {
+            if (saidas.Count == 0 || grupo.Count == 0) return false;
+            if (grupo.Any(r => string.Equals(r.Disposition, "ANSWERED", StringComparison.OrdinalIgnoreCase))) return false;
+            if (EhGrupoOutboundDireto(grupo)) return false;
+
+            var inicio = grupo.Min(r => r.CallDate);
+            var chamadores = grupo.Select(r => Ultimos10Digitos(r.Src)).Where(n => n.Length == 10).Distinct().ToList();
+            if (chamadores.Count != 1) return false;
+            var ramaisTocados = grupo.Select(r => ExtrairRamal(r.DstChannel ?? string.Empty))
+                                     .Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().ToList();
+            if (ramaisTocados.Count == 0) return false;
+
+            foreach (var s in saidas)
+            {
+                if (s.NumeroApresentado != chamadores[0]) continue;
+                if (!ramaisTocados.Contains(s.Ramal)) continue;
+                // A volta chega alguns segundos depois da discagem, mesmo que o operador já tenha desistido.
+                var limite = (s.Fim > s.Inicio.AddSeconds(15) ? s.Fim : s.Inicio.AddSeconds(15)).AddSeconds(5);
+                if (inicio >= s.Inicio && inicio <= limite) return true;
+            }
+            return false;
+        }
+
+        private static bool GrupoTemLinkedIdReal(List<CdrChamada> grupo)
+            => grupo.Count > 0 && grupo.All(r => !string.IsNullOrWhiteSpace(r.LinkedId));
+
+        // Mesmo canal físico (nome completo, com o sufixo único da instância, ex.
+        // "SIP/Wavoip-00000a33") nos dois grupos = a mesma ligação. Canais Local/ não contam.
+        private static bool GruposCompartilhamCanalReal(List<CdrChamada> a, List<CdrChamada> b)
+        {
+            static IEnumerable<string> Canais(List<CdrChamada> g) => g
+                .SelectMany(r => new[] { r.Channel, r.DstChannel })
+                .Where(c => !string.IsNullOrWhiteSpace(c) && !c!.StartsWith("Local/", StringComparison.OrdinalIgnoreCase))
+                .Select(c => c!.Trim());
+            var canaisA = new HashSet<string>(Canais(a), StringComparer.OrdinalIgnoreCase);
+            return canaisA.Count > 0 && Canais(b).Any(canaisA.Contains);
+        }
+
+        // v2.5.0 — dois registros do Histórico vindos do CDR, cada um com seu linkedid: são duas
+        // ligações reais e nenhuma limpeza por "mesmo número + janela de tempo" pode juntá-los
+        // nem apagar um por causa do outro (ver PodeMesclarGruposPorJanela).
+        internal static bool SaoLigacoesDistintasPorLinkedId(HistoricoLigacaoItem a, HistoricoLigacaoItem b)
+            => a.FonteCdr && b.FonteCdr &&
+               !string.IsNullOrWhiteSpace(a.LinkedId) && !string.IsNullOrWhiteSpace(b.LinkedId) &&
+               !string.Equals(a.LinkedId, b.LinkedId, StringComparison.OrdinalIgnoreCase);
 
         // Discagem manual direta de um ramal: dcontext=from-internal (contexto do dialplan do
         // Issabel pra ramal ligando pra fora) E o canal de origem resolve pra um ramal válido
@@ -1527,6 +1701,84 @@ namespace WavenVoIP.Services
             return EhRamalAgente(fromFile, conhecidos) ? fromFile : string.Empty;
         }
 
+        // v2.5.0 — chamada que só o PABX atendeu. O Asterisk marca ANSWERED quando ELE MESMO
+        // atende o canal para tocar um áudio (URA: BackGround/WaitExten em ivr-N; anúncio:
+        // Playback em app-announcement-N, ex.: mensagem de fora do horário) — nessas linhas não
+        // existe dstchannel, porque a ligação nunca foi entregue a ninguém. Confirmado com CDR
+        // real de produção (11/10/2026 16:17, linha única dcontext=app-announcement-1
+        // lastapp=Playback dstchannel vazio: aparecia como "Recebida" sem atendente).
+        // Só devolve algo quando TODAS as linhas atendidas do grupo são desse tipo — basta uma
+        // perna entregue a um canal para a chamada não ser mais "só automática".
+        // Retorna "ForaHorario", "Anuncio", "URA" ou vazio.
+        //
+        // "ForaHorario" nunca é decidido por dia/hora: exige que o próprio CDR mostre o anúncio de
+        // fora do horário. No dialplan de produção (lido em 12/10/2026) o ramo "falso" das
+        // condições de horário cai em app-announcement-1 (ForadeServicoQuerencia →
+        // custom/NovoForadeServicoQuerencia08as14) e app-announcement-3/4 (ForadeServico das
+        // filiais → custom/FECHAMENTO_FILIA); o app-announcement-2 (custom/teste_espera) é um
+        // anúncio comum e continua "Anuncio". A URA do expediente (ivr-N) continua "URA".
+        // Depois do anúncio a chamada segue para ext-local,vmu400 (caixa postal 400) — único
+        // caminho do dialplan até essa caixa — e o CDR passa a mostrar só dst=vmu400
+        // (VoiceMail 400@default,u, ou Hangup quando o cliente desliga na saudação). No CDR real
+        // de 30 dias (12/09–12/10/2026): 11 linhas no anúncio, 8 na caixa postal, 1 Hangup.
+        private static string IdentificarAtendimentoAutomatico(List<CdrChamada> registrosAtendidos)
+        {
+            if (registrosAtendidos.Count == 0) return string.Empty;
+
+            var temUra = false;
+            var temForaHorario = false;
+            foreach (var r in registrosAtendidos)
+            {
+                if (!string.IsNullOrWhiteSpace(r.DstChannel)) return string.Empty;
+
+                var ctx = (r.DContext ?? string.Empty).ToLowerInvariant();
+                var app = (r.LastApp  ?? string.Empty).ToLowerInvariant();
+
+                if (EhDestinoForaDoHorario(r))
+                    temForaHorario = true;
+                else if (ctx.Contains("ivr") || ctx.Contains("ura") || app is "background" or "waitexten" or "read")
+                    temUra = true;
+                else if (!ctx.Contains("announcement") && app != "playback")
+                    return string.Empty;
+            }
+
+            // Passou pela URA do expediente em alguma perna → não é fora do horário.
+            if (temUra) return "URA";
+            return temForaHorario ? "ForaHorario" : "Anuncio";
+        }
+
+        private static readonly HashSet<string> _contextosAnuncioForaHorario =
+            new(StringComparer.OrdinalIgnoreCase) { "app-announcement-1", "app-announcement-3", "app-announcement-4" };
+
+        private static readonly string[] _audiosAnuncioForaHorario =
+            { "foradeservico", "foradohorario", "forahorario", "fechamento" };
+
+        // Caixa postal que só é alcançada depois do anúncio de fora do horário.
+        private const string CaixaPostalForaHorario = "400";
+
+        private static bool EhDestinoForaDoHorario(CdrChamada r)
+        {
+            var dst = (r.Dst ?? string.Empty).Trim().ToLowerInvariant();
+            if (dst is "vmu" + CaixaPostalForaHorario or "vmb" + CaixaPostalForaHorario or "vms" + CaixaPostalForaHorario)
+                return true;
+            if ((r.LastApp ?? string.Empty).Equals("VoiceMail", StringComparison.OrdinalIgnoreCase) &&
+                (r.LastData ?? string.Empty).TrimStart().StartsWith(CaixaPostalForaHorario + "@", StringComparison.Ordinal))
+                return true;
+            return EhAnuncioForaDoHorario((r.DContext ?? string.Empty).ToLowerInvariant(), r.LastData);
+        }
+
+        private static bool EhAnuncioForaDoHorario(string contexto, string? lastData)
+        {
+            if (_contextosAnuncioForaHorario.Contains((contexto ?? string.Empty).Trim())) return true;
+
+            // Mesmo áudio tocado a partir de outro contexto (ex.: anúncio recriado no Issabel
+            // com outro número) — o nome do arquivo ainda confirma o destino.
+            var audio = (lastData ?? string.Empty).ToLowerInvariant().Replace("_", string.Empty).Replace("-", string.Empty);
+            foreach (var chave in _audiosAnuncioForaHorario)
+                if (audio.Contains(chave)) return true;
+            return false;
+        }
+
         // ── CDR fetch ─────────────────────────────────────────────────────────────
 
         private static async Task<List<CdrChamada>> BuscarLinhasCdrAsync(SipConfig config, int diasRetencao)
@@ -1682,6 +1934,43 @@ namespace WavenVoIP.Services
                 return ehOrigem ? TipoHistoricoLigacao.Realizada : TipoHistoricoLigacao.Recebida;
 
             return ehOrigem ? TipoHistoricoLigacao.NaoAtendida : TipoHistoricoLigacao.Perdida;
+        }
+
+        // v2.5.0 — motivo de uma chamada recebida sem atendimento, pelo que o Asterisk registrou.
+        // O PABX grava, no último registro do canal do cliente, a aplicação que estava em execução
+        // quando a chamada terminou (lastapp) e o resultado (disposition):
+        //   • terminou DENTRO do Dial (ramal/grupo ainda tocando) → quem encerrou foi o cliente:
+        //     se o toque tivesse esgotado, o plano de discagem seguiria para o destino seguinte e
+        //     o último registro seria de outra aplicação           → "ClienteDesistiu";
+        //   • terminou DENTRO da Queue (cliente ainda aguardando)   → "AbandonoFila";
+        //   • terminou em outra etapa (toque/fila esgotados, plano seguiu) → perdida de fato ("").
+        // Caso real (13/10/2026 09:02, grupo de toque 600): Dial tocando 104 e 109, o canal do
+        // tronco desligou ("Spawn extension ... exited non-zero" dentro do Dial) → cliente desistiu.
+        // Não há regra de tempo: 3 s ou 90 s de toque, se terminou no Dial foi o cliente que saiu.
+        internal static string MotivoDaPerdida(List<CdrChamada> grupo)
+        {
+            if (grupo == null || grupo.Count == 0) return string.Empty;
+            // Só o canal do cliente conta. Na fila, cada tentativa num agente gera também um
+            // registro do canal interno "Local/<ramal>@from-queue" com lastapp=Dial, que termina
+            // no mesmo segundo do registro da fila: sem este filtro o empate caía no Dial e um
+            // abandono na fila virava "Cliente desistiu" (caso real 13/10/2026 13:21, fila 700).
+            var doCliente = grupo.Where(r => !(r.Channel ?? string.Empty).StartsWith("Local/", StringComparison.OrdinalIgnoreCase)).ToList();
+            if (doCliente.Count == 0) doCliente = grupo;
+            // último registro da chamada (o que estava em curso quando ela acabou)
+            var ultimo = doCliente.OrderBy(r => r.CallDate.AddSeconds(Math.Max(r.Duration, 0))).ThenBy(r => r.CallDate).Last();
+            if (string.Equals(ultimo.Disposition, "ANSWERED", StringComparison.OrdinalIgnoreCase)) return string.Empty;
+            if (string.Equals(ultimo.LastApp, "Queue", StringComparison.OrdinalIgnoreCase)) return "AbandonoFila";
+            // a fila grava um registro por agente tentado; os que não tocaram (CONGESTION) podem
+            // empatar no fim com o que tocou — se a chamada acabou dentro da fila, é abandono
+            var fim = ultimo.CallDate.AddSeconds(Math.Max(ultimo.Duration, 0));
+            if (doCliente.Any(r => string.Equals(r.LastApp, "Queue", StringComparison.OrdinalIgnoreCase) &&
+                                   !string.Equals(r.Disposition, "ANSWERED", StringComparison.OrdinalIgnoreCase) &&
+                                   r.CallDate.AddSeconds(Math.Max(r.Duration, 0)) >= fim))
+                return "AbandonoFila";
+            if (string.Equals(ultimo.LastApp, "Dial", StringComparison.OrdinalIgnoreCase))
+                // ocupado/indisponível/congestionado: ninguém chegou a tocar — não é desistência
+                return string.Equals(ultimo.Disposition, "NO ANSWER", StringComparison.OrdinalIgnoreCase) ? "ClienteDesistiu" : string.Empty;
+            return string.Empty;
         }
 
         // ── Number helpers ─────────────────────────────────────────────────────────

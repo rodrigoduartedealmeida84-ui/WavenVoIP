@@ -82,8 +82,8 @@ namespace WavenVoIP.Services
 
                     if (existente != null)
                     {
-                        var localDt  = existente.AtualizadoEm ?? DateTime.MinValue;
-                        var remoteDt = cc.AtualizadoEm        ?? DateTime.MinValue;
+                        var localDt  = ContatoSyncCoordinator.ParaUtc(existente.AtualizadoEm);
+                        var remoteDt = ContatoSyncCoordinator.ParaUtc(cc.AtualizadoEm);
 
                         if (remoteDt > localDt && !existente.EhRamalIssabel && !existente.FonteGoogle)
                         {
@@ -214,12 +214,22 @@ namespace WavenVoIP.Services
                     }
                     else
                     {
-                        if (mudouNome)    existente.Nome       = cc.Nome;
-                        if (mudouEmpresa) existente.Observacao = cc.Empresa;
-                        existente.AtualizadoEm = DateTime.Now;
-                        Log($"COMPANY_CONTACT_UPDATED | nome={cc.Nome} numero={numero}");
-                        atualizados++;
-                        alterou = true;
+                        // v2.5.0 — este arquivo vem com o instalador e regravava o nome a cada
+                        // abertura do app, desfazendo qualquer edição. Agora só vale se trouxer uma
+                        // data de alteração MAIS RECENTE que a do contato local, e nunca mexe em
+                        // contato do Google nem em ramal.
+                        var dtArquivo = ContatoSyncCoordinator.ParaUtc(cc.AtualizadoEm);
+                        var dtLocal   = ContatoSyncCoordinator.ParaUtc(existente.AtualizadoEm);
+                        if (!existente.FonteGoogle && !existente.EhRamalIssabel && dtArquivo != DateTime.MinValue && dtArquivo > dtLocal)
+                        {
+                            if (mudouNome)    existente.Nome       = cc.Nome;
+                            if (mudouEmpresa) existente.Observacao = cc.Empresa;
+                            existente.AtualizadoEm = dtArquivo;
+                            Log($"COMPANY_CONTACT_UPDATED | nome={cc.Nome} numero={numero}");
+                            atualizados++;
+                            alterou = true;
+                        }
+                        else Log($"COMPANY_CONTACT_KEPT_LOCAL | local={existente.Nome} arquivo={cc.Nome} numero={numero}");
                     }
                 }
                 else

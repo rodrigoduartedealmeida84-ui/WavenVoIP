@@ -44,9 +44,9 @@
     </Window.Resources>
 
     <Border Background="White" CornerRadius="18" Padding="34,30">
-        <Border.Effect>
+        <Grid><Border Margin="-34,-30" CornerRadius="18" Background="White" IsHitTestVisible="False"><Border.Effect>
             <DropShadowEffect BlurRadius="32" ShadowDepth="4" Opacity="0.18" Color="#000000"/>
-        </Border.Effect>
+        </Border.Effect></Border>
         <StackPanel>
 
             <!-- Ícone + Título -->
@@ -118,5 +118,5 @@
             </StackPanel>
 
         </StackPanel>
-    </Border>
+    </Grid></Border>
 </Window>

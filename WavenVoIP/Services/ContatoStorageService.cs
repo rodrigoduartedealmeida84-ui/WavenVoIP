@@ -9,7 +9,7 @@ namespace WavenVoIP.Services
 {
     public static class ContatoStorageService
     {
-        private static readonly string _path = Path.Combine(
+        private static string _path = Path.Combine(
             System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData),
             "WavenVoIP",
             "contatos.json");
@@ -18,36 +18,93 @@ namespace WavenVoIP.Services
         private static DateTime _cacheExpiry = DateTime.MinValue;
         private static readonly object _cacheLock = new object();
 
+        // v2.5.0 — contatos salvos desapareciam (caso real: "Suporte Dlink", 12→13/10/2026).
+        // Várias sincronizações (Google, empresa, Waven API, deduplicação da tela) leem e regravam
+        // este arquivo ao mesmo tempo. A gravação não era atômica e a leitura, quando encontrava o
+        // arquivo em uso ("being used by another process"), devolvia uma LISTA VAZIA em silêncio —
+        // a sincronização seguinte reconstruía só os contatos do Google/empresa e gravava por
+        // cima, apagando os contatos salvos à mão.
+        //  • um único lock para ler e gravar; gravação em arquivo temporário + troca atômica;
+        //  • leitura com novas tentativas; se ainda assim falhar, devolve a última versão lida com
+        //    sucesso — nunca uma lista vazia;
+        //  • as sincronizações automáticas fazem ler→alterar→gravar dentro do mesmo lock.
+        private static readonly object _ioLock = new object();
+        private static string? _ultimoJsonBom;
+        private static readonly JsonSerializerOptions _jsonGravacao = new JsonSerializerOptions { WriteIndented = true };
+
         public static List<Contato> Carregar()
         {
-            try
+            lock (_ioLock)
             {
                 if (!File.Exists(_path))
-                {
-                    Log("CONTACTS_LOAD_OK | count=0 source=new");
                     return new List<Contato>();
+
+                Exception? erro = null;
+                for (int tentativa = 0; tentativa < 6; tentativa++)
+                {
+                    try
+                    {
+                        string json;
+                        using (var fs = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                        using (var sr = new StreamReader(fs))
+                            json = sr.ReadToEnd();
+                        var result = JsonSerializer.Deserialize<List<Contato>>(json);
+                        if (result == null) throw new InvalidDataException("arquivo de contatos vazio");
+                        _ultimoJsonBom = json;
+                        return result;
+                    }
+                    catch (Exception ex)
+                    {
+                        erro = ex;
+                        System.Threading.Thread.Sleep(40 * (tentativa + 1));
+                    }
                 }
 
-                Log("CONTACTS_LOAD_START");
-                var json = File.ReadAllText(_path);
-                var result = JsonSerializer.Deserialize<List<Contato>>(json) ?? new List<Contato>();
-                Log($"CONTACTS_LOAD_OK | count={result.Count}");
-                return result;
-            }
-            catch (Exception ex)
-            {
-                Log($"CONTACTS_LOAD_ERROR | {ex.Message}");
-                return new List<Contato>();
+                Log($"CONTACTS_LOAD_ERROR | {erro?.Message} | usando_ultima_leitura_valida={_ultimoJsonBom != null}");
+                if (_ultimoJsonBom != null)
+                {
+                    try { return JsonSerializer.Deserialize<List<Contato>>(_ultimoJsonBom) ?? new List<Contato>(); } catch { }
+                }
+                // Sem nenhuma leitura válida anterior: falha explícita. Devolver lista vazia aqui
+                // faria o chamador gravar por cima e apagar os contatos.
+                throw new IOException("Não foi possível ler o arquivo de contatos.", erro);
             }
         }
 
         public static void Salvar(List<Contato> contatos)
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            var json = JsonSerializer.Serialize(contatos, new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(_path, json);
-            lock (_cacheLock) { _cache = null; }
+            lock (_ioLock)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+                var json = JsonSerializer.Serialize(contatos, _jsonGravacao);
+                // v2.5.0 — desempenho: as sincronizações automáticas gravavam o arquivo inteiro
+                // (~1 MB) a cada ciclo mesmo sem nenhuma mudança. Conteúdo igual = não regrava,
+                // não vence o cache de nomes e não gera linha de log.
+                try
+                {
+                    if (File.Exists(_path) && string.Equals(File.ReadAllText(_path), json, StringComparison.Ordinal))
+                    {
+                        _ultimoJsonBom = json;
+                        return;
+                    }
+                }
+                catch { }
+                var tmp = _path + ".tmp";
+                File.WriteAllText(tmp, json);
+                if (File.Exists(_path)) File.Replace(tmp, _path, null);
+                else File.Move(tmp, _path);
+                _ultimoJsonBom = json;
+            }
+            // sem lock aqui: quem resolve nomes segura _cacheLock e depois lê o arquivo (_ioLock);
+            // pegar _cacheLock com _ioLock na mão inverteria a ordem (risco de deadlock)
+            _cacheExpiry = DateTime.MinValue;
             Log($"CONTACT_SAVE_OK | count={contatos.Count}");
+        }
+
+        // Ler → alterar → gravar sem que outra sincronização entre no meio.
+        public static T ComArquivoTravado<T>(Func<T> operacao)
+        {
+            lock (_ioLock) return operacao();
         }
 
         public static string ResolverNomePorNumero(string numero)
@@ -87,7 +144,8 @@ namespace WavenVoIP.Services
                 });
                 if (contato != null)
                 {
-                    Log($"CONTACT_MATCH_SUCCESS numero={numero} nome={contato.Nome} metodo=exact");
+                    // v2.5.0: sem log por consulta — roda para cada linha a cada refresh do Histórico
+                    // (~30 MB/dia de log, com número e nome em claro).
                     return contato.Nome;
                 }
 
@@ -102,11 +160,9 @@ namespace WavenVoIP.Services
 
                 if (contato != null)
                 {
-                    Log($"CONTACT_MATCH_SUCCESS numero={numero} nome={contato.Nome} metodo=sufixo8");
                     return contato.Nome;
                 }
 
-                Log($"CONTACT_MATCH_FAIL numero={numero}");
                 return numero;
             }
             catch { return numero; }
@@ -124,6 +180,9 @@ namespace WavenVoIP.Services
             catch { return false; }
         }
         public static int SincronizarRamaisIssabel(IEnumerable<Contato> ramais)
+            => ComArquivoTravado(() => SincronizarRamaisIssabelImpl(ramais));
+
+        private static int SincronizarRamaisIssabelImpl(IEnumerable<Contato> ramais)
         {
             var contatos = Carregar();
             var alterados = 0;
@@ -165,11 +224,17 @@ namespace WavenVoIP.Services
                 }
             }
 
-            Salvar(contatos.OrderByDescending(c => c.EhRamalIssabel).ThenBy(c => SomenteDigitos(c.Numero)).ThenBy(c => c.Nome).ToList());
+            // v2.5.0 — desempenho: sem ramal novo/alterado não regrava (esta ordenação é diferente
+            // da usada pela importação do Google, e as duas regravavam o arquivo inteiro a cada minuto).
+            if (alterados > 0)
+                Salvar(contatos.OrderByDescending(c => c.EhRamalIssabel).ThenBy(c => SomenteDigitos(c.Numero)).ThenBy(c => c.Nome).ToList());
             return alterados;
         }
 
         public static int SincronizarContatosGoogle(IEnumerable<Contato> contatosGoogle)
+            => ComArquivoTravado(() => SincronizarContatosGoogleImpl(contatosGoogle));
+
+        private static int SincronizarContatosGoogleImpl(IEnumerable<Contato> contatosGoogle)
         {
             var contatos = Carregar();
             contatos.RemoveAll(c => c.FonteGoogle);
@@ -185,10 +250,17 @@ namespace WavenVoIP.Services
                 var numero = PhoneNumberNormalizer.NormalizeBrazilPhone(numeroRaw);
                 if (string.IsNullOrWhiteSpace(numero)) numero = numeroRaw;
 
-                // Se já existe contato local (não Google) com o mesmo número normalizado, não sobrescrever
-                if (contatos.Any(c => !c.FonteGoogle &&
-                    PhoneNumberNormalizer.NormalizeBrazilPhone(SomenteDigitos(c.Numero)) == numero))
+                // Já existe contato local/da empresa (não Google) com o mesmo número: os dois são o
+                // mesmo contato. Vale o nome alterado por último (ver ContatoSyncCoordinator); o
+                // contato do Google não é duplicado na lista.
+                var localMesmoNumero = contatos.FirstOrDefault(c => !c.FonteGoogle &&
+                    PhoneNumberNormalizer.NormalizeBrazilPhone(SomenteDigitos(c.Numero)) == numero);
+                if (localMesmoNumero != null)
+                {
+                    if (!localMesmoNumero.EhRamalIssabel)
+                        ContatoSyncCoordinator.Reconciliar(localMesmoNumero, g, Log);
                     continue;
+                }
 
                 // Se está na lista de suprimidos (tombstone), não reimportar
                 if (ContactTombstoneService.EstaSuprimido(g.GoogleContactId, numero))
@@ -212,18 +284,26 @@ namespace WavenVoIP.Services
                     Numero          = numero,
                     Observacao      = "Google Contacts",
                     FonteGoogle     = true,
-                    AtualizadoEm    = DateTime.Now,
+                    AtualizadoEm    = g.AtualizadoEm ?? DateTime.Now,
                     GoogleContactId = g.GoogleContactId
                 });
                 adicionados++;
             }
 
-            Salvar(contatos
+            // O Google traz o mesmo número em mais de um cadastro: resolve aqui, antes de gravar
+            // (antes a tela de contatos removia os repetidos e gravava o arquivo outra vez).
+            var ordenado = contatos
+                .OrderByDescending(c => c.EhRamalIssabel)
+                .ThenByDescending(c => c.FonteGoogle == false)
+                .ThenBy(c => c.Nome, StringComparer.Ordinal)
+                .ToList();
+            var (semRepetidos, removidos) = Deduplicar(ordenado, salvarSeAlterou: false);
+            Salvar(semRepetidos
                 .OrderByDescending(c => c.EhRamalIssabel)
                 .ThenByDescending(c => c.FonteGoogle == false)
                 .ThenBy(c => c.Nome)
                 .ToList());
-            return adicionados;
+            return Math.Max(0, adicionados - removidos);
         }
 
         // ── Migração automática de contatos antigos ───────────────────────────────
@@ -310,7 +390,6 @@ namespace WavenVoIP.Services
                         .ThenByDescending(c => !c.FonteGoogle)
                         .ThenBy(c => c.Nome)
                         .ToList());
-                    lock (_cacheLock) { _cache = null; }
                 }
 
                 var sufixo = ct.IsCancellationRequested ? " (timeout)" : "";
@@ -359,14 +438,12 @@ namespace WavenVoIP.Services
                         .First();
 
                     resultado.Add(vencedor);
-                    foreach (var d in lista.Where(c => c != vencedor))
-                    {
-                        Log($"CONTACT_DUPLICATE_FOUND | nome={d.Nome} numero={d.Numero} numNorm={grupo.Key}");
-                        Log($"CONTACT_DUPLICATE_REMOVED | descartado={d.Nome} mantido={vencedor.Nome}");
-                        removidos++;
-                    }
-                    Log($"CONTACT_DUPLICATE_MERGED | numNorm={grupo.Key} removidos={lista.Count - 1} mantido={vencedor.Nome}");
+                    // v2.5.0 — desempenho: eram 3 linhas de log por contato duplicado a cada
+                    // passada (milhares por minuto); agora uma linha de resumo no final.
+                    removidos += lista.Count - 1;
                 }
+                if (removidos > 0)
+                    Log($"CONTACT_DUPLICATE_MERGED | removidos={removidos}");
 
                 if (removidos > 0 && salvarSeAlterou)
                 {
@@ -375,8 +452,10 @@ namespace WavenVoIP.Services
                         .ThenByDescending(c => !c.FonteGoogle)
                         .ThenBy(c => c.Nome)
                         .ToList();
+                    // Salvar já vence o cache (_cacheExpiry). Não pegar _cacheLock aqui: esta função
+                    // roda com _ioLock na mão (ComArquivoTravado) e quem resolve nomes faz o caminho
+                    // inverso (_cacheLock → _ioLock) — as sincronizações travavam para sempre.
                     Salvar(ordenado);
-                    lock (_cacheLock) { _cache = null; }
                     return (ordenado, removidos);
                 }
 

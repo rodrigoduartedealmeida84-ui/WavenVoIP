@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows10.0.17763.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <!-- AppProj permite compilar o mesmo teste contra outra árvore de fontes (ex.: a 2.4.7,
+         para gerar a linha de base da comparação de regressão). -->
+    <AppProj Condition="'$(AppProj)' == ''">..\WavenVoIP\WavenVoIP.csproj</AppProj>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(AppProj)" />
+  </ItemGroup>
+  <!-- As telas do app referenciam /Assets pela raiz do executavel: no teste, o executavel e este. -->
+  <ItemGroup>
+    <Resource Include="..\WavenVoIP\Assets\**\*.ico;..\WavenVoIP\Assets\**\*.png" Link="Assets\%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>

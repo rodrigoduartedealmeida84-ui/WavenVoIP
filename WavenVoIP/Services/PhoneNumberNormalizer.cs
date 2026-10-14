@@ -16,7 +16,7 @@ namespace WavenVoIP.Services
         //   • Adiciona nono dígito em celular antigo DDD+8 onde 3º char ∈ [6,9]
         public static string NormalizeBrazilPhone(string numero)
         {
-            var digits = SomenteDigitos(numero);
+            var digits = RemoverAcessoInternacionalDoBrasil(SomenteDigitos(numero));
             if (digits.Length == 0) return numero;
 
             // Remove prefixo de rota 1/2/3 antes da normalização de país
@@ -105,7 +105,7 @@ namespace WavenVoIP.Services
         // Strips country code 55 for display; returns plain digits.
         public static string NormalizeForDisplay(string numero)
         {
-            var digits = SomenteDigitos(numero);
+            var digits = RemoverAcessoInternacionalDoBrasil(SomenteDigitos(numero));
             digits = RemoverPrefixo55SeBrasileiro(digits);
             return digits.Length == 0 ? numero : digits;
         }
@@ -150,6 +150,22 @@ namespace WavenVoIP.Services
                     return semPrefixo;
             }
             return digits;
+        }
+
+        // v2.5.0 — "00" + 55 + número brasileiro: alguns troncos (WhatsApp) entregam o chamador com
+        // o prefixo de acesso internacional na frente do código do Brasil (caso real:
+        // "00559176103726" = 00 + 55 + DDD 91 + 7610-3726). O "00" ali não faz parte do número.
+        // Só é removido quando o que vem depois é 55 + DDD existente + 8 ou 9 dígitos; um
+        // internacional de verdade (00 + outro país) e qualquer "00" seguido de algo que não
+        // seja um número brasileiro válido ficam exatamente como chegaram.
+        private static string RemoverAcessoInternacionalDoBrasil(string digits)
+        {
+            if (digits.Length < 14 || digits.Length > 15 || !digits.StartsWith("0055", System.StringComparison.Ordinal))
+                return digits;
+            var nacional = digits.Substring(4);                      // DDD + número
+            if (nacional[0] == '0' || nacional[2] == '0' || !DddExiste(nacional.Substring(0, 2)))
+                return digits;
+            return digits.Substring(2);                              // mantém o 55; o resto do fluxo o trata
         }
 
         // DDD + 8 dígitos onde 3º dígito ∈ [6,9] = celular antigo sem nono dígito.

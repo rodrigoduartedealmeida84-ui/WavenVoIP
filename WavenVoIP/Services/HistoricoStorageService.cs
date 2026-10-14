@@ -270,10 +270,30 @@ namespace WavenVoIP.Services
                 if (chavesDuplicadasIgnoradas > 0)
                     Log($"CDR_DUPLICATE_KEYS_SUMMARY count={chavesDuplicadasIgnoradas} totalExistentes={existentes.Count}");
 
+                // v2.5.0 — a identidade de uma ligação é o linkedid; o UniqueId do registro é só o da
+                // linha "principal" do CDR, e essa escolha muda conforme as linhas vão chegando
+                // (caso real 08/10/2026 13:11, fila 700: enquanto só existiam as linhas CONGESTION
+                // o registro nasceu com o uniqueid de uma delas; com a ligação completa, a principal
+                // passou a ser a perna NO ANSWER do ramal — outro uniqueid). Casando só por
+                // UniqueId, a mesma ligação virava um segundo registro a cada sync, que a limpeza
+                // por número+tempo apagava em seguida, indefinidamente, deixando o registro salvo
+                // com os dados da linha antiga. Agora, sem UniqueId igual, vale o linkedid: o
+                // registro existente é atualizado no lugar e mantém o próprio UniqueId (as chaves
+                // de "perdida já avisada" continuam valendo — nenhum popup repetido).
+                var indicePorLinked = new Dictionary<string, HistoricoLigacaoItem>(StringComparer.OrdinalIgnoreCase);
+                foreach (var e in existentes.Where(i => i.FonteCdr && !string.IsNullOrWhiteSpace(i.LinkedId)))
+                    indicePorLinked.TryAdd(e.LinkedId, e);
+
                 var novosCount = 0;
                 foreach (var item in itensCdrRestantes)
                 {
-                    if (string.IsNullOrWhiteSpace(item.UniqueId) || !indicePorUid.ContainsKey(item.UniqueId))
+                    HistoricoLigacaoItem? existente = null;
+                    if (!string.IsNullOrWhiteSpace(item.UniqueId))
+                        indicePorUid.TryGetValue(item.UniqueId, out existente);
+                    if (existente == null && !string.IsNullOrWhiteSpace(item.LinkedId))
+                        indicePorLinked.TryGetValue(item.LinkedId, out existente);
+
+                    if (existente == null)
                     {
                         existentes.Add(item);
                         novosCount++;
@@ -281,11 +301,12 @@ namespace WavenVoIP.Services
                         // updates rather than duplicates the entry.
                         if (!string.IsNullOrWhiteSpace(item.UniqueId))
                             indicePorUid.TryAdd(item.UniqueId, item);
+                        if (!string.IsNullOrWhiteSpace(item.LinkedId))
+                            indicePorLinked.TryAdd(item.LinkedId, item);
                     }
                     else
                     {
                         // Overwrite stale fields with fresh CDR data (fixes concatenated numbers, 404 URLs, etc.)
-                        var existente = indicePorUid[item.UniqueId];
 
                         // v2.3.6 — segunda camada de proteção (a primeira é a reconciliação em
                         // IssabelCdrService.SincronizarAsync, que já deveria ter propagado Tipo=Cancelada
@@ -319,6 +340,8 @@ namespace WavenVoIP.Services
                         existente.RamalOrigem     = item.RamalOrigem;
                         existente.RamalDestino    = item.RamalDestino;
                         existente.RamalAtendeu    = item.RamalAtendeu;
+                        existente.AtendimentoAutomatico = item.AtendimentoAutomatico;
+                        existente.MotivoPerdida   = item.MotivoPerdida;
                         existente.GravacaoArquivo = item.GravacaoArquivo;
                         existente.GravacaoUrl     = item.GravacaoUrl;
                         if (item.CanceladaPeloOperador) existente.CanceladaPeloOperador = true;
@@ -395,9 +418,14 @@ namespace WavenVoIP.Services
                 // Deduplicate by UniqueId before saving. Prior buggy syncs accumulated multiple copies
                 // of the same CDR record in the JSON. The first occurrence of each UID in existentes
                 // is the one that received the fresh CDR update above — keep it, discard the rest.
+                // v2.5.0 — idem por linkedid entre registros do CDR: sobra de syncs antigos em que a
+                // mesma ligação foi gravada duas vezes com uniqueids diferentes. Fica o primeiro,
+                // que é o que acabou de receber os dados frescos (ver indicePorLinked acima).
                 var seenUids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var seenLinked = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var semDuplicatas = existentes
                     .Where(i => string.IsNullOrWhiteSpace(i.UniqueId) || seenUids.Add(i.UniqueId))
+                    .Where(i => !i.FonteCdr || string.IsNullOrWhiteSpace(i.LinkedId) || i.CanceladaPeloOperador || seenLinked.Add(i.LinkedId))
                     .ToList();
                 if (semDuplicatas.Count != existentes.Count)
                     Log($"CDR_DEDUP_SAVE_CLEANUP removidos={existentes.Count - semDuplicatas.Count} antes={existentes.Count} depois={semDuplicatas.Count}");

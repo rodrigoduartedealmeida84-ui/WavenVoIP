@@ -80,44 +80,36 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="bd"
-                                Background="{TemplateBinding Background}"
-                                CornerRadius="14"
-                                Padding="{TemplateBinding Padding}">
-                            <Border.Effect>
-                                <DropShadowEffect x:Name="shadow" BlurRadius="10" ShadowDepth="2"
-                                                  Opacity="0.20" Color="#7C3AED"/>
-                            </Border.Effect>
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
-                                              RecognizesAccessKey="True"/>
-                        </Border>
+                        <Grid>
+                            <!-- sombra em elemento separado: o texto do botão continua nítido -->
+                            <Border x:Name="sombra" CornerRadius="14" Background="{TemplateBinding Background}" Opacity="0.55" IsHitTestVisible="False">
+                                <Border.Effect>
+                                    <DropShadowEffect BlurRadius="8" ShadowDepth="2" Opacity="0.22" Color="#000000"/>
+                                </Border.Effect>
+                            </Border>
+                            <Border x:Name="bd"
+                                    Background="{TemplateBinding Background}"
+                                    CornerRadius="14"
+                                    Padding="{TemplateBinding Padding}">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                  RecognizesAccessKey="True"/>
+                            </Border>
+                        </Grid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="bd" Property="Background" Value="{StaticResource PrimaryHoverBrush}"/>
-                                <Setter TargetName="bd" Property="Effect">
-                                    <Setter.Value>
-                                        <DropShadowEffect BlurRadius="16" ShadowDepth="2" Opacity="0.34" Color="#7C3AED"/>
-                                    </Setter.Value>
-                                </Setter>
+                                <Setter TargetName="sombra" Property="Opacity" Value="0.8"/>
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
                                 <Setter TargetName="bd" Property="Background" Value="{StaticResource PrimaryDarkBrush}"/>
                                 <Setter TargetName="bd" Property="Opacity" Value="0.90"/>
                             </Trigger>
                             <Trigger Property="IsKeyboardFocused" Value="True">
-                                <Setter TargetName="bd" Property="Effect">
-                                    <Setter.Value>
-                                        <DropShadowEffect BlurRadius="18" ShadowDepth="2" Opacity="0.50" Color="#7C3AED"/>
-                                    </Setter.Value>
-                                </Setter>
+                                <Setter TargetName="sombra" Property="Opacity" Value="1"/>
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter TargetName="bd" Property="Opacity" Value="0.50"/>
-                                <Setter TargetName="bd" Property="Effect">
-                                    <Setter.Value>
-                                        <DropShadowEffect BlurRadius="10" ShadowDepth="2" Opacity="0" Color="#7C3AED"/>
-                                    </Setter.Value>
-                                </Setter>
+                                <Setter TargetName="sombra" Property="Opacity" Value="0"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>

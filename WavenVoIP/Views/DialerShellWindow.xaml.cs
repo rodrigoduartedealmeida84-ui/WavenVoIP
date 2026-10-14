@@ -106,7 +106,9 @@ namespace WavenVoIP.Views
         // (popup, SIP pendente, ramal AMI ativo) é checado primeiro em PodeNotificarChamadaPerdida.
         private DateTime _ultimoFimChamadaEntrada = DateTime.MinValue;
         private static readonly TimeSpan _janelaResfriamentoPosRing = TimeSpan.FromSeconds(6);
-        private MissedCallPopup? _missedCallPopup;
+        // v2.5.0 — avisos de chamada não atendida abertos (um por número, empilhados no canto).
+        private readonly System.Collections.Generic.List<MissedCallPopup> _missedCallPopups = new();
+        private const int MaxAvisosNaoAtendidas = 4;
         private OutboundDeclinedToast? _outboundDeclinedToast;
         private OutboundNotAnsweredToast? _outboundNotAnsweredToast;
 
@@ -150,7 +152,7 @@ namespace WavenVoIP.Views
 
             _sipService.StatusChanged += status =>
             {
-                Dispatcher.Invoke(() => txtStatus.Text = status);
+                NaUi(() => txtStatus.Text = status);
                 if (status != null && status.StartsWith("Registrado com sucesso", StringComparison.OrdinalIgnoreCase))
                     _ = SincronizarConfigEmpresaAsync(silencioso: true);
             };
@@ -166,7 +168,7 @@ namespace WavenVoIP.Views
 
             _sipService.IncomingCallEnded += () =>
             {
-                Dispatcher.Invoke(() =>
+                NaUi(() =>
                 {
                     try
                     {
@@ -184,7 +186,7 @@ namespace WavenVoIP.Views
 
             _sipService.CallEnded += () =>
             {
-                Dispatcher.Invoke(() =>
+                NaUi(() =>
                 {
                     try
                     {
@@ -227,6 +229,19 @@ namespace WavenVoIP.Views
                     }, TaskContinuationOptions.None);
                 }
             };
+        }
+
+        // v2.5.0 — travamentos: os eventos do SipService chegam em threads de sinalização/áudio.
+        // Dispatcher.Invoke prendia essas threads até a interface ficar livre (e podia formar
+        // deadlock com um comando síncrono da interface para o SIP). Agora só enfileira.
+        private void NaUi(Action acao)
+        {
+            try
+            {
+                if (Dispatcher.CheckAccess()) acao();
+                else Dispatcher.BeginInvoke(acao);
+            }
+            catch { }
         }
 
         // Abre o popup de chamada recebida. Chamado tanto para uma chamada nova quanto para um
@@ -385,6 +400,7 @@ namespace WavenVoIP.Views
                 InicializarPainelLogs();
                 IniciarAmiMonitor();
                 ConfigurarRastreamentoFilaAoVivo();
+                IniciarAvisoClienteAguardando();
                 IntegrationAutoReconnectService.ReconectarAgora += OnIntegracaoReconectarAgora;
                 Closed += (_, _) => IntegrationAutoReconnectService.ReconectarAgora -= OnIntegracaoReconectarAgora;
 
@@ -417,6 +433,30 @@ namespace WavenVoIP.Views
         }
 
 
+
+        // v2.5.0 — chamado pelo ResumeRecoveryService quando o computador volta da suspensão e a
+        // rede já responde: registra o ramal e sincroniza tudo de uma vez, sem esperar os
+        // temporizadores de cada serviço.
+        public System.Threading.Tasks.Task AoVoltarDaSuspensaoAsync()
+        {
+            return Dispatcher.InvokeAsync(async () =>
+            {
+                try
+                {
+                    try { _sipService.RenovarRegistroAgora("volta_da_suspensao"); } catch (Exception ex) { RegistrarUiDiagnostico($"RESUME_SIP_ERRO {ex.Message}"); }
+                    Services.AmiMonitorService.ForcarLeituraAtual();
+                    if (GoogleContactsService.EstaConectado())
+                    {
+                        await TentarSincronizarGoogleSilenciosoAsync();
+                        // o temporizador do Google pode ter sido parado por uma falha de rede anterior
+                        AplicarTimerGoogleSync(SipConfig.CarregarSalva()?.GoogleSyncIntervalSeconds ?? 0);
+                    }
+                    await ExecutarSyncCdrAsync(silencioso: true);
+                    RegistrarUiDiagnostico("RESUME_RECONEXAO_CONCLUIDA");
+                }
+                catch (Exception ex) { RegistrarUiDiagnostico($"RESUME_RECONEXAO_ERRO {ex.Message}"); }
+            }).Task.Unwrap();
+        }
 
         private void ConfigurarReconexaoAutomatica()
         {
@@ -668,7 +708,7 @@ namespace WavenVoIP.Views
                     try
                     {
                         var (contatos, _) = await Task.Run(() => GoogleContactsService.SincronizarContatosAsync());
-                        googleImportados = ContatoStorageService.SincronizarContatosGoogle(contatos);
+                        googleImportados = await Task.Run(() => ContatoStorageService.SincronizarContatosGoogle(contatos));
                         AtualizarStatusGoogle();
                         RegistrarUiDiagnostico($"CONTATOS_REFRESH_GOOGLE_OK quantidade={googleImportados}");
                     }
@@ -723,7 +763,9 @@ namespace WavenVoIP.Views
             _googleSyncTimer.Tick -= GoogleSyncTimer_Tick;
             if (segundos > 0 && GoogleContactsService.EstaConectado())
             {
-                _googleSyncTimer.Interval = TimeSpan.FromSeconds(segundos);
+                // v2.5.0 — travamentos: configurações antigas pediam 3 s (baixar e regravar todos os
+                // contatos do Google a cada 3 s). Piso de 60 s; o valor configurado maior é respeitado.
+                _googleSyncTimer.Interval = TimeSpan.FromSeconds(Math.Max(segundos, 60));
                 _googleSyncTimer.Tick += GoogleSyncTimer_Tick;
                 _googleSyncTimer.Start();
             }
@@ -737,7 +779,11 @@ namespace WavenVoIP.Views
         // FireAndForget aqui é só rede de segurança de instrumentação — não corrige/altera
         // esse comportamento (aguardando evidência real antes de mexer, conforme pedido).
         private void GoogleSyncTimer_Tick(object? sender, EventArgs e)
-            => Task.Run(TentarSincronizarGoogleSilenciosoAsync).FireAndForget("GoogleSyncTimer_Tick");
+        {
+            // durante uma ligação a sincronização de contatos espera (volta no próximo ciclo)
+            if (_sipService.IsInCall || _incomingPopup != null) return;
+            Task.Run(TentarSincronizarGoogleSilenciosoAsync).FireAndForget("GoogleSyncTimer_Tick");
+        }
 
         // v2.4.0 — investigação de desempenho/429: guard de reentrância (evita sync sobreposta se
         // uma anterior ainda estiver rodando) + a falha "Temporaria" (ex.: 429 TooManyRequests)
@@ -754,13 +800,18 @@ namespace WavenVoIP.Views
                 Services.LogHelper.Info("[GOOGLE_SYNC_SKIPPED_BUSY]");
                 return;
             }
+            // voltando da suspensão sem rede ainda: o ResumeRecoveryService sincroniza quando ela responder
+            if (Services.ResumeRecoveryService.AguardandoRede) return;
             _googleSyncEmAndamento = true;
             // v2.4.2 — marcador só de log para a telemetria de diagnóstico (LastOperation).
             Services.LogHelper.Info("[GOOGLE_SYNC_START]");
             try
             {
                 var (contatos, _) = await GoogleContactsService.SincronizarSemBrowserAsync();
-                ContatoStorageService.SincronizarContatosGoogle(contatos);
+                // fora da thread da interface (ver CarregarContatosGoogleCacheAsync)
+                await Task.Run(() => ContatoStorageService.SincronizarContatosGoogle(contatos));
+                // nomes editados aqui que o Google ainda não tem (só envia se houver permissão de escrita)
+                await ContatoSyncCoordinator.EnviarPendentesGoogleAsync();
                 IntegrationStatusService.Atualizar(IntegracaoNome.Google, IntegracaoStatus.Conectado);
                 IntegrationAutoReconnectService.CancelarReconexao(IntegracaoNome.Google);
                 Services.LogHelper.Info("[INTEGRATION_AUTO_RECONNECT_SUCCESS] Google");
@@ -833,7 +884,7 @@ namespace WavenVoIP.Views
                 if (txtGoogleStatus != null) txtGoogleStatus.Text = "Google: autenticando...";
 
                 var (contatos, total) = await Task.Run(() => GoogleContactsService.SincronizarContatosAsync());
-                var importados = ContatoStorageService.SincronizarContatosGoogle(contatos);
+                var importados = await Task.Run(() => ContatoStorageService.SincronizarContatosGoogle(contatos));
                 IntegrationStatusService.Atualizar(IntegracaoNome.Google, IntegracaoStatus.Conectado);
                 AplicarTimerGoogleSync(SipConfig.CarregarSalva()?.GoogleSyncIntervalSeconds ?? 0);
                 AtualizarContatosShell();
@@ -886,6 +937,11 @@ namespace WavenVoIP.Views
             AtualizarHistoricoShell();
         }
 
+        private int _assinaturaContatosShell;
+        private int _assinaturaHistoricoCdr;
+        private DateTime _ultimoRefreshUiCdr = DateTime.MinValue;
+        private DateTime _ultimoSyncCdrAutomatico = DateTime.MinValue;
+
         private async void AtualizarContatosShell()
         {
             try
@@ -894,10 +950,10 @@ namespace WavenVoIP.Views
                 var busca = txtBuscaContatosShell?.Text?.Trim() ?? string.Empty;
 
                 // LINQ e I/O pesados em background — UI thread fica livre
-                var contatos = await System.Threading.Tasks.Task.Run(() =>
+                var (contatos, assinatura) = await System.Threading.Tasks.Task.Run(() =>
                 {
-                    var raw = ContatoStorageService.Carregar();
-                    var (list, removidos) = ContatoStorageService.Deduplicar(raw, salvarSeAlterou: true);
+                    var (list, removidos) = ContatoStorageService.ComArquivoTravado(() =>
+                        ContatoStorageService.Deduplicar(ContatoStorageService.Carregar(), salvarSeAlterou: true));
                     if (removidos > 0)
                         Services.LogHelper.Info($"CONTACTS_DEDUP_UI | removidos={removidos}");
 
@@ -924,11 +980,22 @@ namespace WavenVoIP.Views
                         .ThenBy(c => c.Nome ?? string.Empty)
                         .ToList();
 
+                    var h = new HashCode();
+                    h.Add(busca);
                     foreach (var c in list)
+                    {
                         c.EhFavorito = favNums.Contains(normPorContato[c]);
+                        h.Add(c.Nome); h.Add(c.Numero); h.Add(c.Observacao); h.Add(c.EhFavorito);
+                        h.Add(c.SincronizacaoPendente); h.Add(c.WavenApiId); h.Add(c.GoogleContactId);
+                    }
 
-                    return list;
+                    return (list, h.ToHashCode());
                 });
+
+                // v2.5.0 — travamentos: recriar as linhas da grade (milhares de contatos) a cada
+                // sincronização segurava a interface por 1,5–3 s. Só troca quando algo mudou.
+                if (assinatura == _assinaturaContatosShell && gridContatosShell.ItemsSource != null) return;
+                _assinaturaContatosShell = assinatura;
 
                 // Atualiza grid diretamente — sem null intermediário (evita double-refresh)
                 gridContatosShell.ItemsSource = contatos;
@@ -947,29 +1014,27 @@ namespace WavenVoIP.Views
                 var canalFiltro = (cmbFiltroCanalHistorico?.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "Todos os canais";
                 var tipoFiltro  = (cmbFiltroTipoHistorico?.SelectedItem  as ComboBoxItem)?.Content?.ToString() ?? "Todos os tipos";
                 var diasRetencao = ObterDiasRetencaoHistorico();
+                // v2.5.0 — subfiltro da área "Não atendidas" (Nenhum = as três classificações)
+                var motivoNa = rbNaPerdida?.IsChecked == true ? NaoAtendidaMotivo.Perdida
+                             : rbNaDesistiu?.IsChecked == true ? NaoAtendidaMotivo.ClienteDesistiu
+                             : rbNaAbandono?.IsChecked == true ? NaoAtendidaMotivo.AbandonoFila
+                             : NaoAtendidaMotivo.Nenhum;
+                // v2.5.0 — área "Não atendidas" aberta e à vista = o usuário está vendo as chamadas:
+                // marca como visualizadas (contador zera, nada é apagado). Atualização em segundo
+                // plano com outra aba ou janela minimizada não marca nada.
+                var marcarVistas = FiltroNaoAtendidasAtivo() && MainTabs?.SelectedIndex == 2 &&
+                                   IsVisible && WindowState != WindowState.Minimized;
 
                 // I/O e LINQ em background — UI thread fica livre
-                var itens = await System.Threading.Tasks.Task.Run(() =>
+                var (itens, contNa, naoVistas) = await System.Threading.Tasks.Task.Run(() =>
                 {
                     var lista = HistoricoStorageService.CarregarComRetencao(diasRetencao);
+                    // contador "não lidas": todas as não atendidas guardadas, sem depender de busca/filtros
+                    if (marcarVistas) NaoAtendidasVistasService.MarcarVistas(lista);
+                    var naoVistasBg = NaoAtendidasVistasService.ContarNaoVistas(lista);
 
                     if (!string.Equals(canalFiltro, "Todos os canais", StringComparison.OrdinalIgnoreCase))
                         lista = lista.Where(i => string.Equals(i.OrigemSaidaVisual, canalFiltro, StringComparison.OrdinalIgnoreCase)).ToList();
-
-                    if (!string.Equals(tipoFiltro, "Todos os tipos", StringComparison.OrdinalIgnoreCase))
-                    {
-                        lista = tipoFiltro switch
-                        {
-                            "Recebidas"               => lista.Where(i => i.Tipo == Models.TipoHistoricoLigacao.Recebida).ToList(),
-                            "Realizadas"              => lista.Where(i => i.Tipo == Models.TipoHistoricoLigacao.Realizada).ToList(),
-                            "Perdidas"                => lista.Where(i => i.Tipo == Models.TipoHistoricoLigacao.Perdida).ToList(),
-                            "Recusadas"               => lista.Where(i => i.Tipo == Models.TipoHistoricoLigacao.Recusada).ToList(),
-                            "Não atendidas"           => lista.Where(i => i.Tipo == Models.TipoHistoricoLigacao.NaoAtendida).ToList(),
-                            "Canceladas"              => lista.Where(i => i.Tipo == Models.TipoHistoricoLigacao.Cancelada).ToList(),
-                            "Atendida em outro ramal" => lista.Where(i => i.Tipo == Models.TipoHistoricoLigacao.NaoAtendidaNesseRamal).ToList(),
-                            _ => lista
-                        };
-                    }
 
                     if (!string.IsNullOrWhiteSpace(busca))
                         lista = lista.Where(i =>
@@ -981,12 +1046,39 @@ namespace WavenVoIP.Views
                             (i.RamalExibido     ?? string.Empty).Contains(busca, StringComparison.OrdinalIgnoreCase) ||
                             i.TipoTexto.Contains(busca, StringComparison.OrdinalIgnoreCase)).ToList();
 
-                    return lista;
+                    // Totais das não atendidas respeitam canal e busca, mas não o filtro de tipo:
+                    // o seletor mostra quantas há mesmo com outro tipo selecionado.
+                    var cont = NaoAtendidasPolicy.Contar(lista);
+
+                    if (!string.Equals(tipoFiltro, "Todos os tipos", StringComparison.OrdinalIgnoreCase))
+                    {
+                        lista = tipoFiltro switch
+                        {
+                            // v2.5.0 — fora do horário tem filtro próprio e sai de "Recebidas";
+                            // URA sem atendente continua em "Recebidas" (com o rótulo próprio).
+                            "Recebidas"               => lista.Where(i => i.Tipo == Models.TipoHistoricoLigacao.Recebida && !i.EhForaDoHorario && !i.EhEventoTecnico).ToList(),
+                            "Fora do Horário"         => lista.Where(i => i.EhForaDoHorario).ToList(),
+                            "Realizadas"              => lista.Where(i => i.Tipo == Models.TipoHistoricoLigacao.Realizada).ToList(),
+                            // v2.5.0 — "Não atendidas" = recebidas sem atendimento (Perdida + Cliente
+                            // desistiu + Abandono na fila). A realizada sem resposta tem filtro próprio.
+                            "Não atendidas"           => lista.Where(i => motivoNa == NaoAtendidaMotivo.Nenhum
+                                                                            ? NaoAtendidasPolicy.EhNaoAtendida(i)
+                                                                            : NaoAtendidasPolicy.Motivo(i) == motivoNa).ToList(),
+                            "Recusadas"               => lista.Where(i => i.Tipo == Models.TipoHistoricoLigacao.Recusada).ToList(),
+                            "Sem resposta (realizadas)" => lista.Where(i => i.Tipo == Models.TipoHistoricoLigacao.NaoAtendida).ToList(),
+                            "Canceladas"              => lista.Where(i => i.Tipo == Models.TipoHistoricoLigacao.Cancelada).ToList(),
+                            "Atendida em outro ramal" => lista.Where(i => i.Tipo == Models.TipoHistoricoLigacao.NaoAtendidaNesseRamal).ToList(),
+                            _ => lista
+                        };
+                    }
+
+                    return (lista, cont, naoVistasBg);
                 });
 
                 var msBackground = swTotal.ElapsedMilliseconds;
                 var swUi = Stopwatch.StartNew();
                 gridHistoricoShell.ItemsSource = itens; // atribuição roda na UI thread — vale medir à parte
+                AtualizarAreaNaoAtendidas(contNa, naoVistas);
                 var msUi = swUi.ElapsedMilliseconds;
 
                 // Só loga quando algum estágio passa de um limiar pequeno — refresh normal (poucos
@@ -1000,9 +1092,77 @@ namespace WavenVoIP.Views
             }
         }
 
+        // v2.5.0 — o seletor vermelho "Não atendidas" e o item de mesmo nome na lista de tipos são
+        // o mesmo filtro: mexer num atualiza o outro (a trava evita atualizar a lista duas vezes).
+        private bool _sincronizandoFiltroNaoAtendidas;
+
+        private bool FiltroNaoAtendidasAtivo() =>
+            string.Equals((cmbFiltroTipoHistorico?.SelectedItem as ComboBoxItem)?.Content?.ToString(), "Não atendidas", StringComparison.Ordinal);
+
         private void CmbFiltroTipoHistorico_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            if (_sincronizandoFiltroNaoAtendidas) return;
+            _sincronizandoFiltroNaoAtendidas = true;
+            try
+            {
+                var ativo = FiltroNaoAtendidasAtivo();
+                if (btnFiltroNaoAtendidas != null) btnFiltroNaoAtendidas.IsChecked = ativo;
+                if (!ativo && rbNaTodas != null) rbNaTodas.IsChecked = true;
+            }
+            finally { _sincronizandoFiltroNaoAtendidas = false; }
             if (gridHistoricoShell != null) AtualizarHistoricoShell();
+        }
+
+        private void BtnFiltroNaoAtendidas_Click(object sender, RoutedEventArgs e) =>
+            DefinirFiltroNaoAtendidas(btnFiltroNaoAtendidas?.IsChecked == true);
+
+        private void DefinirFiltroNaoAtendidas(bool ativo)
+        {
+            if (cmbFiltroTipoHistorico == null) return;
+            _sincronizandoFiltroNaoAtendidas = true;
+            try
+            {
+                var alvo = ativo ? "Não atendidas" : "Todos os tipos";
+                foreach (var obj in cmbFiltroTipoHistorico.Items)
+                    if (obj is ComboBoxItem ci && string.Equals(ci.Content?.ToString(), alvo, StringComparison.Ordinal))
+                    { cmbFiltroTipoHistorico.SelectedItem = ci; break; }
+                if (btnFiltroNaoAtendidas != null) btnFiltroNaoAtendidas.IsChecked = ativo;
+                if (rbNaTodas != null) rbNaTodas.IsChecked = true;
+            }
+            finally { _sincronizandoFiltroNaoAtendidas = false; }
+            if (gridHistoricoShell != null) AtualizarHistoricoShell();
+        }
+
+        private void RbNaoAtendidas_Checked(object sender, RoutedEventArgs e)
+        {
+            if (_sincronizandoFiltroNaoAtendidas || gridHistoricoShell == null) return;
+            AtualizarHistoricoShell();
+        }
+
+        // naoVistas = contador do botão (como mensagens não lidas); c = totais da lista, usados no resumo
+        // e nos subfiltros da área aberta.
+        private void AtualizarAreaNaoAtendidas((int total, int perdidas, int desistiu, int abandono) c, int naoVistas)
+        {
+            try
+            {
+                var ativo = FiltroNaoAtendidasAtivo();
+                if (txtContNaoAtendidas != null) txtContNaoAtendidas.Text = naoVistas > 99 ? "99+" : naoVistas.ToString();
+                if (bdContNaoAtendidas != null)
+                {
+                    // contador em vermelho sobre o seletor claro; invertido quando o seletor está ativo
+                    bdContNaoAtendidas.Background = ativo ? Brushes.White : (Brush)new BrushConverter().ConvertFromString("#DC2626")!;
+                    txtContNaoAtendidas!.Foreground = ativo ? (Brush)new BrushConverter().ConvertFromString("#B91C1C")! : Brushes.White;
+                    bdContNaoAtendidas.Visibility = naoVistas > 0 ? Visibility.Visible : Visibility.Collapsed;
+                }
+                if (painelNaoAtendidas != null) painelNaoAtendidas.Visibility = ativo ? Visibility.Visible : Visibility.Collapsed;
+                if (!ativo) return;
+                txtResumoNaoAtendidas.Text = c.total == 1 ? "1 chamada não atendida" : $"{c.total} chamadas não atendidas";
+                rbNaTodas.Tag = c.total.ToString();
+                rbNaPerdida.Tag = c.perdidas.ToString();
+                rbNaDesistiu.Tag = c.desistiu.ToString();
+                rbNaAbandono.Tag = c.abandono.ToString();
+            }
+            catch { }
         }
 
         private void BtnAdicionarContato_Click(object sender, RoutedEventArgs e)
@@ -1443,7 +1603,9 @@ namespace WavenVoIP.Views
                 var cache = await GoogleContactsService.CarregarCacheAsync();
                 if (cache.Count > 0)
                 {
-                    ContatoStorageService.SincronizarContatosGoogle(cache);
+                    // v2.5.0 — a importação (milhares de contatos, ~1 MB de arquivo) rodava na thread
+                    // da interface: ~4 s de tela travada na abertura do app. Agora em segundo plano.
+                    await Task.Run(() => ContatoStorageService.SincronizarContatosGoogle(cache));
                     Dispatcher.Invoke(AtualizarContatosShell);
                 }
                 Dispatcher.Invoke(AtualizarStatusGoogle);
@@ -1512,7 +1674,7 @@ namespace WavenVoIP.Views
                 var (contatos, total) = await Task.Run(() =>
                     GoogleContactsService.SincronizarContatosAsync());
 
-                var importados = ContatoStorageService.SincronizarContatosGoogle(contatos);
+                var importados = await Task.Run(() => ContatoStorageService.SincronizarContatosGoogle(contatos));
                 AtualizarContatosShell();
                 AtualizarStatusGoogle();
                 txtStatus.Text = $"Google sincronizado: {total} contatos, {importados} importados.";
@@ -1561,7 +1723,26 @@ namespace WavenVoIP.Views
 
         private void CmbFiltroCanalHistorico_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            if (_sincronizandoFiltroNaoAtendidas) return;
             if (gridHistoricoShell != null) AtualizarHistoricoShell();
+        }
+
+        // v2.5.0 — voltar ao Histórico pela aba mostra sempre todas as ligações: limpa busca, tipo,
+        // canal e a área "Não atendidas". Só a tela muda; registros, pendências e as não atendidas
+        // já visualizadas ficam como estão. Quem chama atualiza a lista uma vez em seguida.
+        private void LimparFiltrosHistorico()
+        {
+            _sincronizandoFiltroNaoAtendidas = true;
+            try
+            {
+                if (txtBuscaHistoricoShell != null) txtBuscaHistoricoShell.Text = string.Empty;
+                if (cmbFiltroTipoHistorico != null) cmbFiltroTipoHistorico.SelectedIndex = 0;
+                if (cmbFiltroCanalHistorico != null) cmbFiltroCanalHistorico.SelectedIndex = 0;
+                if (btnFiltroNaoAtendidas != null) btnFiltroNaoAtendidas.IsChecked = false;
+                if (rbNaTodas != null) rbNaTodas.IsChecked = true;
+            }
+            finally { _sincronizandoFiltroNaoAtendidas = false; }
+            _debounceHistorico.Stop();
         }
 
         // ── CDR / Histórico Issabel ───────────────────────────────────────────────
@@ -1609,11 +1790,20 @@ namespace WavenVoIP.Views
             // antes da sincronização anterior terminar) — não trava a UI, só ignora a chamada extra.
             if (_cdrSyncEmAndamento)
             {
-                RegistrarUiDiagnostico("CDR_SYNC_SKIPPED_BUSY");
+                if (!silencioso) RegistrarUiDiagnostico("CDR_SYNC_SKIPPED_BUSY");
                 return;
             }
+            // v2.5.0 — desempenho: dois timers automáticos se somavam (um ciclo a cada ~1,5 s).
+            // Ciclos automáticos agora respeitam um intervalo mínimo — maior durante uma ligação,
+            // quando o histórico só muda ao desligar (e aí os ciclos pós-chamada cuidam disso).
+            if (silencioso && diasOverride == null)
+            {
+                var minimo = _sipService.IsInCall ? TimeSpan.FromSeconds(10) : TimeSpan.FromSeconds(2.8);
+                if (DateTime.UtcNow - _ultimoSyncCdrAutomatico < minimo) return;
+                _ultimoSyncCdrAutomatico = DateTime.UtcNow;
+            }
             _cdrSyncEmAndamento = true;
-            RegistrarUiDiagnostico("CDR_SYNC_START");
+            if (!silencioso) RegistrarUiDiagnostico("CDR_SYNC_START");
             try
             {
                 var config = SipConfig.CarregarSalva() ?? new SipConfig();
@@ -1644,19 +1834,47 @@ namespace WavenVoIP.Views
                 // janela inteira; os ciclos automáticos usam o incremental.
                 var itens = await Task.Run(() => IssabelCdrService.SincronizarAsync(
                     config, diasOverride ?? config.HistoricoRetencaoDias, forcarCompleto: !silencioso));
-                var novos = HistoricoStorageService.MesclarCdr(itens);
+                // linhas de CDR idênticas às do ciclo anterior: nada a mesclar nem a redesenhar
+                if (silencioso && IssabelCdrService.UltimoSyncSemMudanca)
+                {
+                    IntegrationStatusService.Atualizar(IntegracaoNome.Cdr, IntegracaoStatus.Conectado);
+                    return;
+                }
+
+                // v2.5.0 — travamentos: mescla, limpeza e releitura do histórico rodavam na thread da
+                // interface a cada ciclo automático (2–3 s), inclusive durante chamadas. Agora tudo
+                // isso roda em segundo plano e a interface só é redesenhada quando algo mudou.
+                var (novos, itensAtualizados, assinaturaCdr) = await Task.Run(async () =>
+                {
+                    var n = HistoricoStorageService.MesclarCdr(itens);
+                    // Aplica a MESMA limpeza local (unificação/deduplicação/supressão de Perdida) em
+                    // todo refresh, manual ou automático, sem validar URLs de gravação (sem HTTP).
+                    await IssabelCdrService.ReprocessarHistoricoCdrLocalAsync(false);
+                    // Recarrega o estado local já unificado.
+                    var at = HistoricoStorageService.CarregarComRetencao(config.HistoricoRetencaoDias);
+                    var h = new HashCode();
+                    foreach (var i in at)
+                    {
+                        h.Add(i.Id); h.Add((int)i.Tipo); h.Add(i.Duracao); h.Add(i.Nome);
+                        h.Add(i.GravacaoUrl); h.Add(i.RamalAtendeu); h.Add(i.DataHora);
+                    }
+                    return (n, at, h.ToHashCode());
+                });
                 var gravacoes = itens.Count(i => !string.IsNullOrWhiteSpace(i.GravacaoUrl));
-                RegistrarUiDiagnostico($"CDR_SYNC_DONE chamadas={itens.Count} novas={novos} gravacoes={gravacoes}");
+                if (novos > 0 || !silencioso)
+                    RegistrarUiDiagnostico($"CDR_SYNC_DONE chamadas={itens.Count} novas={novos} gravacoes={gravacoes}");
 
-                // Aplica a MESMA limpeza local (unificação/deduplicação/supressão de Perdida) que
-                // antes só rodava quando o usuário clicava em "Atualizar CDR" — agora roda em todo
-                // refresh, manual ou automático (timer de 3s / timer rápido de 6s da tela aberta),
-                // sem validar URLs de gravação (rápido, sem HTTP) para não pesar o ciclo automático.
-                await Task.Run(() => IssabelCdrService.ReprocessarHistoricoCdrLocalAsync(false));
-
-                // Recarrega o estado local já unificado — reflete qualquer duplicata removida
-                // pela limpeza acima, não só o lote recém-buscado do CDR.
-                var itensAtualizados = HistoricoStorageService.CarregarComRetencao(config.HistoricoRetencaoDias);
+                // Ciclo automático sem nenhuma mudança: não refaz grade, badges nem dashboard
+                // (no máximo a cada 10 s, por causa das regras que dependem do relógio).
+                var semMudanca = silencioso && assinaturaCdr == _assinaturaHistoricoCdr
+                                 && DateTime.UtcNow - _ultimoRefreshUiCdr < TimeSpan.FromSeconds(10);
+                if (semMudanca)
+                {
+                    IntegrationStatusService.Atualizar(IntegracaoNome.Cdr, IntegracaoStatus.Conectado);
+                    return;
+                }
+                _assinaturaHistoricoCdr = assinaturaCdr;
+                _ultimoRefreshUiCdr = DateTime.UtcNow;
 
                 Dispatcher.Invoke(() =>
                 {
@@ -1916,8 +2134,59 @@ namespace WavenVoIP.Views
             var alvo = ResolverUrlGravacaoParaPlay(item);
             if (string.IsNullOrWhiteSpace(alvo)) return;
 
-            RegistrarUiDiagnostico($"RECORDING_PLAY_STARTED arquivo={Path.GetFileName(alvo)}");
             var btn = sender as Button;
+
+            // v2.5.0 — ligação com mais de um arquivo de gravação (um atendente foi removido da
+            // conferência e a gravação continuou em outro arquivo): o botão oferece as partes.
+            try
+            {
+                if (btn != null && !string.IsNullOrWhiteSpace(item.LinkedId))
+                {
+                    var partes = await WavenApiService.GetPartesGravacaoAsync(item.LinkedId, item.DataHora);
+                    if (partes.Count > 0)
+                    {
+                        RegistrarUiDiagnostico($"RECORDING_PARTS linkedid={item.LinkedId} partes={partes.Count + 1}");
+                        var menu = new ContextMenu { PlacementTarget = btn, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
+                        var p1 = new MenuItem { Header = "Parte 1 — início da ligação" };
+                        p1.Click += async (_, _) => await AbrirGravacaoAsync(alvo, btn);
+                        menu.Items.Add(p1);
+                        for (int i = 0; i < partes.Count; i++)
+                        {
+                            var (arquivo, data) = partes[i];
+                            var urlParte = UrlDaParteDaGravacao(alvo, arquivo, item.DataHora, data);
+                            var mi = new MenuItem { Header = $"Parte {i + 2} — depois de remover o atendente" };
+                            mi.Click += async (_, _) => await AbrirGravacaoAsync(urlParte, btn);
+                            menu.Items.Add(mi);
+                        }
+                        menu.IsOpen = true;
+                        return;
+                    }
+                }
+            }
+            catch { }
+
+            await AbrirGravacaoAsync(alvo, btn);
+        }
+
+        // Mesmo endereço da gravação principal, trocando o arquivo (e a pasta do dia, se a parte
+        // começou no dia seguinte).
+        internal static string UrlDaParteDaGravacao(string alvoPrincipal, string arquivoParte, DateTime diaPrincipal, string dataParte)
+        {
+            var sep = alvoPrincipal.Contains('/') ? '/' : System.IO.Path.DirectorySeparatorChar;
+            var i = alvoPrincipal.LastIndexOf(sep);
+            var pasta = i >= 0 ? alvoPrincipal.Substring(0, i) : string.Empty;
+            if (DateTime.TryParse(dataParte, out var dp) && dp.Date != diaPrincipal.Date)
+            {
+                var de = $"{diaPrincipal:yyyy}{sep}{diaPrincipal:MM}{sep}{diaPrincipal:dd}";
+                var para = $"{dp:yyyy}{sep}{dp:MM}{sep}{dp:dd}";
+                if (pasta.EndsWith(de, StringComparison.Ordinal)) pasta = pasta.Substring(0, pasta.Length - de.Length) + para;
+            }
+            return pasta.Length > 0 ? pasta + sep + arquivoParte : arquivoParte;
+        }
+
+        private async Task AbrirGravacaoAsync(string alvo, Button? btn)
+        {
+            RegistrarUiDiagnostico($"RECORDING_PLAY_STARTED arquivo={Path.GetFileName(alvo)}");
             try
             {
                 string localFile;
@@ -2457,10 +2726,12 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
         }
 
         private async Task IniciarLigacaoAsync(string numeroDigitado) => await IniciarLigacaoAsync(numeroDigitado, false);
-        private async Task IniciarLigacaoDoHistoricoAsync(string numeroHistorico, HistoricoLigacaoItem? itemHistorico = null)
-            => await IniciarLigacaoAsync(numeroHistorico, true, itemHistorico);
+        private async Task IniciarLigacaoDoHistoricoAsync(string numeroHistorico, HistoricoLigacaoItem? itemHistorico = null, bool retornoAutomatico = false)
+            => await IniciarLigacaoAsync(numeroHistorico, true, itemHistorico, retornoAutomatico);
 
-        private async Task IniciarLigacaoAsync(string numeroDigitado, bool veioDoHistorico, HistoricoLigacaoItem? itemHistorico = null)
+        // retornoAutomatico (v2.5.0): "Retornar" do aviso de não atendida — usa direto o canal por
+        // onde o cliente entrou, sem perguntar. Só o seletor aparece, e só quando o canal é desconhecido.
+        private async Task IniciarLigacaoAsync(string numeroDigitado, bool veioDoHistorico, HistoricoLigacaoItem? itemHistorico = null, bool retornoAutomatico = false)
         {
             // v2.3.6 — investigação real: usuário precisou clicar ~3x pra chamada iniciar. Causa
             // raiz — nenhuma trava contra clique duplo/triplo: cada clique reentrante disparava uma
@@ -2493,7 +2764,7 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
                 {
                     RegistrarUiDiagnostico($"ABRINDO SELETOR numero={numeroDigitado}");
                     var saida = veioDoHistorico
-                        ? await ResolverSaidaHistoricoAsync(numeroDigitado, itemHistorico)
+                        ? await ResolverSaidaHistoricoAsync(numeroDigitado, itemHistorico, retornoAutomatico)
                         : await AbrirSeletorSaidaAsync(numeroDigitado);
                     RegistrarUiDiagnostico($"RETORNO SELETOR numero={numeroDigitado} saida={(saida.HasValue ? saida.Value.ToString() : "null")}");
                     if (saida == null) return;
@@ -2612,7 +2883,7 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
 
         private void NavDiscagem_Click(object sender, RoutedEventArgs e) { MainTabs.SelectedIndex = 0; AtualizarNavSelecionada(); AnimarAbaAtual(); }
         private void NavContatos_Click(object sender, RoutedEventArgs e) { MainTabs.SelectedIndex = 1; AtualizarContatosShell(); AtualizarNavSelecionada(); AnimarAbaAtual(); }
-        private void NavHistorico_Click(object sender, RoutedEventArgs e) { MainTabs.SelectedIndex = 2; AtualizarHistoricoShell(); AtualizarNavSelecionada(); AnimarAbaAtual(); ResetarBadgePerdidas(); AtualizarTimerFastRefreshHistorico(); }
+        private void NavHistorico_Click(object sender, RoutedEventArgs e) { if (MainTabs.SelectedIndex != 2) LimparFiltrosHistorico(); MainTabs.SelectedIndex = 2; AtualizarHistoricoShell(); AtualizarNavSelecionada(); AnimarAbaAtual(); ResetarBadgePerdidas(); AtualizarTimerFastRefreshHistorico(); }
         private void NavConfiguracoes_Click(object sender, RoutedEventArgs e)
         {
             // Highlight Configurações nav while popup is open
@@ -2867,30 +3138,76 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
             catch { }
         }
 
-        private void MostrarMissedCallPopup(Models.HistoricoLigacaoItem item)
+        // Demonstração do aviso (WavenVoIP.exe /demo-naoatendida): só visual e só neste computador.
+        // Os itens existem apenas na memória — nada vai para o Histórico, indicadores, PABX ou API,
+        // e os botões do aviso não ligam nem abrem conversa (ver MissedCallPopup.Demonstracao).
+        public void MostrarDemonstracaoNaoAtendidas()
+        {
+            foreach (var p in _missedCallPopups.Where(p => p.Demonstracao).ToList()) p.Close();
+            RegistrarUiDiagnostico("MISSED_CALL_POPUP_DEMO");
+            var agora = DateTime.Now;
+            foreach (var (nome, numero, canal, motivo, min) in new[]
+            {
+                ("Cliente Exemplo TIM", "66999990001", "WhatsApp TIM", "ClienteDesistiu", 9),
+                ("Cliente Exemplo Vivo", "66999990002", "WhatsApp Vivo", "AbandonoFila", 6),
+                ("Cliente Exemplo Operadora", "6635210003", "Operadora", "", 4),
+                ("", "6635210004", "0800", "AbandonoFila", 2),
+            })
+            {
+                MostrarMissedCallPopup(new Models.HistoricoLigacaoItem
+                {
+                    Tipo = Models.TipoHistoricoLigacao.Perdida, Nome = nome, Numero = numero,
+                    CanalEntrada = canal, MotivoPerdida = motivo, DataHora = agora.AddMinutes(-min)
+                }, demonstracao: true);
+            }
+        }
+
+        private void MostrarMissedCallPopup(Models.HistoricoLigacaoItem item, bool demonstracao = false)
         {
             try
             {
-                RegistrarUiDiagnostico($"MISSED_CALL_POPUP_OPENED numero={MascararNumero(item.Numero)} linkedid={item.LinkedId}");
-                _missedCallPopup?.Close();
+                // v2.5.0 — sem duplicidade: aviso do mesmo número ainda aberto é atualizado
+                // (horário da última e quantidade), não abre outra janela.
+                var chave = MissedCallPolicy.NumeroChave(item.Numero);
+                var aberto = chave.Length >= 8
+                    ? _missedCallPopups.FirstOrDefault(p => string.Equals(p.ChaveNumero, chave, StringComparison.OrdinalIgnoreCase))
+                    : null;
+                if (aberto != null)
+                {
+                    aberto.RegistrarNovaChamada(item);
+                    RegistrarUiDiagnostico($"MISSED_CALL_POPUP_UPDATED numero={MascararNumero(item.Numero)} linkedid={item.LinkedId} quantidade={aberto.Quantidade}");
+                    return;
+                }
 
-                var popup = new MissedCallPopup(item.NumeroLimpoVisual, item.NomeExibido);
-                _missedCallPopup = popup;
+                RegistrarUiDiagnostico(
+                    $"MISSED_CALL_POPUP_OPENED numero={MascararNumero(item.Numero)} linkedid={item.LinkedId} " +
+                    $"motivo={NaoAtendidasPolicy.Motivo(item)} canal=\"{item.CanalEntrada}\" abertos={_missedCallPopups.Count + 1}");
+                while (_missedCallPopups.Count >= MaxAvisosNaoAtendidas)
+                    _missedCallPopups[0].Close(); // o mais antigo sai; a pendência dele continua no Histórico
+
+                var popup = new MissedCallPopup(item) { Demonstracao = demonstracao };
+                _missedCallPopups.Add(popup);
 
                 popup.RetornarSolicitado += async numero =>
                 {
+                    var itemAtual = popup.Item ?? item;
                     var numeroNorm = PhoneNumberNormalizer.NormalizeForDial(numero);
-                    RegistrarUiDiagnostico($"MISSED_CALL_CALLBACK_STARTED numero={numero} norm={numeroNorm}");
-                    _missedCallPopup = null;
+                    RegistrarUiDiagnostico($"MISSED_CALL_CALLBACK_STARTED numero={MascararNumero(numero)} norm={MascararNumero(numeroNorm)} canal=\"{itemAtual.CanalEntrada}\"");
                     RestaurarJanelas();
                     MainTabs.SelectedIndex = 0;
                     AtualizarNavSelecionada();
-                    await IniciarLigacaoDoHistoricoAsync(numeroNorm, item);
+                    await IniciarLigacaoDoHistoricoAsync(numeroNorm, itemAtual, retornoAutomatico: true);
+                };
+
+                // Só abre a conversa: o aviso fica na tela e a pendência continua contando.
+                popup.WhatsAppSolicitado += numero =>
+                {
+                    RegistrarUiDiagnostico($"MISSED_CALL_WHATSAPP numero={MascararNumero(numero)}");
+                    AbrirTelaWhatsApp(numero, "historico");
                 };
 
                 popup.VerHistoricoSolicitado += () =>
                 {
-                    _missedCallPopup = null;
                     RestaurarJanelas();
                     MainTabs.SelectedIndex = 2;
                     AtualizarHistoricoShell();
@@ -2904,11 +3221,51 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
                     catch { }
                 };
 
-                popup.Closed += (_, _) => { if (ReferenceEquals(_missedCallPopup, popup)) _missedCallPopup = null; };
+                popup.Closed += (_, _) => { _missedCallPopups.Remove(popup); ReposicionarAvisosNaoAtendidas(); };
+                popup.Loaded += (_, _) => ReposicionarAvisosNaoAtendidas();
                 popup.Show();
+            }
+            catch (Exception ex) { RegistrarUiDiagnostico($"MISSED_CALL_POPUP_ERRO {ex.Message}"); }
+        }
+
+        // Empilha os avisos a partir do canto inferior direito (o mais antigo embaixo), acima do
+        // aviso de fila quando ele está na tela.
+        private void ReposicionarAvisosNaoAtendidas()
+        {
+            try
+            {
+                double ocupado = 0;
+                try { if (_popupAguardando != null && _popupAguardando.IsVisible) ocupado = _popupAguardando.ActualHeight + 4; } catch { }
+                var alturaTela = SystemParameters.WorkArea.Height;
+                int coluna = 0; bool colunaVazia = true;
+                foreach (var p in _missedCallPopups)
+                {
+                    var altura = p.ActualHeight > 0 ? p.ActualHeight : 250;
+                    // não cabe mais um nesta pilha: começa outra à esquerda, em vez de sobrepor
+                    if (!colunaVazia && ocupado + altura + 10 > alturaTela) { coluna++; ocupado = 0; colunaVazia = true; }
+                    p.PosicionarBottomRight(ocupado, coluna);
+                    ocupado += altura - 12; // 12 = margem da sombra
+                    colunaVazia = false;
+                }
             }
             catch { }
         }
+
+        // Fecha o aviso quando a pendência deixou de existir: o mesmo número foi atendido depois
+        // (o cliente ligou de novo e alguém atendeu, ou um operador retornou e a chamada completou).
+        private void FecharAvisosNaoAtendidasResolvidos(System.Collections.Generic.List<Models.HistoricoLigacaoItem> itensCdr)
+        {
+            foreach (var p in _missedCallPopups.ToList())
+            {
+                if (p.Demonstracao || p.Item == null || !MissedCallPolicy.FoiAtendidaDepois(p.Item, itensCdr)) continue;
+                RegistrarUiDiagnostico($"MISSED_CALL_POPUP_CLOSED numero={MascararNumero(p.Item.Numero)} motivo=atendida_depois");
+                p.Close();
+            }
+        }
+
+        // v2.5.0 — hora do último popup de perdida por número (ver MissedCallPolicy).
+        private readonly System.Collections.Generic.Dictionary<string, DateTime> _ultimoPopupPerdidaPorNumero =
+            new(StringComparer.OrdinalIgnoreCase);
 
         private void DetectarChamadasPerdidasNovas(System.Collections.Generic.List<Models.HistoricoLigacaoItem> itensCdr)
         {
@@ -2977,6 +3334,17 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
 
                 foreach (var cand in candidatos)
                 {
+                    // v2.5.0 — a perdida fica no Histórico, mas se o mesmo número já foi atendido
+                    // depois (cliente retornou ou operador ligou de volta) não há o que avisar.
+                    if (MissedCallPolicy.FoiAtendidaDepois(cand, itensCdr))
+                    {
+                        _perdidasPendentesConfirmacao.Remove(cand.UniqueId);
+                        _perdidasJaMostradas.Add(cand.UniqueId);
+                        _perdidasVistas.Add(cand.UniqueId);
+                        RegistrarUiDiagnostico($"MISSED_NOTIFY_SUPPRESSED_ANSWERED numero={MascararNumero(cand.Numero)} linkedid={cand.LinkedId} motivo=retorno_atendido_depois");
+                        continue;
+                    }
+
                     if (!PodeNotificarChamadaPerdida(cand))
                     {
                         // PodeNotificarChamadaPerdida já logou o motivo específico do bloqueio.
@@ -3024,12 +3392,23 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
                             continue;
                         }
 
+                        // v2.5.0 — outra perdida do mesmo número logo depois de um popup já exibido:
+                        // conta no indicador (fica como "mostrada e não vista"), sem abrir outra janela.
+                        if (MissedCallPolicy.PopupRecenteParaNumero(c.Numero, _ultimoPopupPerdidaPorNumero, agora))
+                        {
+                            _perdidasJaMostradas.Add(c.UniqueId);
+                            RegistrarUiDiagnostico($"MISSED_SUPPRESSED numero={MascararNumero(c.Numero)} linkedid={c.LinkedId} motivo=popup_recente_mesmo_numero");
+                            continue;
+                        }
+
                         aNotificar.Add(c);
                     }
 
                     foreach (var p in aNotificar)
                     {
                         _perdidasJaMostradas.Add(p.UniqueId);
+                        var chavePopup = MissedCallPolicy.NumeroChave(p.Numero);
+                        if (chavePopup.Length >= 8) _ultimoPopupPerdidaPorNumero[chavePopup] = agora;
                         RegistrarUiDiagnostico($"MISSED_NOTIFICATION_SENT numero={MascararNumero(p.Numero)} linkedid={p.LinkedId}");
 
                         var numNormFila = PhoneNumberNormalizer.NormalizeBrazilPhone(
@@ -3041,10 +3420,13 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
                     if (aNotificar.Count > 0)
                     {
                         RegistrarUiDiagnostico($"MISSED_CALL_DETECTED count={aNotificar.Count}");
-                        MostrarMissedCallPopup(aNotificar[0]);
+                        // v2.5.0 — um aviso por número (antes só o primeiro da leva aparecia)
+                        foreach (var p in aNotificar.OrderBy(x => x.DataHora))
+                            MostrarMissedCallPopup(p);
                     }
                 }
 
+                FecharAvisosNaoAtendidasResolvidos(itensCdr);
                 RecalcularBadgePerdidas(itensCdr);
             }
             catch { }
@@ -3166,7 +3548,10 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
                 i.Tipo == Models.TipoHistoricoLigacao.Perdida &&
                 !string.IsNullOrWhiteSpace(i.UniqueId) &&
                 _perdidasJaMostradas.Contains(i.UniqueId) &&
-                !_perdidasVistas.Contains(i.UniqueId));
+                !_perdidasVistas.Contains(i.UniqueId) &&
+                // v2.5.0 — a perdida continua no Histórico, mas deixa de ser pendência quando o
+                // mesmo número foi atendido depois (antes ela sumia da lista e do contador).
+                !MissedCallPolicy.FoiAtendidaDepois(i, itensCdr));
 
             if (count != _badgePendentes)
             {
@@ -3180,37 +3565,17 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
             if (btnNavDiscagem == null || MainTabs == null) return;
             var botoes = new[] { btnNavDiscagem, btnNavContatos, btnNavHistorico, btnNavConfiguracoes, btnNavDashboard };
 
-            var activeBg = new LinearGradientBrush(
-                new GradientStopCollection
-                {
-                    new GradientStop(Color.FromRgb(0xA7, 0x8B, 0xFA), 0),
-                    new GradientStop(Color.FromRgb(0xC4, 0xB5, 0xFD), 1)
-                },
-                new System.Windows.Point(0, 0), new System.Windows.Point(0, 1));
-            var activeFg     = new SolidColorBrush(Color.FromRgb(0x1E, 0x0A, 0x4B));
-            var activeBorder = new SolidColorBrush(Color.FromRgb(0x6D, 0x28, 0xD9));
-
+            // v2.5.0: a cor da aba ativa (pílula em degradê, texto branco) vem do estilo TopNavButton
+            // pelo Tag="active"; nada de cor local aqui, senão ela encobre o estilo.
             for (int i = 0; i < botoes.Length; i++)
             {
                 if (botoes[i] == null) continue;
-                bool ativo = MainTabs.SelectedIndex == i;
-                botoes[i].Tag = ativo ? "active" : null;
-                if (ativo)
-                {
-                    botoes[i].Background      = activeBg;
-                    botoes[i].Foreground      = activeFg;
-                    botoes[i].BorderBrush     = activeBorder;
-                    botoes[i].BorderThickness = new Thickness(2);
-                    botoes[i].FontWeight      = FontWeights.Bold;
-                }
-                else
-                {
-                    botoes[i].ClearValue(Button.BackgroundProperty);
-                    botoes[i].ClearValue(Button.ForegroundProperty);
-                    botoes[i].ClearValue(Button.BorderBrushProperty);
-                    botoes[i].ClearValue(Button.BorderThicknessProperty);
-                    botoes[i].ClearValue(Button.FontWeightProperty);
-                }
+                botoes[i].Tag = MainTabs.SelectedIndex == i ? "active" : null;
+                botoes[i].ClearValue(Button.BackgroundProperty);
+                botoes[i].ClearValue(Button.ForegroundProperty);
+                botoes[i].ClearValue(Button.BorderBrushProperty);
+                botoes[i].ClearValue(Button.BorderThicknessProperty);
+                botoes[i].ClearValue(Button.FontWeightProperty);
             }
         }
 
@@ -3245,22 +3610,144 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
             call.OnAudioRouteRequested += AudioRouteRequested;
             call.OnOpenConferenceParticipantsRequested += OpenConferenceParticipantsRequested;
             call.OnWhatsAppRequested += numero => AbrirTelaWhatsApp(numero, "chamada");
+            call.OnRemoverAtendenteRequested += async ramal => await RemoverAtendenteDaLigacaoAsync(call, ramal);
             return call;
+        }
+
+        // ── v2.5.0: privacidade após "Puxar ligação" em conferência ──────────────────
+        private bool? _podeRemoverAtendente;       // consultado na API uma vez por abertura do app
+        private bool _removendoAtendente;
+
+        private string NomeDoRamal(string ramal)
+        {
+            try
+            {
+                var r = AmiMonitorService.Current?.Ramais.FirstOrDefault(x => x.Ramal == ramal);
+                if (r != null && !string.IsNullOrWhiteSpace(r.Nome)) return r.Nome;
+                return ContatoStorageService.ResolverNomePorNumero(ramal);
+            }
+            catch { return ramal; }
+        }
+
+        // v2.5.0 — fim de conversa que o softphone não percebe sozinho.
+        //  • Conferência sem cliente: o cliente desligou e este ramal ficou na sala do PABX (a sala
+        //    não termina sozinha). Depois de 2 leituras seguidas sem cliente/convidado, a chamada é
+        //    encerrada aqui. Só vale se já houve cliente nesta conferência — o operador que entra
+        //    primeiro e espera os demais não é desligado.
+        //  • Sessão órfã: o app acha que está em ligação, mas o PABX não tem mais nenhum canal
+        //    deste ramal (o aviso de desligar se perdeu). Depois de 3 leituras seguidas, encerra.
+        private bool _confTeveCliente;
+        private int _confLeiturasSemCliente, _leiturasSemCanalNoPabx;
+        private DateTime _inicioChamadaVista = DateTime.MinValue;
+        private bool _lendoEstadoDaChamada;
+
+        internal static bool DeveEncerrarConferenciaSemCliente(bool emConferencia, bool haClienteOuConvidado, ref bool teveCliente, ref int leiturasSemCliente)
+        {
+            if (!emConferencia) { teveCliente = false; leiturasSemCliente = 0; return false; }
+            if (haClienteOuConvidado) { teveCliente = true; leiturasSemCliente = 0; return false; }
+            if (!teveCliente) return false;
+            return ++leiturasSemCliente >= 2;
+        }
+
+        private void ZerarVigiaDaChamada()
+        {
+            _confTeveCliente = false; _confLeiturasSemCliente = 0; _leiturasSemCanalNoPabx = 0; _inicioChamadaVista = DateTime.MinValue;
+        }
+
+        private async Task AtualizarParticipantesDaLigacaoAsync(bool lerChamadas)
+        {
+            if (_lendoEstadoDaChamada) return;
+            _lendoEstadoDaChamada = true;
+            try
+            {
+                var call = _activeCallWindow as CallWindow;
+                if (call == null || !_sipService.IsInCall) { ZerarVigiaDaChamada(); return; }
+                if (_inicioChamadaVista == DateTime.MinValue) _inicioChamadaVista = DateTime.Now;
+                if (lerChamadas) { try { await _sipService.ListarChamadasAtivasAsync(); } catch { return; } }
+                if (!ReferenceEquals(call, _activeCallWindow) || !_sipService.IsInCall) return;
+                if (_sipService.FonteChamadasAtivas != "Waven API") return;   // sem leitura confiável dos canais: não decide nada
+
+                var haCliente = _sipService.ParticipantesDaMinhaLigacao.Any(p => p.Tipo != "atendente");
+                if (DeveEncerrarConferenciaSemCliente(_sipService.EmConferenciaAgora, haCliente, ref _confTeveCliente, ref _confLeiturasSemCliente))
+                {
+                    RegistrarUiDiagnostico("CONF_ENCERRADA_SEM_CLIENTE | cliente desligou; encerrando a chamada deste ramal");
+                    ZerarVigiaDaChamada();
+                    try { call.DefinirStatus("Cliente desligou"); } catch { }
+                    _sipService.Desligar();
+                    return;
+                }
+                if (_sipService.MeuRamalTemCanalNoPabx == false && (DateTime.Now - _inicioChamadaVista) > TimeSpan.FromSeconds(15))
+                {
+                    if (++_leiturasSemCanalNoPabx >= 3)
+                    {
+                        RegistrarUiDiagnostico("CALL_SESSAO_ORFA_ENCERRADA | o PABX nao tem mais canal deste ramal; encerrando a sessao local");
+                        ZerarVigiaDaChamada();
+                        try { call.DefinirStatus("Chamada encerrada"); } catch { }
+                        _sipService.Desligar();
+                        return;
+                    }
+                }
+                else _leiturasSemCanalNoPabx = 0;
+
+                var participantes = _sipService.ParticipantesDaMinhaLigacao;
+                if (participantes.Count > 0 && _podeRemoverAtendente == null)
+                {
+                    var cfg = SipConfig.CarregarSalva();
+                    var meu = (string.IsNullOrWhiteSpace(cfg?.Ramal) ? cfg?.Login : cfg?.Ramal) ?? string.Empty;
+                    _podeRemoverAtendente = await WavenApiService.PodeRemoverAtendenteAsync(meu);
+                    RegistrarUiDiagnostico($"CONF_REMOVER_PERMISSAO ramal={meu} pode={_podeRemoverAtendente}");
+                }
+                call.AtualizarParticipantes(participantes, _podeRemoverAtendente == true, NomeDoRamal);
+            }
+            catch { }
+            finally { _lendoEstadoDaChamada = false; }
+        }
+
+        private async Task RemoverAtendenteDaLigacaoAsync(CallWindow call, string ramalAlvo)
+        {
+            if (_removendoAtendente) return;
+            _removendoAtendente = true;
+            try
+            {
+                var nome = NomeDoRamal(ramalAlvo);
+                var quem = string.IsNullOrWhiteSpace(nome) || nome == ramalAlvo ? $"o ramal {ramalAlvo}" : $"{nome} (ramal {ramalAlvo})";
+                var resp = MessageBox.Show(call,
+                    $"Remover {quem} desta ligação?\n\nEle será desconectado e deixará de ouvir a conversa. Você e o cliente continuam falando normalmente.",
+                    "Remover atendente", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
+                if (resp != MessageBoxResult.Yes) return;
+
+                var cfg = SipConfig.CarregarSalva();
+                var meu = (string.IsNullOrWhiteSpace(cfg?.Ramal) ? cfg?.Login : cfg?.Ramal) ?? string.Empty;
+                call.MostrarAvisoParticipantes("Removendo o atendente e conferindo no PABX…");
+                var (ok, mensagem) = await WavenApiService.RemoverAtendenteAsync(meu, ramalAlvo);
+                RegistrarUiDiagnostico($"CONF_REMOVER_ATENDENTE alvo={ramalAlvo} ok={ok} msg={mensagem}");
+                call.MostrarAvisoParticipantes(mensagem);
+                await AtualizarParticipantesDaLigacaoAsync(lerChamadas: true);
+            }
+            catch (Exception ex) { try { call.MostrarAvisoParticipantes("Não foi possível remover: " + ex.Message); } catch { } }
+            finally { _removendoAtendente = false; }
         }
 
         private async void BlindTransferRequested()
         {
             if (!_sipService.IsInCall) { MessageBox.Show("Não há chamada ativa para transferir.", "Waven VoIP"); return; }
-            var prompt = new InputPromptWindow("Transferência cega: digite o ramal ou número externo de destino") { Owner = (_activeCallWindow as Window) ?? this };
-            if (!AbrirPromptSeguro(prompt) || string.IsNullOrWhiteSpace(prompt.ValorDigitado)) return;
+            // v2.5.0 — ramais online direto na tela: escolher + "Transferir" = 2 cliques.
+            var (escolhido, ramalDaLista) = await EscolherDestinoAsync("Transferência cega", "A ligação vai direto para o destino, sem você falar antes", "Transferir", "\uE8AB");
+            if (string.IsNullOrWhiteSpace(escolhido) || !_sipService.IsInCall) return;
 
-            var destinoFinal = await PrepararDestinoTransferenciaAsync(prompt.ValorDigitado, "transferência cega");
+            var destinoFinal = await PrepararDestinoTransferenciaAsync(escolhido, "transferência cega");
             if (string.IsNullOrWhiteSpace(destinoFinal)) return;
 
-            var displayDestino = ResolverDisplayChamada(destinoFinal);
-            var confirm = new BlindTransferWindow(displayDestino) { Owner = (_activeCallWindow as Window) ?? this };
-            confirm.ShowDialog();
-            if (!confirm.Confirmado) return;
+            // Ramal escolhido e confirmado na própria lista não pede uma segunda confirmação;
+            // número digitado/externo continua passando pela confirmação de sempre.
+            if (!ramalDaLista)
+            {
+                var displayDestino = ResolverDisplayChamada(destinoFinal);
+                var confirm = new BlindTransferWindow(displayDestino) { Owner = (_activeCallWindow as Window) ?? this };
+                confirm.ShowDialog();
+                if (!confirm.Confirmado) return;
+            }
+            RegistrarUiDiagnostico($"TRANSFER_CEGA destino_ramal_da_lista={ramalDaLista}");
 
             // v2.4.0 — investigação de travamento: TransferenciaCega envia DTMF passo a passo com
             // Thread.Sleep(220/900ms) entre dígitos (protocolo Issabel: ##+ramal) — chamado direto
@@ -3273,10 +3760,10 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
         private async void AttendedTransferRequested()
         {
             if (!_sipService.IsInCall) { MessageBox.Show("Não há chamada ativa para transferir.", "Waven VoIP"); return; }
-            var prompt = new InputPromptWindow("Transferência assistida: digite o ramal ou número externo de destino") { Owner = (_activeCallWindow as Window) ?? this };
-            if (!AbrirPromptSeguro(prompt) || string.IsNullOrWhiteSpace(prompt.ValorDigitado)) return;
+            var (escolhido, _) = await EscolherDestinoAsync("Transferência assistida", "Você fala com o destino antes de passar a ligação", "Chamar", "\uE8AB");
+            if (string.IsNullOrWhiteSpace(escolhido) || !_sipService.IsInCall) return;
 
-            var destinoFinal = await PrepararDestinoTransferenciaAsync(prompt.ValorDigitado, "transferência assistida");
+            var destinoFinal = await PrepararDestinoTransferenciaAsync(escolhido, "transferência assistida");
             if (string.IsNullOrWhiteSpace(destinoFinal)) return;
 
             // v2.4.0 — mesma correção de UI blocking da transferência cega (ver comentário lá):
@@ -3284,6 +3771,37 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
             bool ok = await Task.Run(() => _sipService.TransferenciaAssistida(destinoFinal));
             if (!ok) { MessageBox.Show("Não foi possível iniciar a transferência assistida.", "Waven VoIP"); return; }
             AbrirControleTransferenciaAssistida(destinoFinal);
+        }
+
+        // v2.5.0 — tela única de escolha de destino (ramais online + buscar contato + digitar).
+        // Não é mais modal: a janela fica sobre a chamada, mas o resto do sistema (Discagem,
+        // Histórico, Contatos, Dashboard) continua navegável enquanto ela está aberta.
+        private EscolherDestinoWindow? _escolhaDestinoAberta;
+
+        private async Task<(string? destino, bool ramalDaLista)> EscolherDestinoAsync(string titulo, string subtitulo, string textoConfirmar, string glifo)
+        {
+            try
+            {
+                if (_escolhaDestinoAberta != null)
+                {
+                    try { _escolhaDestinoAberta.Activate(); } catch { }
+                    return (null, false);
+                }
+                var cfg = SipConfig.CarregarSalva();
+                var meuRamal = string.IsNullOrWhiteSpace(cfg?.Ramal) ? cfg?.Login : cfg?.Ramal;
+                var janela = new EscolherDestinoWindow(titulo, subtitulo, meuRamal ?? string.Empty, textoConfirmar, glifo) { Owner = (_activeCallWindow as Window) ?? this };
+                _escolhaDestinoAberta = janela;
+                bool ok;
+                try { ok = await janela.MostrarAsync(); }
+                finally { _escolhaDestinoAberta = null; }
+                if (!ok || string.IsNullOrWhiteSpace(janela.ValorDigitado)) return (null, false);
+                return (janela.ValorDigitado, janela.EscolheuRamalDaLista);
+            }
+            catch (Exception ex)
+            {
+                TratarErroSemTravamento(ex, "Não foi possível abrir a tela de escolha do destino.");
+                return (null, false);
+            }
         }
 
         private async Task<string?> PrepararDestinoTransferenciaAsync(string destinoDigitado, string tipoTransferencia)
@@ -3341,6 +3859,11 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
                 };
 
                 _conferenceControlWindow.OnRefreshRequested += () => RegistrarUiDiagnostico("CONF UI REFRESH solicitado");
+                _conferenceControlWindow.OnListarPresencaAsync = async () =>
+                {
+                    await _sipService.ListarChamadasAtivasAsync();
+                    return _sipService.ParticipantesNaSala;
+                };
                 _conferenceControlWindow.OnMuteRequested += async numero =>
                 {
                     RegistrarUiDiagnostico($"CONF UI MUTE_REQUEST numero={numero}");
@@ -3391,13 +3914,18 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
         {
             var displayDestino = ResolverDisplayChamada(destino);
             var controle = new TransferControlWindow(displayDestino, _activeCallWindow?.NomeNumeroAtual) { Owner = this };
-            controle.OnReturnRequested += () =>
+            // os comandos de transferência enviam teclas com pausas — rodam fora da interface
+            controle.OnReturnRequested += async () =>
             {
-                bool voltou = _sipService.VoltarTransferenciaAssistida();
-                MessageBox.Show(voltou ? "Comando para voltar à chamada original enviado." : "Não foi possível enviar o retorno. Tente * no teclado.", "Waven VoIP");
+                try
+                {
+                    bool voltou = await Task.Run(() => _sipService.VoltarTransferenciaAssistida());
+                    MessageBox.Show(voltou ? "Comando para voltar à chamada original enviado." : "Não foi possível enviar o retorno. Tente * no teclado.", "Waven VoIP");
+                }
+                catch { }
             };
-            controle.OnCompleteRequested += () => _sipService.ConcluirTransferenciaAssistida();
-            controle.OnStarRequested += () => _sipService.EnviarSequenciaDtmf("*");
+            controle.OnCompleteRequested += () => Task.Run(() => { try { _sipService.ConcluirTransferenciaAssistida(); } catch { } });
+            controle.OnStarRequested += () => Task.Run(() => { try { _sipService.EnviarSequenciaDtmf("*"); } catch { } });
             controle.Show();
         }
 
@@ -3492,16 +4020,24 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
             return ok;
         }
 
-        private void RecordingToggleRequested()
+        private async void RecordingToggleRequested()
         {
-            bool ok = _sipService.EnviarSequenciaDtmf("*1");
+            bool ok = await Task.Run(() => _sipService.EnviarSequenciaDtmf("*1"));
             MessageBox.Show(ok ? "Código *1 enviado para gravação em chamada." : "Não foi possível enviar o código *1.", "Waven VoIP");
         }
 
         private void DtmfKeyboardRequested()
         {
             if (!_sipService.IsInCall) { MessageBox.Show("Não há chamada ativa.", "Waven VoIP"); return; }
-            var teclado = new DtmfPadWindow(digito => _sipService.EnviarSequenciaDtmf(digito)) { Owner = this };
+            // cada tecla esperava 220 ms na thread da interface; agora vai para uma fila em
+            // segundo plano, na ordem em que foi digitada
+            var fila = Task.CompletedTask;
+            var teclado = new DtmfPadWindow(digito =>
+            {
+                if (!_sipService.IsInCall) return false;
+                fila = fila.ContinueWith(_ => { try { _sipService.EnviarSequenciaDtmf(digito); } catch { } }, TaskScheduler.Default);
+                return true;
+            }) { Owner = this };
             teclado.Show();
         }
 
@@ -3649,6 +4185,191 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
                 txtNumero.CaretIndex = txtNumero.Text.Length;
             }
             txtNumero.Focus();
+        }
+
+        // ── v2.5.0: aviso de cliente aguardando (fila / fora do horário) ─────────────
+        // A cada 3 s lê as chamadas ativas (Waven API ou AMI) e mantém UM popup com as que estão
+        // esperando alguém: aparece quando surge uma, atualiza sozinho e some quando a chamada é
+        // atendida ou encerrada. Cada chamada (canal do cliente) avisa uma vez só; dispensada,
+        // não volta. A chamada que este próprio ramal atende nunca entra na lista.
+        private System.Windows.Threading.DispatcherTimer? _timerAvisoAguardando;
+        private ChamadasAguardandoPopup? _popupAguardando;
+        private readonly Services.AvisoFilaPolicy _avisoFila = new();
+        private bool _lendoAvisoAguardando;
+        private DateTime _ultimoErroAvisoLogado = DateTime.MinValue;
+        private int _tickAvisoAguardando;
+
+        private void IniciarAvisoClienteAguardando()
+        {
+            try
+            {
+                if (_timerAvisoAguardando != null) return;
+                _timerAvisoAguardando = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+                _timerAvisoAguardando.Tick += async (_, _) =>
+                {
+                    try { _popupAguardando?.AtualizarTempos(); } catch { }
+                    // em conferência, lê o estado a cada segundo para perceber logo a saída do cliente
+                    if (_tickAvisoAguardando % 3 != 2 && _sipService.IsInCall && _sipService.EmConferenciaAgora)
+                        await AtualizarParticipantesDaLigacaoAsync(lerChamadas: true);
+                    if (++_tickAvisoAguardando % 3 == 0)
+                    {
+                        await VerificarClientesAguardandoAsync();
+                        // participantes da ligação em conferência (lê as chamadas aqui só se o
+                        // aviso de cliente aguardando estiver desligado e não tiver lido acima)
+                        var avisoLigado = SipConfig.CarregarSalva()?.AvisoClienteAguardandoHabilitado ?? false;
+                        await AtualizarParticipantesDaLigacaoAsync(lerChamadas: !avisoLigado);
+                    }
+                };
+                _timerAvisoAguardando.Start();
+                RegistrarUiDiagnostico("AVISO_AGUARDANDO_MONITOR_INICIADO");
+            }
+            catch { }
+        }
+
+        private async System.Threading.Tasks.Task VerificarClientesAguardandoAsync()
+        {
+            if (_lendoAvisoAguardando || _sipService == null) return;
+            _lendoAvisoAguardando = true;
+            try
+            {
+                var cfg = SipConfig.CarregarSalva();
+                if (cfg == null || !cfg.AvisoClienteAguardandoHabilitado) { FecharPopupAguardando(); return; }
+
+                List<Models.ChamadaAtivaInfo> ativas;
+                try { ativas = await _sipService.ListarChamadasAtivasAsync(); }
+                catch (Exception ex)
+                {
+                    if (DateTime.Now - _ultimoErroAvisoLogado > TimeSpan.FromMinutes(10))
+                    {
+                        _ultimoErroAvisoLogado = DateTime.Now;
+                        RegistrarUiDiagnostico($"AVISO_AGUARDANDO_SEM_LEITURA {ex.Message}");
+                    }
+                    FecharPopupAguardando();
+                    return;
+                }
+
+                AvisarEntradaNaMinhaLigacao(_sipService.RamaisNaMinhaConferencia);
+
+                // só cliente parado na fila (ver AvisoFilaPolicy); URA, mensagens, fora do horário
+                // e grupo tocando ficam apenas na janela "Puxar Ligação"
+                _avisoFila.DefinirFilas(cfg.AvisoClienteAguardandoFilas);
+                var aguardando = _avisoFila.Avaliar(ativas, out var novasNaFila, out var saidasDaFila);
+                foreach (var a in novasNaFila)
+                    RegistrarUiDiagnostico($"AVISO_FILA_EXIBIDO fila={a.Fila} tronco={a.Tronco} numero={MascararNumero(a.Numero)} espera_s={a.DuracaoSeg} linkedid={a.Linkedid}");
+                foreach (var (a, motivo) in saidasDaFila)
+                    RegistrarUiDiagnostico($"AVISO_FILA_FECHADO motivo={motivo} fila={a.Fila} numero={MascararNumero(a.Numero)} linkedid={a.Linkedid}");
+
+                if (aguardando.Count == 0) { FecharPopupAguardando(); return; }
+
+                if (_popupAguardando == null)
+                {
+                    _popupAguardando = new ChamadasAguardandoPopup();
+                    _popupAguardando.PuxarSolicitado += async info => await PuxarPeloAvisoAsync(info);
+                    _popupAguardando.VerTudoSolicitado += () => BtnPuxarLigacao_Click(this, new RoutedEventArgs());
+                    _popupAguardando.Dispensado += canais =>
+                    {
+                        foreach (var c in canais) _avisoFila.DispensarCanal(c);
+                        if (_popupAguardando != null && _popupAguardando.Quantidade == 0) FecharPopupAguardando();
+                    };
+                    _popupAguardando.Closed += (_, _) => _popupAguardando = null;
+                    _popupAguardando.Show();
+                }
+                _popupAguardando.Atualizar(aguardando);
+            }
+            catch { }
+            finally { _lendoAvisoAguardando = false; }
+        }
+
+        // v2.5.0 — outro operador entrou na ligação deste ramal (Puxar ligação em conferência):
+        // aviso discreto no canto da tela, uma vez por operador, sem tirar o foco da chamada.
+        private readonly HashSet<string> _ramaisJaAvisadosNaConferencia = new(StringComparer.OrdinalIgnoreCase);
+
+        private void AvisarEntradaNaMinhaLigacao(IReadOnlyList<string> ramaisNaSala)
+        {
+            try
+            {
+                if (ramaisNaSala == null || ramaisNaSala.Count == 0) { _ramaisJaAvisadosNaConferencia.Clear(); return; }
+                // quem pediu para entrar não precisa ser avisado de que os outros estão lá
+                var fuiEuQuePuxei = DateTime.Now - _sipService.UltimoPedidoDeConferencia < TimeSpan.FromMinutes(3);
+                foreach (var r in ramaisNaSala)
+                {
+                    if (!_ramaisJaAvisadosNaConferencia.Add(r) || fuiEuQuePuxei) continue;
+                    string nome;
+                    try { nome = ContatoStorageService.ResolverNomePorNumero(r); } catch { nome = r; }
+                    var quem = string.Equals(nome, r, StringComparison.OrdinalIgnoreCase) ? $"Ramal {r}" : $"{nome} (ramal {r})";
+                    RegistrarUiDiagnostico($"CONF_AVISO_OPERADOR_ENTROU ramal={r}");
+                    MostrarAvisoDiscreto("Outro operador entrou na ligação", $"{quem} entrou na sua ligação em conferência. Todos continuam na chamada.");
+                }
+            }
+            catch { }
+        }
+
+        private void MostrarAvisoDiscreto(string titulo, string texto)
+        {
+            try
+            {
+                var painel = new StackPanel { Margin = new Thickness(16, 12, 16, 14) };
+                painel.Children.Add(new TextBlock { Text = titulo, FontSize = 14, FontWeight = FontWeights.Bold, Foreground = Brushes.White });
+                painel.Children.Add(new TextBlock { Text = texto, FontSize = 12.5, Foreground = new SolidColorBrush(Color.FromRgb(233, 213, 255)), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0) });
+                var borda = new Border
+                {
+                    CornerRadius = new CornerRadius(14), Margin = new Thickness(10), Child = painel,
+                    Background = new LinearGradientBrush(Color.FromRgb(124, 58, 237), Color.FromRgb(91, 33, 182), 45),
+                    Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 18, ShadowDepth = 3, Opacity = 0.25 }
+                };
+                var w = new Window
+                {
+                    Width = 360, SizeToContent = SizeToContent.Height, WindowStyle = WindowStyle.None, AllowsTransparency = true,
+                    Background = Brushes.Transparent, ShowInTaskbar = false, Topmost = true, ShowActivated = false, ResizeMode = ResizeMode.NoResize, Content = borda
+                };
+                w.Loaded += (_, _) => { var a = SystemParameters.WorkArea; w.Left = a.Right - w.ActualWidth - 8; w.Top = a.Top + 8; };
+                w.MouseLeftButtonDown += (_, _) => { try { w.Close(); } catch { } };
+                w.Show();
+                var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(9) };
+                t.Tick += (_, _) => { t.Stop(); try { w.Close(); } catch { } };
+                t.Start();
+            }
+            catch { }
+        }
+
+        private void FecharPopupAguardando()
+        {
+            try { var p = _popupAguardando; _popupAguardando = null; p?.Close(); } catch { }
+        }
+
+        private async System.Threading.Tasks.Task PuxarPeloAvisoAsync(Models.ChamadaAtivaInfo info)
+        {
+            try
+            {
+                _popupAguardando?.MostrarMensagem("Conferindo a ligação no PABX…");
+                var (ok, mensagem) = await _sipService.PuxarChamadaAsync(info);
+                RegistrarUiDiagnostico($"AVISO_AGUARDANDO_PUXAR ok={ok} status={info.Status} linkedid={info.Linkedid}");
+                _popupAguardando?.MostrarMensagem(mensagem);
+                if (ok) _avisoFila.Dispensar(info);   // já está vindo para este ramal
+            }
+            catch (Exception ex) { _popupAguardando?.MostrarMensagem("Não foi possível puxar: " + ex.Message); }
+        }
+
+        // v2.5.0 — abre a lista de ligações em andamento nos outros ramais (ver PuxarLigacaoWindow).
+        private PuxarLigacaoWindow? _puxarLigacaoWindow;
+        private void BtnPuxarLigacao_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var cfg = SipConfig.CarregarSalva();
+                if (cfg != null && !cfg.PuxarLigacaoHabilitado)
+                {
+                    MessageBox.Show(this, "Puxar ligação está desabilitado neste computador.", "Puxar ligação", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+                if (_puxarLigacaoWindow != null) { _puxarLigacaoWindow.Activate(); return; }
+                var ramal = string.IsNullOrWhiteSpace(cfg?.Ramal) ? cfg?.Login : cfg?.Ramal;
+                _puxarLigacaoWindow = new PuxarLigacaoWindow(_sipService, ramal ?? string.Empty) { Owner = this };
+                _puxarLigacaoWindow.Closed += (_, _) => _puxarLigacaoWindow = null;
+                _puxarLigacaoWindow.Show();
+                RegistrarUiDiagnostico("PUXAR_LIGACAO_JANELA_ABERTA");
+            }
+            catch (Exception ex) { RegistrarUiDiagnostico($"PUXAR_LIGACAO_JANELA_ERRO {ex.Message}"); }
         }
 
         private void BtnLimparNumero_Click(object sender, RoutedEventArgs e)
@@ -4079,9 +4800,8 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
 
         private void AbrirTelaWhatsApp(string numero, string tipoEvento)
         {
-            var numSem55 = PhoneNumberNormalizer.NormalizeForDial(numero ?? string.Empty);
-            var numLimpo = DialPlanService.RemoverPrefixoDeRota(numSem55);
-            if (!DialPlanService.IsTelefoneExternoValido(numLimpo))
+            var numLimpo = NaoAtendidasPolicy.NumeroParaWhatsApp(numero);
+            if (numLimpo == null)
             {
                 MessageBox.Show(
                     "Este registro não possui telefone externo válido para WhatsApp.\n\n" +
@@ -4130,8 +4850,20 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
         // Qualquer outro Tipo (CaixaPostal, NaoAtendidaNesseRamal) ou campo vazio/não reconhecido
         // (ex.: "Ramal interno", "Queue", "Saída não identificada") nunca abre este diálogo — regra
         // explícita: não inventar, não presumir, não usar o último canal — cai direto pro seletor.
-        private async Task<SaidaChamada?> ResolverSaidaHistoricoAsync(string numeroDigitado, HistoricoLigacaoItem? item)
+        private async Task<SaidaChamada?> ResolverSaidaHistoricoAsync(string numeroDigitado, HistoricoLigacaoItem? item, bool retornoAutomatico = false)
         {
+            // v2.5.0 — retorno do aviso de não atendida: mesmo canal da chamada original, sem diálogo
+            // (WhatsApp TIM → TIM, WhatsApp Vivo → Vivo, Operadora → Operadora, 0800 → Operadora).
+            if (retornoAutomatico && item != null)
+            {
+                var saidaAuto = NaoAtendidasPolicy.SaidaDeRetorno(item.CanalEntrada);
+                RegistrarUiDiagnostico(
+                    $"RETORNO_AUTOMATICO canalEntrada=\"{item.CanalEntrada}\" " +
+                    $"saida={(saidaAuto.HasValue ? saidaAuto.Value.ToString() : "desconhecido_abre_seletor")} numero={MascararNumero(numeroDigitado)}");
+                if (saidaAuto.HasValue) return saidaAuto;
+                return await AbrirSeletorSaidaAsync(numeroDigitado);
+            }
+
             // v2.3.6 — REGRA (investigação do botão Ligar sem resposta): qualquer falha inesperada
             // aqui dentro NUNCA pode resultar em "nada acontece" — cai para o seletor normal, com a
             // exceção completa (stack trace) registrada. Cada estágio pedido na investigação tem
@@ -4494,17 +5226,15 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
                 if (txtDndStatusLabel != null)
                 {
                     txtDndStatusLabel.Text = _dndAtivo ? "Offline" : "Online";
+                    // v2.5.0: botão do usuário é um cartão branco — a situação fica na cor do texto e do ponto
                     txtDndStatusLabel.Foreground = new SolidColorBrush(_dndAtivo
-                        ? Color.FromRgb(254, 202, 202)
-                        : Color.FromRgb(187, 247, 208));
+                        ? Color.FromRgb(220, 38, 38)
+                        : Color.FromRgb(22, 163, 74));
                 }
                 if (dotStatusBtn != null)
                     dotStatusBtn.Background = new SolidColorBrush(_dndAtivo
-                        ? Color.FromRgb(254, 202, 202)
-                        : Color.FromRgb(255, 255, 255));
-                btnDndToggle.Background = new SolidColorBrush(_dndAtivo
-                    ? Color.FromRgb(239, 68, 68)
-                    : Color.FromRgb(34, 197, 94));
+                        ? Color.FromRgb(239, 68, 68)
+                        : Color.FromRgb(34, 197, 94));
             }
             catch { }
         }

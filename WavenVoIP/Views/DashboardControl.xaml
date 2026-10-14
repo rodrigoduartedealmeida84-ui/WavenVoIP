@@ -196,10 +196,10 @@
                 <TextBlock x:Name="txtPeriodo" Text="" Foreground="#64748B" FontSize="12"
                            VerticalAlignment="Center" Margin="0,0,16,0"/>
                 <Button x:Name="btnAtualizar"
-                        Content="↻  Atualizar"
-                        Background="#16A34A" Foreground="White" BorderBrush="#16A34A"
                         Style="{StaticResource FilterBtn}"
-                        Click="BtnAtualizar_Click"/>
+                        Click="BtnAtualizar_Click">
+<StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72C;" FontFamily="Segoe MDL2 Assets" FontSize="12" VerticalAlignment="Center" Margin="0,0,7,0"/><TextBlock Text="Atualizar" VerticalAlignment="Center"/></StackPanel>
+</Button>
             </StackPanel>
         </DockPanel>
 
@@ -285,7 +285,8 @@
                         <Border Style="{StaticResource MetricCard}" Margin="0,0,10,0">
                             <StackPanel>
                                 <TextBlock Text="Perdidas" FontSize="11" Foreground="#64748B" FontWeight="SemiBold"/>
-                                <TextBlock x:Name="txtPerdidas" Text="—" FontSize="28" FontWeight="Bold" Foreground="#DC2626" Margin="0,4,0,0"/>
+                                <TextBlock x:Name="txtPerdidas" Text="—" FontSize="28" FontWeight="Bold" Foreground="#DC2626" Margin="0,4,0,0"
+                                           ToolTip="Tocou até o fim e ninguém atendeu"/>
                                 <TextBlock Text="chamadas" FontSize="10" Foreground="#CBD5E1" Margin="0,2,0,0"/>
                             </StackPanel>
                         </Border>

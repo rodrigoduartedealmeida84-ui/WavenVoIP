@@ -102,6 +102,8 @@ namespace WavenVoIP.Views
                 txtRecebidas.Text  = metricas.Recebidas.ToString();
                 txtRealizadas.Text = metricas.Realizadas.ToString();
                 txtPerdidas.Text   = metricas.Perdidas.ToString();
+                // v2.5.0 — sem contador de "Cliente desistiu"/"Abandono na fila" no Dashboard:
+                // as não atendidas ficam todas na tela Histórico (filtro "Não atendidas").
                 txtTotal.Text      = metricas.TotalAtendimentos.ToString();
                 txtTempoMedio.Text = metricas.TempoMedio;
                 txtGravacoes.Text  = metricas.Gravacoes.ToString();

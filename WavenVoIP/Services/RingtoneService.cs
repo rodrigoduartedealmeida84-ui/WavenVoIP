@@ -14,6 +14,8 @@ namespace WavenVoIP.Services
         private MMDeviceEnumerator? _enumerator;
         private bool _disposed;
         private bool _looping = true;
+        // Tocar/Parar podem vir de threads diferentes (toque inicia em segundo plano)
+        private readonly object _gate = new();
 
         // Dispositivos que NUNCA devem tocar o ringtone — headsets, USB audio, Intelbras
         private static readonly string[] _headsetKeywords =
@@ -46,6 +48,11 @@ namespace WavenVoIP.Services
         }
 
         public void Tocar(string arquivoToque, string dispositivoId, string dispositivoNome, string fonte, bool loop = true, float volume = 1.0f)
+        {
+            lock (_gate) TocarImpl(arquivoToque, dispositivoId, dispositivoNome, fonte, loop, volume);
+        }
+
+        private void TocarImpl(string arquivoToque, string dispositivoId, string dispositivoNome, string fonte, bool loop, float volume)
         {
             Parar();
             if (_disposed) return;
@@ -144,11 +151,14 @@ namespace WavenVoIP.Services
         public void Parar()
         {
             _looping = false;
-            try { _player?.Stop(); } catch { }
-            try { _player?.Dispose(); _player = null; } catch { }
-            try { _reader?.Dispose(); _reader = null; } catch { }
-            // dispose enumerator AFTER player and reader
-            try { _enumerator?.Dispose(); _enumerator = null; } catch { }
+            lock (_gate)
+            {
+                try { _player?.Stop(); } catch { }
+                try { _player?.Dispose(); _player = null; } catch { }
+                try { _reader?.Dispose(); _reader = null; } catch { }
+                // dispose enumerator AFTER player and reader
+                try { _enumerator?.Dispose(); _enumerator = null; } catch { }
+            }
         }
 
         public void Dispose()

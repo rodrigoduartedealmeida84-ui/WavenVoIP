@@ -704,6 +704,12 @@ namespace WavenVoIP
             LogHelper.Sip($"SIP_REGISTER_START | ramal={_config.Login} servidor={registrarHost}");
             RegistrarSinalSip($"SIP_REGISTER_START | ramal={_config.Login} servidor={registrarHost}");
 
+            // v2.5.0 — cada chamada criava um agente de registro novo sem parar o anterior (o
+            // temporizador de reconexão chama a cada 30 s enquanto não registra): ficavam vários
+            // agentes renovando o mesmo ramal em paralelo. Para o anterior SEM enviar o
+            // cancelamento do registro (ele poderia chegar depois do registro novo).
+            try { _registerUserAgent?.Stop(false); } catch { }
+
             _registerUserAgent = new SIPRegistrationUserAgent(
                 _sipTransport,
                 _config.Login,
@@ -737,6 +743,16 @@ namespace WavenVoIP
             };
 
             _registerUserAgent.Start();
+        }
+
+        // v2.5.0 — registra de novo agora, sem esperar o temporizador do registro (volta da
+        // suspensão do Windows, troca de rede). Não mexe em chamada em andamento.
+        public void RenovarRegistroAgora(string motivo)
+        {
+            if (_config == null || _sipTransport == null) return;
+            LogHelper.Info($"SIP_REGISTRO_RENOVAR_AGORA | motivo={motivo} em_chamada={IsInCall}");
+            IsRegistered = false;
+            Registrar();
         }
 
         // v2.1.1 — controle local de Offline (substitui dependência de *78/*79 no Issabel)
@@ -1852,6 +1868,11 @@ namespace WavenVoIP
             public string ConnectedLineNum { get; set; } = string.Empty;
             public string Exten { get; set; } = string.Empty;
             public string Context { get; set; } = string.Empty;
+            public string BridgeId { get; set; } = string.Empty;
+            public string CallerIDName { get; set; } = string.Empty;
+            public string Application { get; set; } = string.Empty;
+            public string ApplicationData { get; set; } = string.Empty;
+            public int DuracaoSeg { get; set; }
         }
 
         public async Task<bool> MoverChamadaAtualParaConferenciaIssabelAsync(string salaConferencia)
@@ -2076,6 +2097,17 @@ namespace WavenVoIP
                 var ramal = string.IsNullOrWhiteSpace(_config.Ramal) ? _config.Login : _config.Ramal;
                 var canalOriginate = $"Local/{participante}@from-internal/n";
 
+                var canaisAgora = (await ObterCanaisAmiAsync(ami.Session)).Select(ParaCanalAtivo).ToList();
+                var ocupada = JaChameiParticipanteNestaLigacao(canaisAgora, ramal ?? string.Empty)
+                    ? null : MotivoSalaOcupadaPorOutraLigacao(canaisAgora, salaConferencia, ramal ?? string.Empty);
+                if (ocupada != null)
+                {
+                    LastConferenceError = ocupada;
+                    RegistrarSinalSip($"CONF AMI SALA_OCUPADA | etapa=originate | sala={salaConferencia} | ramal={ramal} | chamada_preservada=true");
+                    await ami.Session.SendAsync("Logoff", new Dictionary<string, string>());
+                    return false;
+                }
+
                 RegistrarSinalSip($"CONF AMI ORIGINATE | participante={participante} | numSemPrefixo={numSemPrefixo} | prefixo={prefixo} | tronco={troncoNome} | canal={canalOriginate} | sala={salaConferencia}");
 
                 await ami.Session.SendAsync("Originate", new Dictionary<string, string>
@@ -2096,6 +2128,8 @@ namespace WavenVoIP
 
                 if (okOrigem)
                 {
+                    _confLinkedidComParticipante = canaisAgora.FirstOrDefault(c => EhCanalDeRamal(c.Channel) &&
+                        string.Equals(RamalDoCanal(c.Channel), ramal, StringComparison.OrdinalIgnoreCase))?.Linkedid ?? string.Empty;
                     RegistrarSinalSip($"CONF AMI ORIGINATE_OK | participante={participante} | sala={salaConferencia} | aguardando_atendimento=true | audio_controlado_pelo_Asterisk_ConfBridge");
                 }
                 else
@@ -2126,31 +2160,38 @@ namespace WavenVoIP
 
             RegistrarSinalSip($"CONF AMI JOIN_INIT | sala={salaConferencia} | ramal={ramal} | login={loginRamal} | canais_totais={canais.Count} | momento={DateTime.Now:HH:mm:ss.fff}");
             foreach (var c in canais)
-                RegistrarSinalSip($"CONF AMI JOIN_CANAL | channel={c.Channel} | callerIdNum={c.CallerIDNum} | connectedLine={c.ConnectedLineNum} | linkedid={c.Linkedid} | exten={c.Exten}");
+                RegistrarSinalSip($"CONF AMI JOIN_CANAL | channel={c.Channel} | callerIdNum={c.CallerIDNum} | connectedLine={c.ConnectedLineNum} | linkedid={c.Linkedid} | exten={c.Exten} | bridge={c.BridgeId}");
 
-            // Prefer SIP/PJSIP channels over Local/* — Originate sets CallerID to the ramal, so
-            // Local channels can falsely match CanalPertenceAoRamal before the real SIP channel.
-            var canalBase = canais.FirstOrDefault(c => CanalPertenceAoRamal(c, ramal, loginRamal) &&
-                                                        !c.Channel.StartsWith("Local/", StringComparison.OrdinalIgnoreCase))
-                            ?? canais.FirstOrDefault(c => CanalPertenceAoRamal(c, ramal, loginRamal));
-            if (canalBase == null)
+            var canaisSala = canais.Select(ParaCanalAtivo).ToList();
+            var salaOcupada = JaChameiParticipanteNestaLigacao(canaisSala, ramal ?? string.Empty)
+                ? null : MotivoSalaOcupadaPorOutraLigacao(canaisSala, salaConferencia, ramal ?? string.Empty);
+            if (salaOcupada != null)
             {
-                LastConferenceError = $"AMI não encontrou o canal ativo do ramal {ramal}. Canais lidos: {canais.Count}. Verifique se o ramal no SipConfig corresponde ao CallerIDNum/ConnectedLineNum/Exten/Channel dos canais acima.";
-                RegistrarSinalSip($"CONF AMI JOIN_SEM_CANAL | ramal={ramal} | login={loginRamal} | canais={canais.Count} | ERRO={LastConferenceError}");
+                LastConferenceError = salaOcupada;
+                RegistrarSinalSip($"CONF AMI SALA_OCUPADA | etapa=join | sala={salaConferencia} | ramal={ramal} | chamada_preservada=true");
                 return false;
             }
 
-            RegistrarSinalSip($"CONF AMI JOIN_CANAL_BASE | channel={canalBase.Channel} | callerIdNum={canalBase.CallerIDNum} | linkedid={canalBase.Linkedid}");
+            // v2.5.0 — escolha determinística: o canal do PRÓPRIO ramal + a ponta real com quem
+            // ele está falando (ver SelecionarCanaisParaSala). Não existe mais plano B: a
+            // heurística antiga ("os 2 primeiros canais do linkedid") podia levar para a sala as
+            // duas metades de um mesmo canal Local (laço de áudio = eco para todos) ou a perna
+            // errada. Quando a escolha exata não é possível, a união é recusada e a chamada do
+            // operador continua exatamente como estava.
+            var selecionados = SelecionarCanaisParaSala(
+                canais.Select(c => (c.Channel, c.Linkedid, c.Uniqueid, c.BridgeId)).ToList(), ramal, loginRamal);
+            if (selecionados == null)
+            {
+                LastConferenceError = $"Não foi possível identificar com segurança os canais da chamada do ramal {ramal} para unir à sala. A chamada atual não foi alterada.";
+                RegistrarSinalSip($"CONF AMI JOIN_SELECAO_IMPOSSIVEL | ramal={ramal} | login={loginRamal} | canais={canais.Count} | chamada_preservada=true");
+                return false;
+            }
 
-            var linkedid = string.IsNullOrWhiteSpace(canalBase.Linkedid) ? canalBase.Uniqueid : canalBase.Linkedid;
-            var canaisDaChamada = canais
-                .Where(c => string.Equals(c.Linkedid, linkedid, StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(c.Uniqueid, linkedid, StringComparison.OrdinalIgnoreCase))
-                .Where(c => !string.IsNullOrWhiteSpace(c.Channel))
-                .GroupBy(c => c.Channel)
-                .Select(g => g.First())
-                .Take(2)
+            var canaisDaChamada = selecionados
+                .Select(nome => canais.First(c => string.Equals(c.Channel, nome, StringComparison.OrdinalIgnoreCase)))
                 .ToList();
+            var linkedid = string.IsNullOrWhiteSpace(canaisDaChamada[0].Linkedid) ? canaisDaChamada[0].Uniqueid : canaisDaChamada[0].Linkedid;
+            RegistrarSinalSip($"CONF AMI JOIN_SELECAO_EXATA | canais={string.Join("|", selecionados)}");
 
             RegistrarSinalSip($"CONF AMI JOIN_CANAIS_CHAMADA | linkedid={linkedid} | qtd={canaisDaChamada.Count} | canais={string.Join("|", canaisDaChamada.Select(c => c.Channel))}");
 
@@ -2211,6 +2252,616 @@ namespace WavenVoIP
 
             await ami.Session.SendAsync("Logoff", new Dictionary<string, string>());
             return true;
+        }
+
+        // v2.5.0 — quais canais levar para a sala quando o operador une a chamada atual à
+        // conferência: o canal do próprio ramal e a ponta REAL com quem ele está falando.
+        //
+        // A heurística anterior pegava "os 2 primeiros canais com o mesmo linkedid" e achava o
+        // canal do ramal por CallerID/ConnectedLine. Dois defeitos:
+        //  1) Chamada entregue por fila tem 4 canais no mesmo linkedid (tronco, Local/R@from-queue;1,
+        //     Local/R@from-queue;2 e SIP/R) e a ordem do CoreShowChannels não é garantida. Se os 2
+        //     escolhidos fossem as duas metades do MESMO canal Local, as duas pontas de um mesmo
+        //     "fio" entravam na sala: tudo que a sala manda para uma metade volta pela outra —
+        //     laço de áudio (eco para todos) — e o ramal do operador ficava de fora.
+        //  2) O participante é originado com CallerID = ramal do operador; o canal de um
+        //     participante interno (SIP/101-…) fica com ConnectedLine = ramal do operador e podia
+        //     ser tomado como "canal do operador", redirecionando a perna errada.
+        // (Em 15 e 16/05/2026 o log registrou REDIRECT de "SIP/Wavoip-…|Local/…;2", a perna do
+        // participante em vez da chamada do operador.)
+        //
+        // Devolve [canal do ramal] ou [canal do ramal, ponta real]; null quando não dá para
+        // decidir com segurança (quem chama então recusa a união, sem tocar na chamada).
+        internal static List<string>? SelecionarCanaisParaSala(
+            IReadOnlyList<(string Channel, string Linkedid, string Uniqueid, string BridgeId)> canais,
+            string ramal, string login)
+        {
+            static bool EhLocal(string ch) => ch.StartsWith("Local/", StringComparison.OrdinalIgnoreCase);
+
+            bool EhDoRamal(string ch)
+            {
+                foreach (var id in new[] { ramal, login })
+                {
+                    if (string.IsNullOrWhiteSpace(id)) continue;
+                    if (ch.StartsWith("SIP/" + id + "-", StringComparison.OrdinalIgnoreCase) ||
+                        ch.StartsWith("PJSIP/" + id + "-", StringComparison.OrdinalIgnoreCase))
+                        return true;
+                }
+                return false;
+            }
+
+            var validos = canais.Where(c => !string.IsNullOrWhiteSpace(c.Channel)).ToList();
+            var proprios = validos.Where(c => EhDoRamal(c.Channel)).ToList();
+            if (proprios.Count == 0) return null;
+            if (proprios.Count > 1)
+            {
+                // Mais de um canal do ramal: só serve o que está em ponte (em conversa).
+                proprios = proprios.Where(c => !string.IsNullOrWhiteSpace(c.BridgeId)).ToList();
+                if (proprios.Count != 1) return null;
+            }
+            var proprio = proprios[0];
+
+            List<(string Channel, string Linkedid, string Uniqueid, string BridgeId)> ParesDePonte(
+                (string Channel, string Linkedid, string Uniqueid, string BridgeId) c) =>
+                string.IsNullOrWhiteSpace(c.BridgeId)
+                    ? new()
+                    : validos.Where(o => o.Channel != c.Channel &&
+                                         string.Equals(o.BridgeId, c.BridgeId, StringComparison.OrdinalIgnoreCase)).ToList();
+
+            // Segue a ponte do ramal; se do outro lado houver um canal Local, atravessa para a
+            // outra metade dele (;1 <-> ;2) e continua, até chegar num canal real.
+            var atual = proprio;
+            for (var salto = 0; salto < 4; salto++)
+            {
+                var pares = ParesDePonte(atual);
+                if (pares.Count != 1) break;
+                var par = pares[0];
+                if (!EhLocal(par.Channel))
+                    return new List<string> { proprio.Channel, par.Channel };
+
+                var sufixo = par.Channel.EndsWith(";1", StringComparison.Ordinal) ? ";2"
+                           : par.Channel.EndsWith(";2", StringComparison.Ordinal) ? ";1" : null;
+                if (sufixo == null) break;
+                var outraMetade = par.Channel.Substring(0, par.Channel.Length - 2) + sufixo;
+                var idx = validos.FindIndex(o => string.Equals(o.Channel, outraMetade, StringComparison.OrdinalIgnoreCase));
+                if (idx < 0) break;
+                atual = validos[idx];
+            }
+
+            // Sem informação de ponte: vale o linkedid, desde que não haja ambiguidade.
+            var linkedid = string.IsNullOrWhiteSpace(proprio.Linkedid) ? proprio.Uniqueid : proprio.Linkedid;
+            var mesmaChamada = validos
+                .Where(c => c.Channel != proprio.Channel &&
+                            (string.Equals(c.Linkedid, linkedid, StringComparison.OrdinalIgnoreCase) ||
+                             string.Equals(c.Uniqueid, linkedid, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+            var reais = mesmaChamada.Where(c => !EhLocal(c.Channel)).Select(c => c.Channel).Distinct().ToList();
+            if (reais.Count == 1) return new List<string> { proprio.Channel, reais[0] };
+            if (reais.Count == 0 && mesmaChamada.Count == 0) return new List<string> { proprio.Channel };
+            return null;
+        }
+
+        // ── Puxar ligação (v2.5.0) ─────────────────────────────────────────────────
+        //
+        // Assume uma ligação que já está em conversa com OUTRO ramal, sem risco de derrubá-la:
+        //   1. lê os canais ativos no AMI e acha, pela ponte, o canal do ramal alvo e a ponta
+        //      real do cliente (mesma lógica segura da conferência — nunca um canal Local/);
+        //   2. manda o PABX ligar para o ramal de quem está puxando (Originate) com a aplicação
+        //      Bridge apontando para o canal do cliente;
+        //   3. SÓ quando esse ramal atende, o Asterisk tira o cliente da conversa antiga e o
+        //      liga a ele; o outro operador é desconectado nesse momento.
+        // Se quem puxa não atender (ou o Originate falhar), a ligação original segue intacta —
+        // em nenhum momento o cliente fica "no ar" esperando alguém.
+        // A gravação presa ao canal do cliente (chamadas recebidas) continua no mesmo arquivo.
+        internal static (string CanalOperador, string CanalCliente)? SelecionarCanaisParaPuxar(
+            IReadOnlyList<(string Channel, string Linkedid, string Uniqueid, string BridgeId)> canais, string ramalAlvo)
+        {
+            var sel = SelecionarCanaisParaSala(canais, ramalAlvo, ramalAlvo);
+            if (sel == null || sel.Count != 2) return null;                     // sem ponta do cliente identificada
+            var operador = canais.FirstOrDefault(c => string.Equals(c.Channel, sel[0], StringComparison.OrdinalIgnoreCase));
+            if (string.IsNullOrWhiteSpace(operador.BridgeId)) return null;      // ainda não está em conversa
+            if (sel[1].StartsWith("Local/", StringComparison.OrdinalIgnoreCase)) return null;
+            return (sel[0], sel[1]);
+        }
+
+        // ── Puxar ligação: todas as chamadas de cliente vivas no PABX ──────────────
+        //
+        // Monta, a partir do CoreShowChannels, uma linha por chamada de cliente: em atendimento
+        // por um ramal, tocando, na fila, na URA, ouvindo o anúncio de fora do horário ou na
+        // caixa postal. O "canal do cliente" é sempre o canal real do tronco (nunca Local/ nem
+        // o canal de um ramal), que é o que a aplicação Bridge precisa para assumir a chamada.
+        private static readonly System.Text.RegularExpressions.Regex _reCanalRamal =
+            new(@"^(SIP|PJSIP|IAX2)/\d{2,5}-", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
+
+        private static bool EhCanalDeRamal(string canal) => _reCanalRamal.IsMatch(canal ?? string.Empty);
+        private static bool EhCanalLocal(string canal) => (canal ?? string.Empty).StartsWith("Local/", StringComparison.OrdinalIgnoreCase);
+
+        private static string RamalDoCanal(string canal)
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(canal ?? string.Empty, @"^[A-Za-z0-9]+/(\d{2,5})-");
+            return m.Success ? m.Groups[1].Value : string.Empty;
+        }
+
+        internal static string RotuloDoTronco(string canal)
+        {
+            var c = (canal ?? string.Empty);
+            var barra = c.IndexOf('/'); if (barra >= 0) c = c.Substring(barra + 1);
+            c = System.Text.RegularExpressions.Regex.Replace(c, "-[0-9a-fA-F]{8}$", string.Empty);
+            var l = c.ToLowerInvariant();
+            if (l.Contains("vivo")) return "WhatsApp Vivo";
+            if (l.Contains("wavoip")) return "WhatsApp TIM";
+            if (l.Contains("0800")) return "0800";
+            if (l.StartsWith("brdid")) return "Operadora";
+            return c;
+        }
+
+        // Segue a ponte a partir de um canal, atravessando metades de canais Local (;1 <-> ;2),
+        // até achar o canal de um ramal. Vazio = ninguém em conversa com esse canal.
+        private static string RamalEmConversaCom(CanalAtivo origem, IReadOnlyList<CanalAtivo> canais)
+        {
+            var atual = origem;
+            for (var salto = 0; salto < 4; salto++)
+            {
+                if (string.IsNullOrWhiteSpace(atual.BridgeId)) return string.Empty;
+                var pares = canais.Where(o => o.Channel != atual.Channel &&
+                                              string.Equals(o.BridgeId, atual.BridgeId, StringComparison.OrdinalIgnoreCase)).ToList();
+                if (pares.Count != 1) return string.Empty;              // conferência ou ponte incompleta
+                var par = pares[0];
+                if (EhCanalDeRamal(par.Channel)) return RamalDoCanal(par.Channel);
+                if (!EhCanalLocal(par.Channel)) return string.Empty;    // tronco ↔ tronco: não é atendimento de ramal
+                var sufixo = par.Channel.EndsWith(";1", StringComparison.Ordinal) ? ";2"
+                           : par.Channel.EndsWith(";2", StringComparison.Ordinal) ? ";1" : null;
+                if (sufixo == null) return string.Empty;
+                var outra = par.Channel.Substring(0, par.Channel.Length - 2) + sufixo;
+                var prox = canais.FirstOrDefault(o => string.Equals(o.Channel, outra, StringComparison.OrdinalIgnoreCase));
+                if (prox == null) return string.Empty;
+                // a outra metade pode estar discando/tocando o ramal sem ponte ainda
+                atual = prox;
+            }
+            return string.Empty;
+        }
+
+        private static readonly HashSet<string> _anunciosForaHorario =
+            new(StringComparer.OrdinalIgnoreCase) { "app-announcement-1", "app-announcement-3", "app-announcement-4" };
+
+        internal static List<ChamadaAtivaInfo> MontarChamadasAtivas(IReadOnlyList<CanalAtivo> canais, string meuRamal)
+        {
+            var resultado = new List<ChamadaAtivaInfo>();
+            foreach (var c in canais)
+            {
+                if (string.IsNullOrWhiteSpace(c.Channel) || EhCanalLocal(c.Channel) || EhCanalDeRamal(c.Channel)) continue;
+                var tec = c.Channel.Split('/')[0];
+                if (!tec.Equals("SIP", StringComparison.OrdinalIgnoreCase) && !tec.Equals("PJSIP", StringComparison.OrdinalIgnoreCase) &&
+                    !tec.Equals("IAX2", StringComparison.OrdinalIgnoreCase) && !tec.Equals("DAHDI", StringComparison.OrdinalIgnoreCase)) continue;
+
+                var app = (c.Application ?? string.Empty).ToLowerInvariant();
+                var ctx = (c.Context ?? string.Empty).ToLowerInvariant();
+                var dados = (c.ApplicationData ?? string.Empty);
+                if (app is "confbridge" or "meetme" or "bridge") continue;                // sala de conferência / já sendo puxada
+
+                var atendente = RamalEmConversaCom(c, canais);
+                StatusChamadaAtiva status; var fila = string.Empty;
+
+                if (!string.IsNullOrEmpty(atendente))
+                    status = StatusChamadaAtiva.EmAtendimento;
+                else if (app is "appdial" or "appqueue")
+                    continue;                                                             // saída ainda chamando: não há cliente na linha
+                else if (app == "queue")
+                { status = StatusChamadaAtiva.NaFila; fila = dados.Split(',')[0].Trim(); }
+                else if (app.Contains("voicemail") || ctx.Contains("macro-vm") || (c.Exten ?? string.Empty).StartsWith("vm", StringComparison.OrdinalIgnoreCase))
+                    status = StatusChamadaAtiva.CaixaPostal;
+                else if (ctx.StartsWith("app-announcement"))
+                    status = _anunciosForaHorario.Contains(ctx) ? StatusChamadaAtiva.ForaDoHorario : StatusChamadaAtiva.Mensagem;
+                else if (ctx.StartsWith("ivr-") || app is "background" or "waitexten" or "read")
+                    status = StatusChamadaAtiva.NaUra;
+                else if (app == "dial")
+                    status = StatusChamadaAtiva.TocandoRamais;
+                else
+                    continue;                                                             // estado transitório/desconhecido: não lista
+
+                if (!string.IsNullOrEmpty(meuRamal) && string.Equals(atendente, meuRamal, StringComparison.OrdinalIgnoreCase)) continue;
+
+                var numero = new string((c.CallerIDNum ?? string.Empty).Where(char.IsDigit).ToArray());
+                if (numero.Length < 8) numero = new string((c.ConnectedLineNum ?? string.Empty).Where(char.IsDigit).ToArray());
+                if (numero.Length < 8) continue;                                          // sem número de cliente identificável
+
+                resultado.Add(new ChamadaAtivaInfo
+                {
+                    CanalCliente = c.Channel, Linkedid = c.Linkedid, Uniqueid = c.Uniqueid,
+                    Numero = numero, Nome = (c.CallerIDName ?? string.Empty).Trim(),
+                    Tronco = RotuloDoTronco(c.Channel), Status = status, RamalAtendente = atendente,
+                    Fila = fila, DuracaoSeg = c.DuracaoSeg
+                });
+            }
+            return resultado
+                .GroupBy(r => r.CanalCliente, StringComparer.OrdinalIgnoreCase).Select(g => g.First())
+                .OrderByDescending(r => r.DuracaoSeg).ToList();
+        }
+
+        // A chamada ainda existe, é a mesma (linkedid) e ninguém a está puxando agora?
+        internal static string? MotivoParaNaoPuxar(IReadOnlyList<CanalAtivo> canais, string canalCliente, string linkedid, string meuRamal)
+        {
+            var alvo = canais.FirstOrDefault(c => string.Equals(c.Channel, canalCliente, StringComparison.OrdinalIgnoreCase));
+            if (alvo == null) return "Essa ligação já foi encerrada.";
+            if (!string.IsNullOrWhiteSpace(linkedid) && !string.Equals(alvo.Linkedid, linkedid, StringComparison.OrdinalIgnoreCase))
+                return "Essa ligação já foi encerrada (o canal agora pertence a outra chamada).";
+            if (EhCanalLocal(alvo.Channel) || EhCanalDeRamal(alvo.Channel)) return "Canal inválido para puxar.";
+            if (string.Equals(RamalEmConversaCom(alvo, canais), meuRamal, StringComparison.OrdinalIgnoreCase))
+                return "Essa ligação já está no seu ramal.";
+            var puxando = canais.FirstOrDefault(c =>
+                string.Equals(c.Application, "Bridge", StringComparison.OrdinalIgnoreCase) &&
+                (c.ApplicationData ?? string.Empty).Split(',')[0].Trim().Equals(canalCliente, StringComparison.OrdinalIgnoreCase));
+            if (puxando != null) return $"Outro operador (ramal {RamalDoCanal(puxando.Channel)}) já está puxando essa ligação.";
+            // Pedido de puxar já enviado e o ramal de quem puxa ainda está tocando (antes de atender
+            // o canal ainda não executa Bridge): o ramal aparece tocando com o cliente como origem.
+            return null;
+        }
+
+        private static CanalAtivo ParaCanalAtivo(AmiChannelInfo c) => new(
+            c.Channel, c.Linkedid, c.Uniqueid, c.BridgeId, c.CallerIDNum, c.CallerIDName, c.ConnectedLineNum,
+            c.Context, c.Exten, c.Application, c.ApplicationData, c.DuracaoSeg);
+
+        // Conexão AMI mantida enquanto a janela "Puxar ligação" está aberta (uma leitura a cada
+        // 2 s não justifica abrir sessão/login a cada vez).
+        private AmiConnection? _amiPuxar;
+        private readonly System.Threading.SemaphoreSlim _amiPuxarGate = new(1, 1);
+        private readonly HashSet<string> _puxadasEmAndamento = new(StringComparer.OrdinalIgnoreCase);
+
+        // Fonte dos canais: 1) Waven API (/api/ami/calls) — funciona de qualquer rede; 2) AMI
+        // direto — só de dentro dos IPs liberados no PABX. A porta do AMI não abre para fora,
+        // então sem a API atualizada um posto fora do escritório não enxerga as chamadas.
+        // v2.5.0 — ramais que estão na mesma sala de conferência que este ramal agora (vazio fora
+        // de conferência). Usado para avisar o atendente quando outro operador entra na ligação.
+        public IReadOnlyList<string> RamaisNaMinhaConferencia { get; private set; } = Array.Empty<string>();
+        // Quando ESTE ramal pediu para entrar na ligação de outro (ele não precisa do aviso).
+        public DateTime UltimoPedidoDeConferencia { get; private set; } = DateTime.MinValue;
+
+        // Quem está na sala de conferência agora: ramais (pelo canal) e números chamados
+        // (canal Local/<numero>@...). Alimenta o estado dos participantes na tela de Conferência.
+        public IReadOnlyList<string> ParticipantesNaSala { get; private set; } = Array.Empty<string>();
+
+        internal static List<string> ParticipantesDaSala(IReadOnlyList<CanalAtivo> canais, string sala)
+        {
+            var ids = new List<string>();
+            foreach (var c in canais)
+            {
+                if (!string.Equals(c.Application, "ConfBridge", StringComparison.OrdinalIgnoreCase)) continue;
+                if ((c.ApplicationData ?? string.Empty).Split(',')[0].Trim() != sala) continue;
+                if (EhCanalDeRamal(c.Channel)) { var r = RamalDoCanal(c.Channel); if (r.Length > 0) ids.Add(r); continue; }
+                var m = System.Text.RegularExpressions.Regex.Match(c.Channel ?? string.Empty, @"^Local/(\d+)@", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                if (m.Success) ids.Add(m.Groups[1].Value);
+                else if (!string.IsNullOrWhiteSpace(c.CallerIDNum)) ids.Add(c.CallerIDNum);
+            }
+            return ids.Distinct().ToList();
+        }
+
+        // v2.5.0 — "Participantes da ligação": todos os canais na mesma ponte de conferência do
+        // canal deste ramal (cliente, outros atendentes, convidados). Vazio fora de conferência.
+        public IReadOnlyList<ParticipanteLigacao> ParticipantesDaMinhaLigacao { get; private set; } = Array.Empty<ParticipanteLigacao>();
+        // Na última leitura dos canais do PABX: este ramal está numa sala de conferência? Tem algum canal ativo?
+        public bool EmConferenciaAgora { get; private set; }
+        public bool? MeuRamalTemCanalNoPabx { get; private set; }
+
+        internal static bool EstaEmConferencia(IReadOnlyList<CanalAtivo> canais, string meuRamal) =>
+            canais.Any(c => EhCanalDeRamal(c.Channel) && string.Equals(RamalDoCanal(c.Channel), meuRamal, StringComparison.OrdinalIgnoreCase) &&
+                            string.Equals(c.Application, "ConfBridge", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(c.BridgeId));
+
+        internal static List<ParticipanteLigacao> ParticipantesDaLigacaoDe(IReadOnlyList<CanalAtivo> canais, string meuRamal)
+        {
+            var lista = new List<ParticipanteLigacao>();
+            var meu = canais.FirstOrDefault(c => string.Equals(RamalDoCanal(c.Channel), meuRamal, StringComparison.OrdinalIgnoreCase) &&
+                                                 EhCanalDeRamal(c.Channel) &&
+                                                 string.Equals(c.Application, "ConfBridge", StringComparison.OrdinalIgnoreCase) &&
+                                                 !string.IsNullOrWhiteSpace(c.BridgeId));
+            if (meu == null) return lista;
+            foreach (var c in canais.Where(c => c.Channel != meu.Channel && string.Equals(c.BridgeId, meu.BridgeId, StringComparison.OrdinalIgnoreCase)))
+            {
+                // canais de serviço da própria sala (anúncios/gravação) não são participantes
+                if (c.Channel.StartsWith("CBAnn/", StringComparison.OrdinalIgnoreCase) || c.Channel.StartsWith("CBRec/", StringComparison.OrdinalIgnoreCase)) continue;
+                if (EhCanalDeRamal(c.Channel))
+                {
+                    var r = RamalDoCanal(c.Channel);
+                    if (r.Length > 0 && r != meuRamal) lista.Add(new ParticipanteLigacao("atendente", r, c.CallerIDName ?? string.Empty, c.Channel));
+                }
+                else if (c.Channel.StartsWith("Local/", StringComparison.OrdinalIgnoreCase))
+                {
+                    var m = System.Text.RegularExpressions.Regex.Match(c.Channel, @"^Local/(\d+)@", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                    lista.Add(new ParticipanteLigacao("convidado", m.Success ? m.Groups[1].Value : c.CallerIDNum ?? string.Empty, string.Empty, c.Channel));
+                }
+                else lista.Add(new ParticipanteLigacao("cliente", c.CallerIDNum ?? string.Empty, c.CallerIDName ?? string.Empty, c.Channel));
+            }
+            return lista.OrderBy(p => p.Tipo == "cliente" ? 0 : p.Tipo == "atendente" ? 1 : 2).ThenBy(p => p.Identificador).ToList();
+        }
+
+        internal static List<string> RamaisNaConferenciaDe(IReadOnlyList<CanalAtivo> canais, string meuRamal)
+        {
+            var meu = canais.FirstOrDefault(c => string.Equals(RamalDoCanal(c.Channel), meuRamal, StringComparison.OrdinalIgnoreCase) &&
+                                                 EhCanalDeRamal(c.Channel) &&
+                                                 string.Equals(c.Application, "ConfBridge", StringComparison.OrdinalIgnoreCase) &&
+                                                 !string.IsNullOrWhiteSpace(c.BridgeId));
+            if (meu == null) return new List<string>();
+            return canais.Where(c => c.Channel != meu.Channel && string.Equals(c.BridgeId, meu.BridgeId, StringComparison.OrdinalIgnoreCase) && EhCanalDeRamal(c.Channel))
+                         .Select(c => RamalDoCanal(c.Channel)).Where(r => r.Length > 0 && r != meuRamal).Distinct().ToList();
+        }
+
+        // v2.5.0 — a sala de conferência do Issabel é uma só para todos os postos. Sem esta
+        // checagem, dois atendimentos independentes que abrissem conferência ao mesmo tempo
+        // cairiam na mesma sala e os clientes se ouviriam. A sala só é "minha" quando já tem o
+        // canal deste ramal, um participante que este ramal chamou (CallerID do Originate) ou
+        // um canal da mesma ligação; qualquer outra ocupação recusa a operação sem mexer em nada.
+        // Ligação (linkedid) em que este ramal já chamou um participante para a sala: enquanto
+        // ela durar, a sala é dele mesmo antes de o próprio canal entrar.
+        private string _confLinkedidComParticipante = string.Empty;
+
+        private bool JaChameiParticipanteNestaLigacao(IReadOnlyList<CanalAtivo> canais, string meuRamal) =>
+            _confLinkedidComParticipante.Length > 0 &&
+            canais.Any(c => EhCanalDeRamal(c.Channel) && string.Equals(RamalDoCanal(c.Channel), meuRamal, StringComparison.OrdinalIgnoreCase) &&
+                            string.Equals(c.Linkedid, _confLinkedidComParticipante, StringComparison.OrdinalIgnoreCase));
+
+        internal static string? MotivoSalaOcupadaPorOutraLigacao(IReadOnlyList<CanalAtivo> canais, string sala, string meuRamal)
+        {
+            var naSala = canais.Where(c => string.Equals(c.Application, "ConfBridge", StringComparison.OrdinalIgnoreCase) &&
+                                           (c.ApplicationData ?? string.Empty).Split(',')[0].Trim() == sala).ToList();
+            if (naSala.Count == 0) return null;
+
+            var minhasLigacoes = canais.Where(c => EhCanalDeRamal(c.Channel) && string.Equals(RamalDoCanal(c.Channel), meuRamal, StringComparison.OrdinalIgnoreCase))
+                                       .Select(c => c.Linkedid).Where(l => !string.IsNullOrWhiteSpace(l)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            bool minha = naSala.Any(c =>
+                (EhCanalDeRamal(c.Channel) && string.Equals(RamalDoCanal(c.Channel), meuRamal, StringComparison.OrdinalIgnoreCase)) ||
+                string.Equals(c.CallerIDNum, meuRamal, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(c.ConnectedLineNum, meuRamal, StringComparison.OrdinalIgnoreCase) ||
+                minhasLigacoes.Contains(c.Linkedid ?? string.Empty));
+            if (minha) return null;
+
+            var ramais = naSala.Where(c => EhCanalDeRamal(c.Channel)).Select(c => RamalDoCanal(c.Channel)).Where(r => r.Length > 0).Distinct().ToList();
+            var quem = ramais.Count > 0 ? $" (ramal {string.Join(", ", ramais)})" : string.Empty;
+            return $"A sala de conferência {sala} está em uso por outra ligação{quem}. Para não misturar os atendimentos, aguarde ela terminar. Sua chamada não foi alterada.";
+        }
+
+        private DateTime _apiSemChamadasAte = DateTime.MinValue;
+        private DateTime _amiDiretoIndisponivelAte = DateTime.MinValue;
+        private string _ultimoErroFonteChamadas = string.Empty;
+        public string FonteChamadasAtivas { get; private set; } = string.Empty;
+
+        public async Task<List<ChamadaAtivaInfo>> ListarChamadasAtivasAsync()
+        {
+            if (_config == null) return new List<ChamadaAtivaInfo>();
+            var meuRamal = string.IsNullOrWhiteSpace(_config.Ramal) ? _config.Login : _config.Ramal;
+
+            var erroApi = string.Empty;
+            if (_config.UsarWavenApi && DateTime.Now >= _apiSemChamadasAte)
+            {
+                var (canaisApi, http, erro) = await WavenApiService.GetAmiCallsAsync();
+                if (canaisApi != null)
+                {
+                    RamaisNaMinhaConferencia = RamaisNaConferenciaDe(canaisApi, meuRamal ?? string.Empty);
+                    ParticipantesDaMinhaLigacao = ParticipantesDaLigacaoDe(canaisApi, meuRamal ?? string.Empty);
+                    EmConferenciaAgora = EstaEmConferencia(canaisApi, meuRamal ?? string.Empty);
+                    // lista vazia = leitura não confiável (o PABX com uma chamada minha teria ao menos um canal): não conclui nada
+                    MeuRamalTemCanalNoPabx = canaisApi.Count == 0 ? (bool?)null
+                        : canaisApi.Any(c => EhCanalDeRamal(c.Channel) && string.Equals(RamalDoCanal(c.Channel), meuRamal, StringComparison.OrdinalIgnoreCase));
+                    ParticipantesNaSala = ParticipantesDaSala(canaisApi, string.IsNullOrWhiteSpace(_config.SalaConferenciaIssabel) ? "800" : _config.SalaConferenciaIssabel.Trim());
+                    FonteChamadasAtivas = "Waven API";
+                    return MontarChamadasAtivas(canaisApi, meuRamal ?? string.Empty);
+                }
+                erroApi = http == 404 ? "a Waven API ainda não tem a consulta de chamadas ativas" : $"Waven API: {erro}";
+                if (http == 404) _apiSemChamadasAte = DateTime.Now.AddMinutes(2);   // não insiste a cada 2 s
+            }
+            else if (_config.UsarWavenApi) erroApi = "a Waven API ainda não tem a consulta de chamadas ativas";
+
+            // AMI direto: se falhou há pouco, não tenta de novo a cada leitura — uma porta fechada
+            // custa segundos de espera por tentativa e tentativas repetidas podem levar o
+            // fail2ban do PABX a bloquear o IP deste posto.
+            if (DateTime.Now < _amiDiretoIndisponivelAte)
+                throw new InvalidOperationException(_ultimoErroFonteChamadas);
+            try
+            {
+                var lista = await ListarChamadasAtivasViaAmiAsync(meuRamal ?? string.Empty);
+                FonteChamadasAtivas = "AMI direto";
+                return lista;
+            }
+            catch (Exception ex)
+            {
+                FonteChamadasAtivas = string.Empty;
+                _amiDiretoIndisponivelAte = DateTime.Now.AddMinutes(5);
+                _ultimoErroFonteChamadas =
+                    (erroApi.Length > 0 ? erroApi + " e " : string.Empty) + "o AMI do PABX não é acessível desta rede (" + ex.Message + ")";
+                throw new InvalidOperationException(_ultimoErroFonteChamadas);
+            }
+        }
+
+        private async Task<List<ChamadaAtivaInfo>> ListarChamadasAtivasViaAmiAsync(string meuRamal)
+        {
+            await _amiPuxarGate.WaitAsync();
+            try
+            {
+                _amiPuxar ??= await AbrirAmiAsync();
+                var canais = await ObterCanaisAmiAsync(_amiPuxar.Session);
+                return MontarChamadasAtivas(canais.Select(ParaCanalAtivo).ToList(), meuRamal);
+            }
+            catch
+            {
+                try { _amiPuxar?.Dispose(); } catch { }
+                _amiPuxar = null;       // reconecta na próxima leitura
+                throw;
+            }
+            finally { _amiPuxarGate.Release(); }
+        }
+
+        public void EncerrarMonitorChamadasAtivas()
+        {
+            try
+            {
+                var c = _amiPuxar; _amiPuxar = null;
+                if (c != null) { try { _ = c.Session.SendAsync("Logoff", new Dictionary<string, string>()); } catch { } c.Dispose(); }
+            }
+            catch { }
+        }
+
+        public async Task<(bool ok, string mensagem)> PuxarChamadaAsync(ChamadaAtivaInfo chamada)
+        {
+            if (_config == null || chamada == null) return (false, "Sem configuração carregada.");
+            if (!_config.PuxarLigacaoHabilitado) return (false, "Puxar ligação está desabilitado neste computador.");
+            var meuRamal = string.IsNullOrWhiteSpace(_config.Ramal) ? _config.Login : _config.Ramal;
+            if (string.IsNullOrWhiteSpace(meuRamal)) return (false, "Ramal inválido.");
+            if (IsInCall) return (false, "Encerre a sua ligação atual antes de puxar outra.");
+            lock (_puxadasEmAndamento)
+                if (!_puxadasEmAndamento.Add(chamada.CanalCliente)) return (false, "Você já pediu para puxar essa ligação; atenda o seu ramal.");
+
+            try
+            {
+                // 1) pela Waven API (confere o canal, garante a gravação e manda o ramal tocar no servidor)
+                if (_config.UsarWavenApi)
+                {
+                    var salaConf = string.IsNullOrWhiteSpace(_config.SalaConferenciaIssabel) ? "800" : _config.SalaConferenciaIssabel.Trim();
+                    var (okApi, msgApi, http) = await WavenApiService.PostAmiPickupAsync(
+                        chamada.CanalCliente, chamada.Linkedid, meuRamal, chamada.Nome ?? string.Empty, chamada.Numero ?? string.Empty, salaConf);
+                    RegistrarSinalSip($"PUXAR API | http={http} | ok={okApi} | canal_cliente={chamada.CanalCliente} | status={chamada.Status} | para_ramal={meuRamal} | msg={msgApi}");
+                    if (okApi == true && chamada.Status == StatusChamadaAtiva.EmAtendimento) UltimoPedidoDeConferencia = DateTime.Now;
+                    if (okApi.HasValue) return (okApi.Value, msgApi);
+                    // sem resposta útil da API (endpoint ausente/rede): tenta o AMI direto abaixo
+                }
+
+                // Ligação já atendida entra em conferência (ninguém é desconectado) — isso é feito
+                // pelo servidor; o caminho de AMI direto abaixo só sabe assumir a chamada inteira.
+                if (chamada.Status == StatusChamadaAtiva.EmAtendimento)
+                    return (false, "Não foi possível falar com a Waven API para entrar nessa ligação em conferência. Nada foi alterado.");
+
+                using var ami = await AbrirAmiAsync();
+                var canais = (await ObterCanaisAmiAsync(ami.Session)).Select(ParaCanalAtivo).ToList();
+                var motivo = MotivoParaNaoPuxar(canais, chamada.CanalCliente, chamada.Linkedid, meuRamal);
+                if (motivo != null)
+                {
+                    RegistrarSinalSip($"PUXAR AMI RECUSADO | canal_cliente={chamada.CanalCliente} | motivo={motivo}");
+                    await ami.Session.SendAsync("Logoff", new Dictionary<string, string>());
+                    return (false, motivo + " Nada foi alterado.");
+                }
+
+                var numero = new string((chamada.Numero ?? string.Empty).Where(char.IsDigit).ToArray());
+                var nome = new string((chamada.Nome ?? string.Empty).Where(ch => ch != '"' && ch != '<' && ch != '>' && !char.IsControl(ch)).ToArray()).Trim();
+                if (nome.Length > 30) nome = nome.Substring(0, 30);
+                RegistrarSinalSip($"PUXAR AMI SELECAO | canal_cliente={chamada.CanalCliente} | linkedid={chamada.Linkedid} | status={chamada.Status} | atendente={chamada.RamalAtendente} | para_ramal={meuRamal}");
+
+                // Gravação: chamada que ainda não chegou a ramal/fila (URA, anúncio, caixa postal)
+                // não tem gravação iniciada. Se o canal não tem arquivo, inicia uma agora no mesmo
+                // padrão de nome do PABX; se já tem, a gravação existente continua no mesmo arquivo.
+                try
+                {
+                    await ami.Session.SendAsync("Getvar", new Dictionary<string, string> { ["Channel"] = chamada.CanalCliente, ["Variable"] = "CDR(recordingfile)" });
+                    var rv = await ami.Session.ReadBlockAsync(3000);
+                    var linhaValor = rv.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                                       .FirstOrDefault(l => l.StartsWith("Value:", StringComparison.OrdinalIgnoreCase)) ?? string.Empty;
+                    var jaGrava = linhaValor.Length > 6 && !string.IsNullOrWhiteSpace(linhaValor.Substring(6));
+                    if (!jaGrava && rv.Contains("Success", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var agora = DateTime.Now;
+                        var arquivo = $"force-{numero}-{meuRamal}-{agora:yyyyMMdd}-{agora:HHmmss}-{chamada.Uniqueid}.wav";
+                        await ami.Session.SendAsync("MixMonitor", new Dictionary<string, string>
+                            { ["Channel"] = chamada.CanalCliente, ["File"] = $"{agora:yyyy}/{agora:MM}/{agora:dd}/{arquivo}" });
+                        var rm = await ami.Session.ReadBlockAsync(3000);
+                        var okGrav = rm.Contains("Success", StringComparison.OrdinalIgnoreCase);
+                        if (okGrav)
+                        {
+                            await ami.Session.SendAsync("Setvar", new Dictionary<string, string>
+                                { ["Channel"] = chamada.CanalCliente, ["Variable"] = "CDR(recordingfile)", ["Value"] = arquivo });
+                            await ami.Session.ReadBlockAsync(3000);
+                        }
+                        RegistrarSinalSip($"PUXAR AMI GRAVACAO_INICIADA | ok={okGrav} | arquivo={arquivo} | resp={ResumoAmi(rm)}");
+                    }
+                    else RegistrarSinalSip($"PUXAR AMI GRAVACAO_EXISTENTE | mantida={jaGrava}");
+                }
+                catch (Exception exGrav) { RegistrarSinalSip($"PUXAR AMI GRAVACAO_ERRO | {exGrav.Message}"); }
+
+                var tecnologia = "SIP";
+                await ami.Session.SendAsync("Originate", new Dictionary<string, string>
+                {
+                    ["Channel"] = $"{tecnologia}/{meuRamal}",
+                    ["Application"] = "Bridge",
+                    ["Data"] = chamada.CanalCliente,
+                    ["CallerID"] = $"\"Puxar: {(nome.Length > 0 ? nome : numero)}\" <{numero}>",
+                    ["Timeout"] = "25000",
+                    ["Async"] = "true"
+                });
+                var resp = await ami.Session.ReadBlockAsync(5000);
+                var ok = resp.Contains("Success", StringComparison.OrdinalIgnoreCase) ||
+                         resp.Contains("Originate successfully queued", StringComparison.OrdinalIgnoreCase);
+                RegistrarSinalSip($"PUXAR AMI ORIGINATE | ok={ok} | para_ramal={meuRamal} | canal_cliente={chamada.CanalCliente} | resp={ResumoAmi(resp)}");
+                await ami.Session.SendAsync("Logoff", new Dictionary<string, string>());
+
+                return ok
+                    ? (true, "Seu ramal está tocando: atenda para assumir a ligação. Se não atender, nada muda.")
+                    : (false, "O PABX recusou o pedido: " + ResumoAmi(resp) + ". A ligação não foi alterada.");
+            }
+            catch (Exception ex)
+            {
+                RegistrarSinalSip($"PUXAR AMI ERRO | canal_cliente={chamada.CanalCliente} | erro={ex.Message}");
+                return (false, "Falha ao falar com o PABX: " + ex.Message + ". A ligação não foi alterada.");
+            }
+            finally
+            {
+                // libera o bloqueio local depois do tempo máximo de toque do pedido
+                _ = Task.Delay(TimeSpan.FromSeconds(27)).ContinueWith(_ => { lock (_puxadasEmAndamento) _puxadasEmAndamento.Remove(chamada.CanalCliente); });
+            }
+        }
+
+        public async Task<(bool ok, string mensagem)> PuxarLigacaoAsync(string ramalAlvo, string clienteNome, string clienteNumero)
+        {
+            if (_config == null) return (false, "Sem configuração carregada.");
+            if (!_config.PuxarLigacaoHabilitado) return (false, "Puxar ligação está desabilitado neste computador.");
+            var meuRamal = string.IsNullOrWhiteSpace(_config.Ramal) ? _config.Login : _config.Ramal;
+            ramalAlvo = (ramalAlvo ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(meuRamal) || string.IsNullOrWhiteSpace(ramalAlvo)) return (false, "Ramal inválido.");
+            if (string.Equals(meuRamal, ramalAlvo, StringComparison.OrdinalIgnoreCase)) return (false, "Essa ligação já está no seu ramal.");
+            if (IsInCall) return (false, "Encerre a sua ligação atual antes de puxar outra.");
+
+            try
+            {
+                using var ami = await AbrirAmiAsync();
+                var canais = await ObterCanaisAmiAsync(ami.Session);
+                RegistrarSinalSip($"PUXAR AMI INIT | de_ramal={ramalAlvo} | para_ramal={meuRamal} | canais_totais={canais.Count}");
+
+                var par = SelecionarCanaisParaPuxar(
+                    canais.Select(c => (c.Channel, c.Linkedid, c.Uniqueid, c.BridgeId)).ToList(), ramalAlvo);
+                if (par == null)
+                {
+                    foreach (var c in canais)
+                        RegistrarSinalSip($"PUXAR AMI CANAL | channel={c.Channel} | linkedid={c.Linkedid} | bridge={c.BridgeId}");
+                    RegistrarSinalSip($"PUXAR AMI SELECAO_IMPOSSIVEL | de_ramal={ramalAlvo} | chamada_preservada=true");
+                    await ami.Session.SendAsync("Logoff", new Dictionary<string, string>());
+                    return (false, $"Não foi possível identificar com segurança a ligação do ramal {ramalAlvo} (ela pode ter acabado). Nada foi alterado.");
+                }
+
+                var (canalOperador, canalCliente) = par.Value;
+                var tecnologia = canalOperador.StartsWith("PJSIP/", StringComparison.OrdinalIgnoreCase) ? "PJSIP" : "SIP";
+                var numero = new string((clienteNumero ?? string.Empty).Where(char.IsDigit).ToArray());
+                var nome = new string((clienteNome ?? string.Empty).Where(ch => ch != '"' && ch != '<' && ch != '>' && !char.IsControl(ch)).ToArray()).Trim();
+                if (nome.Length > 30) nome = nome.Substring(0, 30);
+                RegistrarSinalSip($"PUXAR AMI SELECAO | canal_operador={canalOperador} | canal_cliente={canalCliente}");
+
+                await ami.Session.SendAsync("Originate", new Dictionary<string, string>
+                {
+                    ["Channel"] = $"{tecnologia}/{meuRamal}",
+                    ["Application"] = "Bridge",
+                    ["Data"] = canalCliente,
+                    ["CallerID"] = $"\"Puxar: {(nome.Length > 0 ? nome : numero)}\" <{numero}>",
+                    ["Timeout"] = "25000",
+                    ["Async"] = "true"
+                });
+                var resp = await ami.Session.ReadBlockAsync(5000);
+                var ok = resp.Contains("Success", StringComparison.OrdinalIgnoreCase) ||
+                         resp.Contains("Originate successfully queued", StringComparison.OrdinalIgnoreCase);
+                RegistrarSinalSip($"PUXAR AMI ORIGINATE | ok={ok} | para_ramal={meuRamal} | canal_cliente={canalCliente} | de_ramal={ramalAlvo} | resp={ResumoAmi(resp)}");
+                await ami.Session.SendAsync("Logoff", new Dictionary<string, string>());
+
+                return ok
+                    ? (true, "Seu ramal está tocando: atenda para assumir a ligação. Se não atender, nada muda.")
+                    : (false, "O PABX recusou o pedido: " + ResumoAmi(resp) + ". A ligação original não foi alterada.");
+            }
+            catch (Exception ex)
+            {
+                RegistrarSinalSip($"PUXAR AMI ERRO | de_ramal={ramalAlvo} | erro={ex.Message}");
+                return (false, "Falha ao falar com o PABX: " + ex.Message + ". A ligação original não foi alterada.");
+            }
         }
 
         private static bool CanalPertenceAoRamal(AmiChannelInfo c, string ramal, string login)
@@ -2299,7 +2950,12 @@ namespace WavenVoIP
                         CallerIDNum = atual.TryGetValue("CallerIDNum", out v) ? v : string.Empty,
                         ConnectedLineNum = atual.TryGetValue("ConnectedLineNum", out v) ? v : string.Empty,
                         Exten = atual.TryGetValue("Exten", out v) ? v : string.Empty,
-                        Context = atual.TryGetValue("Context", out v) ? v : string.Empty
+                        Context = atual.TryGetValue("Context", out v) ? v : string.Empty,
+                        BridgeId = atual.TryGetValue("BridgeId", out v) ? v : string.Empty,
+                        CallerIDName = atual.TryGetValue("CallerIDName", out v) ? v : string.Empty,
+                        Application = atual.TryGetValue("Application", out v) ? v : string.Empty,
+                        ApplicationData = atual.TryGetValue("ApplicationData", out v) ? v : string.Empty,
+                        DuracaoSeg = atual.TryGetValue("Duration", out v) && TimeSpan.TryParse(v, out var dur) ? (int)dur.TotalSeconds : 0
                     });
                 }
                 else if (atual.TryGetValue("Event", out ev) && ev.Equals("CoreShowChannelsComplete", StringComparison.OrdinalIgnoreCase))
@@ -2453,6 +3109,26 @@ namespace WavenVoIP
                 _muteMicrofoneAtivo = false;
 
                 // Desconecta proxy e garante próxima chamada começa desmutada
+                // v2.5.0 — resumo do nivelamento do microfone desta chamada (nível de fala que
+                // chegou do microfone e ganho aplicado), para validar em chamada real.
+                var estatMic = _muteableAudioSource?.EstatisticaAutoGain() ?? (double.NaN, 0L, 0L);
+                var resumoMic = _muteableAudioSource?.EncerrarAutoGain();
+                if (!string.IsNullOrEmpty(resumoMic))
+                    RegistrarSinalSip($"AUDIO_TX_AUTO_GAIN | {resumoMic}");
+                if (!string.IsNullOrEmpty(resumoMic) && (_config?.MicNivelWindowsAuto ?? false))
+                {
+                    var micCfg = _config?.AudioInputDevice ?? string.Empty;
+                    // fora da thread da chamada: consulta ao áudio do Windows nunca atrasa o desligar
+                    _ = Task.Run(() =>
+                    {
+                        try
+                        {
+                            var r = MicNivelWindows.AjustarAposChamada(micCfg, estatMic.Item1, estatMic.Item2, estatMic.Item3);
+                            RegistrarSinalSip($"AUDIO_MIC_NIVEL_WINDOWS | {r}");
+                        }
+                        catch { }
+                    });
+                }
                 _muteableAudioSource?.Detach();
                 _muteableAudioSource = null;
                 _muteAntesDeEspera = false;
@@ -2623,11 +3299,23 @@ namespace WavenVoIP
 
             // Proxy TX-only: intercept encoded samples, injeta silence quando mutado.
             // AudioSink (RX/WaveOut) aponta direto para audio — nunca afetado pelo mute.
-            var muteProxy = new MuteableAudioSource(audio);
+            var nivelarMic = _config?.MicAutoGainEnabled ?? true;
+            if (nivelarMic)
+            {
+                // ganho aprendido é por microfone; a consulta ao Windows tem limite de tempo
+                try
+                {
+                    var micCfg = _config?.AudioInputDevice ?? string.Empty;
+                    var tNome = Task.Run(() => MicNivelWindows.NomeCapturaAtual(micCfg));
+                    if (tNome.Wait(400)) MicAutoGain.DefinirDispositivo(tNome.Result);
+                }
+                catch { }
+            }
+            var muteProxy = new MuteableAudioSource(audio, nivelarMic);
             _muteableAudioSource = muteProxy;
-            LogHelper.Sip("AUDIO_MUTE_PROXY_CREATED | TX=MuteableAudioSource RX=WindowsAudioEndPoint direto");
+            LogHelper.Sip($"AUDIO_MUTE_PROXY_CREATED | TX=MuteableAudioSource RX=WindowsAudioEndPoint direto | mic_auto_gain={nivelarMic}");
 
-            return new VoIPMediaSession(new SIPSorceryMedia.Abstractions.MediaEndPoints
+            var sessao = new VoIPMediaSession(new SIPSorceryMedia.Abstractions.MediaEndPoints
             {
                 AudioSource = muteProxy,
                 AudioSink   = audio
@@ -2635,6 +3323,23 @@ namespace WavenVoIP
             {
                 AcceptRtpFromAny = true
             };
+
+            // v2.5.0 — o nivelamento do microfone precisa saber quando o outro lado está falando
+            // para não amplificar o retorno do alto-falante (eco). Só lê o nível do pacote; o
+            // áudio recebido segue intocado para o alto-falante.
+            if (nivelarMic)
+            {
+                sessao.OnRtpPacketReceived += (_, tipo, pacote) =>
+                {
+                    try
+                    {
+                        if (tipo == SDPMediaTypesEnum.audio)
+                            muteProxy.InformarAudioRemoto(pacote.Header.PayloadType, pacote.Payload);
+                    }
+                    catch { }
+                };
+            }
+            return sessao;
         }
 
         public void Dispose()

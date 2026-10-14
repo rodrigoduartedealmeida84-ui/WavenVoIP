@@ -62,12 +62,12 @@
                     <!-- Logo -->
                     <Border Width="200" Height="68" ClipToBounds="True"
                             Background="White" CornerRadius="16" Margin="0,0,0,32">
-                        <Border.Effect>
+                        <Grid><Border Margin="0" CornerRadius="16" Background="White" IsHitTestVisible="False"><Border.Effect>
                             <DropShadowEffect BlurRadius="22" ShadowDepth="0" Opacity="0.30" Color="#7C3AED"/>
-                        </Border.Effect>
+                        </Border.Effect></Border>
                         <Image Source="/Assets/Brand/waven_logo_dark.png" Stretch="Uniform"
                                RenderOptions.BitmapScalingMode="HighQuality"/>
-                    </Border>
+                    </Grid></Border>
 
                     <TextBlock x:Name="txtTitulo"
                                Text="Configuração inicial"

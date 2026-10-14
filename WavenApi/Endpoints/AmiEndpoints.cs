@@ -30,6 +30,8 @@ public static partial class AmiEndpoints
         g.MapGet("/queues-live",     GetQueuesLive);
         g.MapGet("/status",          GetStatus);
         g.MapPost("/test",           TestAmi);
+        MapChamadasEndpoints(g);
+        MapConferenciaEndpoints(g);              // v2.5.0: /conference/permission e /conference/remove
     }
 
     // ── GET /api/ami/extensions ───────────────────────────────────────────────

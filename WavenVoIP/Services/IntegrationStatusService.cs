@@ -24,6 +24,9 @@ namespace WavenVoIP.Services
 
         public static void Atualizar(IntegracaoNome nome, IntegracaoStatus status)
         {
+            // v2.5.0 — desempenho: os ciclos automáticos confirmam "Conectado" a cada poucos
+            // segundos; sem mudança de estado não há o que registrar nem o que redesenhar.
+            bool mudou = !_status.TryGetValue(nome, out var anterior) || anterior != status;
             _status[nome] = status;
             if (status == IntegracaoStatus.Conectado)
             {
@@ -35,6 +38,7 @@ namespace WavenVoIP.Services
             {
                 _modalMostrado.TryRemove(nome, out _); // allow modal if next failure is auth
             }
+            if (!mudou) return;
             LogHelper.Info($"[INTEGRATION_STATUS] {nome}={status}");
             StatusChanged?.Invoke(nome, status);
         }

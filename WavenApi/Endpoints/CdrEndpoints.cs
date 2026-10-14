@@ -12,6 +12,7 @@ public static class CdrEndpoints
         g.MapGet("/calls",       GetCalls);
         g.MapGet("/test",        TestConnection);
         g.MapGet("/recordings",  GetRecording);
+        g.MapGet("/recording-parts", GetRecordingParts);
     }
 
     // ── GET /api/cdr/calls?ramal=100&dias=7[&desde=yyyy-MM-dd HH:mm:ss] ──────
@@ -205,6 +206,28 @@ public static class CdrEndpoints
     }
 
     // ── GET /api/cdr/recordings?file={filename}&date={yyyy-MM-dd} ─────────────
+
+    // v2.5.0 — continuações da gravação de uma ligação (criadas quando um atendente é removido da
+    // conferência e a gravação original pertencia ao canal dele). Só nomes de arquivo, do dia
+    // informado e do seguinte (ligação que atravessa a meia-noite).
+    private static IResult GetRecordingParts(string? linkedid, string? date, IOptions<WavenApiOptions> opts)
+    {
+        var lid = (linkedid ?? "").Trim();
+        if (!System.Text.RegularExpressions.Regex.IsMatch(lid, @"^\d{6,12}\.\d{1,8}$"))
+            return Results.BadRequest(new { error = "linkedid invalido" });
+        if (!DateTime.TryParse(date, out var dia)) dia = DateTime.Today;
+
+        var basePath = opts.Value.RecordingsPath.TrimEnd('/', '\\');
+        var arquivos = new List<object>();
+        foreach (var d in new[] { dia.Date, dia.Date.AddDays(1) })
+        {
+            var pasta = Path.Combine(basePath, d.ToString("yyyy"), d.ToString("MM"), d.ToString("dd"));
+            if (!Directory.Exists(pasta)) continue;
+            foreach (var f in Directory.EnumerateFiles(pasta, $"*-{lid}-parte*.wav").OrderBy(x => x))
+                arquivos.Add(new { file = Path.GetFileName(f), date = d.ToString("yyyy-MM-dd"), bytes = new FileInfo(f).Length });
+        }
+        return Results.Ok(new { linkedid = lid, files = arquivos });
+    }
 
     private static IResult GetRecording(
         string file, string? date,

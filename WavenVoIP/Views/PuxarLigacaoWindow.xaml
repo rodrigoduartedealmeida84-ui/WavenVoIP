@@ -1,0 +1,187 @@
+<Window x:Class="WavenVoIP.Views.PuxarLigacaoWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Puxar ligação" Width="880" Height="520" MinWidth="760" MinHeight="340"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="#F5F3FF" FontFamily="Segoe UI" UseLayoutRounding="True" SnapsToDevicePixels="True">
+    <Window.Resources>
+        <Style x:Key="PuxarButtonStyle" TargetType="Button">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bd" CornerRadius="10" Padding="16,8">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                    <GradientStop Color="#8B5CF6" Offset="0"/>
+                                    <GradientStop Color="#6D28D9" Offset="1"/>
+                                </LinearGradientBrush>
+                            </Border.Background>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <TextBlock Text="&#xE717;" FontFamily="Segoe MDL2 Assets" FontSize="13" Foreground="White" VerticalAlignment="Center" Margin="0,0,7,0"/>
+                                <ContentPresenter VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="bd" Property="Opacity" Value="0.88"/></Trigger>
+                            <Trigger Property="IsPressed" Value="True"><Setter TargetName="bd" Property="Opacity" Value="0.74"/></Trigger>
+                            <Trigger Property="IsEnabled" Value="False"><Setter TargetName="bd" Property="Opacity" Value="0.45"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="FecharButtonStyle" TargetType="Button">
+            <Setter Property="Foreground" Value="#5B21B6"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bd" Background="White" BorderBrush="#DDD6FE" BorderThickness="1" CornerRadius="10" Padding="18,7">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="bd" Property="Background" Value="#EDE9FE"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="CabecalhoColuna" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="10.5"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="#7C7A9C"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Cabeçalho -->
+        <Border Grid.Row="0" Padding="24,18">
+            <Border.Background>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                    <GradientStop Color="#7C3AED" Offset="0"/>
+                    <GradientStop Color="#5B21B6" Offset="1"/>
+                </LinearGradientBrush>
+            </Border.Background>
+            <DockPanel>
+                <Border DockPanel.Dock="Left" Width="44" Height="44" CornerRadius="22" Background="#33FFFFFF" Margin="0,0,14,0" VerticalAlignment="Center">
+                    <TextBlock Text="&#xE717;" FontFamily="Segoe MDL2 Assets" FontSize="20" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <Border DockPanel.Dock="Right" Background="#26FFFFFF" CornerRadius="12" Padding="12,6" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal">
+                        <Ellipse x:Name="bolinhaAoVivo" Width="8" Height="8" Fill="#4ADE80" VerticalAlignment="Center" Margin="0,0,7,0"/>
+                        <TextBlock x:Name="txtContagem" Text="0 ligações" Foreground="White" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Border>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="Puxar Ligação" FontSize="19" FontWeight="Bold" Foreground="White"/>
+                    <TextBlock x:Name="txtSubtitulo" Text="Consultando o PABX…" FontSize="12" Foreground="#E9D5FF" Margin="0,2,12,0" TextTrimming="CharacterEllipsis"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- Lista -->
+        <Border Grid.Row="1" Margin="20,18,20,0" Background="White" CornerRadius="16" BorderBrush="#E9E5FB" BorderThickness="1">
+            <Grid><Border Margin="0" CornerRadius="16" Background="White" IsHitTestVisible="False"><Border.Effect>
+                <DropShadowEffect BlurRadius="16" ShadowDepth="2" Opacity="0.07" Color="#4C1D95"/>
+            </Border.Effect></Border>
+            <Grid Grid.IsSharedSizeScope="True">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <Border Grid.Row="0" Background="#FAF9FF" CornerRadius="16,16,0,0" BorderBrush="#EEEAFB" BorderThickness="0,0,0,1" Padding="18,10">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="2.0*" MinWidth="150"/>
+                            <ColumnDefinition Width="1.05*" MinWidth="74"/>
+                            <ColumnDefinition Width="1.9*" MinWidth="126"/>
+                            <ColumnDefinition Width="0.65*" MinWidth="52"/>
+                            <ColumnDefinition Width="1.4*" MinWidth="80"/>
+                            <ColumnDefinition Width="Auto" SharedSizeGroup="ColBotao"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="CLIENTE" Style="{StaticResource CabecalhoColuna}"/>
+                        <TextBlock Grid.Column="1" Text="CANAL" Style="{StaticResource CabecalhoColuna}"/>
+                        <TextBlock Grid.Column="2" Text="STATUS" Style="{StaticResource CabecalhoColuna}"/>
+                        <TextBlock Grid.Column="3" Text="TEMPO" Style="{StaticResource CabecalhoColuna}"/>
+                        <TextBlock Grid.Column="4" Text="ATENDENTE" Style="{StaticResource CabecalhoColuna}"/>
+                        <Border Grid.Column="5" MinWidth="104" Height="1"/>
+                    </Grid>
+                </Border>
+
+                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <ItemsControl x:Name="lstChamadas" Margin="0,2,0,6">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border x:Name="linha" Padding="18,11" BorderBrush="#F3F1FB" BorderThickness="0,0,0,1" Background="Transparent">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="2.0*" MinWidth="150"/>
+                                            <ColumnDefinition Width="1.05*" MinWidth="74"/>
+                                            <ColumnDefinition Width="1.9*" MinWidth="126"/>
+                                            <ColumnDefinition Width="0.65*" MinWidth="52"/>
+                                            <ColumnDefinition Width="1.4*" MinWidth="80"/>
+                                            <ColumnDefinition Width="Auto" SharedSizeGroup="ColBotao"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <DockPanel Grid.Column="0" Margin="0,0,10,0">
+                                            <Border DockPanel.Dock="Left" Width="38" Height="38" CornerRadius="19" Background="{Binding CorFundo}" Margin="0,0,12,0" VerticalAlignment="Center">
+                                                <TextBlock Text="&#xE77B;" FontFamily="Segoe MDL2 Assets" FontSize="16" Foreground="{Binding Cor}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            </Border>
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding Cliente}" FontSize="14" FontWeight="SemiBold" Foreground="#1E1B4B" TextTrimming="CharacterEllipsis" ToolTip="{Binding Cliente}"/>
+                                                <TextBlock Text="{Binding Telefone}" FontSize="12" Foreground="#64748B" TextTrimming="CharacterEllipsis"/>
+                                            </StackPanel>
+                                        </DockPanel>
+
+                                        <TextBlock Grid.Column="1" Text="{Binding Canal}" FontSize="12.5" Foreground="#334155" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,8,0"/>
+
+                                        <Border Grid.Column="2" Background="{Binding CorFundo}" CornerRadius="9" Padding="10,4" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="0,0,8,0">
+                                            <TextBlock Text="{Binding Status}" Foreground="{Binding Cor}" FontSize="11.5" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                        </Border>
+
+                                        <TextBlock Grid.Column="3" Text="{Binding Duracao}" FontSize="14" FontWeight="SemiBold" Foreground="#1E1B4B" VerticalAlignment="Center" Margin="0,0,8,0"/>
+
+                                        <TextBlock Grid.Column="4" Text="{Binding Atendente}" FontSize="12.5" Foreground="#334155" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,8,0"/>
+
+                                        <Button Grid.Column="5" Content="Puxar" Style="{StaticResource PuxarButtonStyle}" Click="BtnPuxar_Click" Tag="{Binding}" VerticalAlignment="Center" HorizontalAlignment="Right" MinWidth="104"/>
+                                    </Grid>
+                                </Border>
+                                <DataTemplate.Triggers>
+                                    <Trigger SourceName="linha" Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="linha" Property="Background" Value="#FBFAFF"/>
+                                    </Trigger>
+                                </DataTemplate.Triggers>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+
+                <StackPanel Grid.Row="1" x:Name="txtVazio" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed">
+                    <TextBlock Text="&#xE717;" FontFamily="Segoe MDL2 Assets" FontSize="34" Foreground="#DDD6FE" HorizontalAlignment="Center"/>
+                    <TextBlock Text="Nenhuma ligação em andamento no momento" Foreground="#6B7280" FontSize="14" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,10,0,0"/>
+                    <TextBlock Text="Chamadas na fila, na URA, fora do horário, na caixa postal ou em atendimento aparecem aqui." Foreground="#9CA3AF" FontSize="12" HorizontalAlignment="Center" Margin="16,4,16,0" TextWrapping="Wrap" TextAlignment="Center"/>
+                </StackPanel>
+            </Grid>
+        </Grid></Border>
+
+        <!-- Rodapé -->
+        <DockPanel Grid.Row="2" Margin="22,14,22,16" LastChildFill="True">
+            <Button DockPanel.Dock="Right" Content="Fechar" Style="{StaticResource FecharButtonStyle}" Click="BtnFechar_Click"/>
+            <TextBlock x:Name="txtStatus" VerticalAlignment="Center" FontSize="12.5" Foreground="#4C1D95" FontWeight="SemiBold" TextWrapping="Wrap" Margin="2,0,14,0"/>
+        </DockPanel>
+    </Grid>
+</Window>

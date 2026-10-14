@@ -124,30 +124,30 @@
                                 <!-- Balão da mensagem recebida -->
                                 <Border Background="White" CornerRadius="8,8,8,0" Padding="12,10"
                                         HorizontalAlignment="Left" MaxWidth="320">
-                                    <Border.Effect>
+                                    <Grid><Border Margin="-12,-10" CornerRadius="8,8,8,0" Background="White" IsHitTestVisible="False"><Border.Effect>
                                         <DropShadowEffect Color="#000000" Opacity="0.12" BlurRadius="6" ShadowDepth="1"/>
-                                    </Border.Effect>
+                                    </Border.Effect></Border>
                                     <StackPanel>
                                         <TextBlock TextWrapping="Wrap" FontSize="13" Foreground="#111B21" LineHeight="19">
                                             <Run Text="💬 Você tem um atendimento em andamento. 👇 Toque abaixo para continuar."/>
                                         </TextBlock>
                                         <TextBlock Text="12:00" FontSize="10" Foreground="#8696A0" HorizontalAlignment="Right" Margin="0,6,0,0"/>
                                     </StackPanel>
-                                </Border>
+                                </Grid></Border>
 
                                 <!-- Botão de resposta rápida (QUICK_REPLY) -->
                                 <Border Background="White" CornerRadius="0,0,8,8" Padding="0" Margin="0,2,0,0"
                                         HorizontalAlignment="Left" MinWidth="150" MaxWidth="320">
-                                    <Border.Effect>
+                                    <Grid><Border Margin="0" CornerRadius="0,0,8,8" Background="White" IsHitTestVisible="False"><Border.Effect>
                                         <DropShadowEffect Color="#000000" Opacity="0.10" BlurRadius="6" ShadowDepth="1"/>
-                                    </Border.Effect>
+                                    </Border.Effect></Border>
                                     <Border BorderBrush="#E9EDEF" BorderThickness="0,1,0,0" Padding="12,9">
                                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                                             <TextBlock Text="↩" FontSize="13" Foreground="#00A5F4" Margin="0,0,8,0" VerticalAlignment="Center"/>
                                             <TextBlock Text="Continuar Atendimento" FontSize="13" FontWeight="SemiBold" Foreground="#00A5F4"/>
                                         </StackPanel>
                                     </Border>
-                                </Border>
+                                </Grid></Border>
                             </StackPanel>
                         </Border>
                     </StackPanel>

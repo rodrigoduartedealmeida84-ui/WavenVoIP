@@ -20,7 +20,7 @@ namespace WavenVoIP.Views
         private ScaleTransform? _pulseScale;
 
         private static readonly string[] _avatarColors =
-            { "#6366F1", "#8B5CF6", "#EC4899", "#10B981", "#3B82F6", "#F59E0B" };
+            { "#7C3AED", "#8B5CF6", "#EC4899", "#10B981", "#3B82F6", "#F59E0B" };
 
         public TransferControlWindow(string destino, string? chamadaOriginal = null)
         {
@@ -114,10 +114,10 @@ namespace WavenVoIP.Views
                 }
                 _pulseTimer?.Stop();
                 _pulsePhase = 0;
-                _pulseTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(40) };
+                _pulseTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(80) };
                 _pulseTimer.Tick += (_, _) =>
                 {
-                    _pulsePhase = (_pulsePhase + 0.055) % (2 * Math.PI);
+                    _pulsePhase = (_pulsePhase + 0.11) % (2 * Math.PI);
                     var p = (1 - Math.Cos(_pulsePhase)) / 2;
                     _pulseScale.ScaleX = 1 + 1.8 * p;
                     _pulseScale.ScaleY = 1 + 1.8 * p;

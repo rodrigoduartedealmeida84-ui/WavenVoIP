@@ -49,9 +49,7 @@
                     Margin="0,0,10,10"
                     Width="292"
                     Opacity="{Binding Opacidade}">
-                <Border.Effect>
-                    <DropShadowEffect BlurRadius="6" ShadowDepth="1" Opacity="0.07" Color="#000000"/>
-                </Border.Effect>
+                
                 <StackPanel>
 
                     <!-- Linha superior: dot + ramal/nome + badge de status -->
@@ -275,7 +273,7 @@
             <!-- Refresh + Last updated -->
             <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
                 <Button x:Name="btnAtualizar"
-                        Content="↻  Atualizar"
+                        Content="Atualizar"
                         Height="34" Padding="14,0"
                         FontSize="12.5" FontWeight="SemiBold" Cursor="Hand"
                         Background="#7C3AED" Foreground="White" BorderBrush="#7C3AED" BorderThickness="0"

@@ -19,6 +19,40 @@ namespace WavenVoIP.Models
         // Preservado ao converter Google → Empresa para evitar duplicatas na re-sync
         public string? GoogleContactId { get; set; }
 
+        // v2.5.0 — alteração feita aqui que ainda não chegou a outra origem:
+        // "" = tudo sincronizado; "google" = nome ainda não enviado ao Google;
+        // "google_sem_permissao" = o WavenVoIP só tem leitura no Google; "api" = aguardando a Waven API.
+        public string SincronizacaoPendente { get; set; } = string.Empty;
+
+        [JsonIgnore]
+        public bool TemPendencia => !string.IsNullOrEmpty(SincronizacaoPendente);
+
+        // Origem do contato, por extenso (segunda linha da lista de contatos).
+        [JsonIgnore]
+        public string OrigemTexto =>
+            EhRamalIssabel  ? "Ramal do PABX" :
+            FonteGoogle     ? "Google Contacts" :
+            EhCompartilhado ? (string.IsNullOrWhiteSpace(GoogleContactId) ? "Empresa (Waven API)" : "Empresa (Waven API) · também no Google") :
+                              (string.IsNullOrWhiteSpace(GoogleContactId) ? "Somente neste computador" : "Editado aqui · também no Google");
+
+        [JsonIgnore]
+        public string LinhaOrigem
+        {
+            get
+            {
+                var obs = (Observacao ?? string.Empty).Trim();
+                var s = OrigemTexto;
+                if (obs.Length > 0 && obs != "Google Contacts" && obs != "Contato empresa" && !EhRamalIssabel) s += " · " + obs;
+                return SincronizacaoPendente switch
+                {
+                    "google"               => s + " · alteração ainda não enviada ao Google",
+                    "google_sem_permissao" => s + " · não enviado ao Google (sem permissão de escrita)",
+                    "api"                  => s + " · aguardando envio à Waven API",
+                    _                      => s
+                };
+            }
+        }
+
         // Transient — set at display time, never persisted
         [JsonIgnore]
         public bool EhFavorito { get; set; }

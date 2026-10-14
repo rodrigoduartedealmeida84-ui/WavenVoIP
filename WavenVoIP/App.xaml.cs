@@ -95,6 +95,18 @@ public partial class App : Application
         }, null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
     }
 
+    internal static bool EhEncerramentoNormalDeSocket(Exception? ex)
+    {
+        if (ex == null) return false;
+        if (ex is AggregateException ag)
+            return ag.InnerExceptions.Count > 0 && ag.InnerExceptions.All(EhEncerramentoNormalDeSocket);
+        if (ex is System.Net.Sockets.SocketException se)
+            return se.SocketErrorCode is System.Net.Sockets.SocketError.OperationAborted or System.Net.Sockets.SocketError.Interrupted
+                or System.Net.Sockets.SocketError.NotSocket or System.Net.Sockets.SocketError.Shutdown;
+        if (ex is ObjectDisposedException or OperationCanceledException) return true;
+        return ex.InnerException != null && EhEncerramentoNormalDeSocket(ex.InnerException);
+    }
+
     protected override void OnStartup(StartupEventArgs e)
     {
         // v2.1.1 — Quando iniciado pelo Run key do Windows (autostart), o processo herda
@@ -108,15 +120,18 @@ public partial class App : Application
 
         const string mutexName = "WavenVoIP_SingleInstance_v79";
         const string eventName = "WavenVoIP_ActivateEvent_v79";
+        const string demoEventName = "WavenVoIP_DemoNaoAtendida_v79";
 
         _instanceMutex = new Mutex(true, mutexName, out bool createdNew);
 
         if (!createdNew)
         {
             // Sinaliza instância existente para trazer ao foco
+            // "/demo-naoatendida": pede ao app aberto o aviso de demonstração (só visual, local)
+            var pedeDemo = e.Args.Any(a => a.Equals("/demo-naoatendida", StringComparison.OrdinalIgnoreCase));
             try
             {
-                using var evt = EventWaitHandle.OpenExisting(eventName);
+                using var evt = EventWaitHandle.OpenExisting(pedeDemo ? demoEventName : eventName);
                 evt.Set();
             }
             catch { }
@@ -140,6 +155,18 @@ public partial class App : Application
         { IsBackground = true, Name = "ActivateListener" };
         activateThread.Start();
 
+        var demoEvent = new EventWaitHandle(false, EventResetMode.AutoReset, demoEventName);
+        new Thread(() =>
+        {
+            try
+            {
+                while (demoEvent.WaitOne())
+                    Dispatcher.BeginInvoke(() => (Current.MainWindow as DialerShellWindow)?.MostrarDemonstracaoNaoAtendidas());
+            }
+            catch { }
+        })
+        { IsBackground = true, Name = "DemoNaoAtendidaListener" }.Start();
+
         AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
         DispatcherUnhandledException += App_DispatcherUnhandledException;
         // v2.4.0 — investigação de travamento: antes isso engolia TODA exceção de task
@@ -149,10 +176,38 @@ public partial class App : Application
         // derrubando o processo por isso (SetObserved já fazia isso).
         TaskScheduler.UnobservedTaskException += (_, ex) =>
         {
-            try { LogHelper.Error("TASK_UNOBSERVED_EXCEPTION", ex.Exception); } catch { }
+            // v2.5.0 — ao desligar, a biblioteca SIP fecha os sockets de áudio com leituras ainda
+            // pendentes; elas terminam com "operação de E/S anulada" numa tarefa que ninguém
+            // aguarda. É o encerramento normal do áudio, não um erro: não entra no log de erros
+            // nem na contagem de exceções do diagnóstico.
+            try
+            {
+                if (EhEncerramentoNormalDeSocket(ex.Exception)) LogHelper.Info("TASK_SOCKET_ENCERRADO | leitura de audio cancelada no fim da chamada");
+                else LogHelper.Error("TASK_UNOBSERVED_EXCEPTION", ex.Exception);
+            }
+            catch { }
             ex.SetObserved();
         };
         IniciarUiFreezeWatchdog();
+
+        // v2.5.0 — nitidez: o estilo "Window" do App.xaml não vale para as classes derivadas
+        // (cada janela do app é uma subclasse), então nenhuma janela herdava o alinhamento a
+        // pixels. Em 125%/150% bordas, ícones e textos caíam em meio pixel e ficavam borrados.
+        EventManager.RegisterClassHandler(typeof(Window), FrameworkElement.LoadedEvent, new RoutedEventHandler((s, _) =>
+        {
+            try
+            {
+                if (s is not Window w) return;
+                w.UseLayoutRounding = true;
+                w.SnapsToDevicePixels = true;
+                System.Windows.Media.TextOptions.SetTextFormattingMode(w, System.Windows.Media.TextFormattingMode.Display);
+                // janela transparente não tem ClearType: tons de cinza ficam mais limpos que o padrão
+                System.Windows.Media.TextOptions.SetTextRenderingMode(w, w.AllowsTransparency
+                    ? System.Windows.Media.TextRenderingMode.Grayscale : System.Windows.Media.TextRenderingMode.ClearType);
+                System.Windows.Media.RenderOptions.SetBitmapScalingMode(w, System.Windows.Media.BitmapScalingMode.HighQuality);
+            }
+            catch { }
+        }));
 
         base.OnStartup(e);
 
@@ -265,6 +320,16 @@ public partial class App : Application
             var shell = new DialerShellWindow(sip);
             MainWindow = shell;
             shell.Show();
+
+            // v2.5.0 — reconexão automática ao voltar da suspensão do Windows
+            try
+            {
+                var hostRede = string.Empty;
+                if (config.UsarWavenApi && Uri.TryCreate(config.WavenApiUrl, UriKind.Absolute, out var uriApi)) hostRede = uriApi.Host;
+                if (string.IsNullOrWhiteSpace(hostRede)) hostRede = config.ServerIp ?? string.Empty;
+                ResumeRecoveryService.Iniciar(hostRede, shell.AoVoltarDaSuspensaoAsync);
+            }
+            catch (Exception ex) { LogHelper.Info($"POWER_RESUME_INIT_ERRO | {ex.Message}"); }
             _ = System.Threading.Tasks.Task.Run(WavenVoIP.Services.ContatoStorageService.MigrarContatosAntigos);
 
             // Inicia sync com Waven API se estiver habilitado

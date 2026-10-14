@@ -65,7 +65,8 @@ namespace WavenVoIP.Services
                     {
                         Mesclar(delta);
                         if (delta.Calls.Count > 0)
-                            LogHelper.Info($"CDR_FETCH modo=incremental recebidas={delta.Calls.Count} total={_linhas!.Count} bytes={delta.TamanhoBytes}");
+                            if (delta.Calls.Count > 1)
+                                LogHelper.Info($"CDR_FETCH modo=incremental recebidas={delta.Calls.Count} total={_linhas!.Count} bytes={delta.TamanhoBytes}");
                     }
                     else
                     {

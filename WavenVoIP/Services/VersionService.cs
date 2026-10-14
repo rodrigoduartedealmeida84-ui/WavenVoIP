@@ -4,15 +4,42 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "2.4.7";
+        public const string Versao  = "2.5.0";
         public const string NomeApp = "WavenVoIP";
 
-        public static readonly DateTime DataBuild = new DateTime(2026, 10, 9);
+        public static readonly DateTime DataBuild = new DateTime(2026, 10, 13);
 
         public static string VersaoCompleta => $"{NomeApp} v{Versao}";
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v2.5.0 — Puxar Ligacao, conferencia nova, aviso de fila, contatos e desempenho (14/10/2026)\n" +
+            "• [NEW] Nao atendidas como mensagens nao lidas: o numero no botao conta so as que voce ainda nao viu; abrir a area zera o contador sem apagar nada; novas chamadas voltam a contar (uma por ligacao)\n" +
+            "• [NEW] Historico: ao voltar pela aba, mostra sempre todas as ligacoes (busca, filtros e Nao atendidas limpos)\n" +
+            "• [NEW] Visual: topo da janela renovado (logo, abas com aba ativa em destaque, cartao do usuario) e aviso de chamada nao atendida com contorno em degrade e logotipo oficial do WhatsApp\n" +
+            "• [FIX] Log: consulta de nome de contato nao grava mais uma linha por numero a cada atualizacao do Historico (~30 MB/dia a menos, sem numero/nome em claro)\n" +
+            "• [NEW] Puxar Ligacao: botao abaixo do Ligar lista todas as chamadas vivas no PABX (em atendimento, tocando, fila, URA, fora do horario, caixa postal) e traz a escolhida para o seu ramal. Ligacao ja atendida por outro ramal vira conferencia com o cliente e o atendente\n" +
+            "• [NEW] Conferencia: tela nova com os ramais online, busca de contato e participantes em tempo real; painel Participantes da ligacao e botao Remover atendente (por padrao so o ramal 100); a chamada encerra sozinha quando o cliente desliga\n" +
+            "• [NEW] Aviso de cliente aguardando: popup somente para cliente parado nas filas 700 e 701. URA, mensagens, fora do horario, grupo tocando e ligacao em espera nao avisam; fecha sozinho quando a ligacao e atendida ou encerrada; ligacao que volta a fila avisa de novo\n" +
+            "• [NEW] Transferencia e conferencia: escolha do destino pelos ramais online (livre/ocupado) ou por busca de contato\n" +
+            "• [NEW] Perdidas: motivo no Historico (Cliente desistiu / Abandono na fila); gravacao em partes quando ha continuacao (Parte 1 / Parte 2)\n" +
+            "• [NEW] Historico: filtro Nao atendidas (Perdida + Cliente desistiu + Abandono na fila) com o total de cada uma; essas ligacoes aparecem em vermelho na lista. Topo da tela redesenhado (busca, filtros, Atualizar CDR e Reprocessar)\n" +
+            "• [NEW] Aviso de chamada nao atendida: fixo, com cliente, telefone, horario e canal. Retornar liga direto pelo mesmo canal da chamada (0800 retorna pela Operadora); WhatsApp abre a conversa sem fechar o aviso. Um aviso por numero\n" +
+            "• [FIX] Contatos: nome editado nao volta mais ao antigo. Vale a alteracao mais recente entre WavenVoIP, Waven API e Google; a lista mostra a origem do contato e avisa quando algo nao foi enviado ao Google; contatos nao somem mais durante sincronizacoes simultaneas\n" +
+            "• [FIX] Desempenho: sincronizacoes fora da tela (sem travadas a cada ciclo), abertura mais rapida, arquivo de contatos e configuracao so sao regravados quando mudam, menos log\n" +
+            "• [FIX] Volta da suspensao do Windows: o ramal registra de novo e as sincronizacoes retomam assim que a rede responde; falha de rede nao e mais tratada como Google desconectado\n" +
+            "• [FIX] Telas mais nitidas (texto sem borrao em 125%/150%) e visual atualizado nas abas, chamada e chamada recebida\n" +
+            "• [NEW] Historico: filtro 'Fora do Horario' — ligacoes que chegaram fora do expediente e ouviram a mensagem automatica (confirmado pelo anuncio no CDR, nao pelo relogio). Aparecem como 'Fora do horario / Mensagem automatica', nao sao perdidas e saem do filtro 'Recebidas'\n" +
+            "• [FIX] Historico: cada ligacao real tem o proprio registro. Ligacoes diferentes do mesmo numero em poucos minutos eram juntadas em uma so; agora a identidade e o linkedid do Asterisk (as pernas de fila, URA e transferencia de uma mesma ligacao continuam em um unico registro). Registros dentro da janela do CDR sao recuperados no primeiro sync\n" +
+            "• [FIX] Historico: a 'entrada' que e so o retorno de uma ligacao feita pelo proprio ramal para uma linha da empresa aparece como 'Evento tecnico' e nao como chamada perdida\n" +
+            "• [FIX] Avisos de perdida: a perdida continua no Historico e nos indicadores, mas nao gera popup nem pendencia quando o mesmo numero foi atendido depois; perdidas seguidas do mesmo numero abrem um unico popup\n" +
+            "• [NEW] Historico: fora do horario que segue ate a caixa postal 400 tambem entra no filtro 'Fora do Horario'\n" +
+            "• [FIX] Historico: chamada que so a URA atendeu (cliente desligou no menu) mostra 'URA (sem atendente)' em vez de ficar sem atendente\n" +
+            "• [FIX] Painel: Recebidas, Total de atendimentos e tempo medio contam so o que um operador atendeu (URA abandonada e fora do horario ficam de fora)\n" +
+            "• [FIX] Audio: nivelamento automatico do microfone com limitador (sem clipping). O microfone ia cru para a rede e o operador ficava 9 a 18 dB abaixo do cliente nas gravacoes; agora a fala e levada ao mesmo nivel. Desligavel com MicAutoGainEnabled=false no sipconfig.json\n" +
+            "• [FIX] Conferencia: ao unir a chamada atual a sala, o WavenVoIP leva o canal do proprio ramal e a ponta real da conversa; antes, em chamada vinda de fila, podia levar as duas metades de um canal interno (laco de audio/eco) ou a perna do participante. Sem escolha segura, a uniao e recusada e a chamada fica como estava\n" +
+            "• [SAFE] Classificacao (Recebida/Perdida/Realizada...), atendente, duracao, canal e gravacao das demais chamadas inalterados (158 de 158 iguais a 2.4.7 no CDR real de 7 dias). Reproducao de audio, Waven API e Auto Update inalterados\n" +
+            "\n" +
             "v2.4.7 — Historico incremental e validacao de DDD (09/10/2026)\n" +
             "• [PERF] Historico/CDR via Waven API agora e incremental: a janela completa e baixada uma vez e os ciclos seguintes trazem so as chamadas novas (resposta de ~100 bytes em vez de ~200 KB a cada 2-5 s)\n" +
             "• [SAFE] Download completo continua na primeira sincronizacao, no botao 'Atualizar CDR', apos qualquer falha da API e a cada 10 minutos (reconciliacao); compativel com Waven API antiga\n" +

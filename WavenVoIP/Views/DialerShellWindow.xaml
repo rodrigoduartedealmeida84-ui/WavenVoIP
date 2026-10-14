@@ -29,7 +29,7 @@
                                 <ToggleButton.Template>
                                     <ControlTemplate TargetType="ToggleButton">
                                         <Border x:Name="bd" Background="White" CornerRadius="10"
-                                                BorderBrush="#DDD6FE" BorderThickness="1">
+                                                BorderBrush="#E2E8F0" BorderThickness="1">
                                             <Grid>
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="Auto"/>
@@ -37,11 +37,11 @@
                                                     <ColumnDefinition Width="22"/>
                                                 </Grid.ColumnDefinitions>
                                                 <TextBlock Grid.Column="0" Text="&#xE71C;" FontFamily="Segoe MDL2 Assets"
-                                                           FontSize="11" Foreground="#7C3AED"
-                                                           VerticalAlignment="Center" Margin="10,0,4,0" IsHitTestVisible="False"/>
+                                                           FontSize="11" Foreground="#64748B"
+                                                           VerticalAlignment="Center" Margin="12,1,4,0" IsHitTestVisible="False"/>
                                                 <ContentPresenter Grid.Column="1" IsHitTestVisible="False"
                                                                   VerticalAlignment="Center" HorizontalAlignment="Left"/>
-                                                <Path Grid.Column="2" Data="M0,0 L4,4 L8,0" Stroke="#7C3AED"
+                                                <Path Grid.Column="2" Data="M0,0 L4,4 L8,0" Stroke="#64748B"
                                                       StrokeThickness="1.5" Width="8" Height="5" Stretch="Fill"
                                                       VerticalAlignment="Center" HorizontalAlignment="Center" IsHitTestVisible="False"/>
                                             </Grid>
@@ -66,14 +66,14 @@
                                       MinWidth="{TemplateBinding ActualWidth}" MaxHeight="280">
                                     <Border Background="White" CornerRadius="10" Margin="0,3,0,0"
                                             BorderBrush="#DDD6FE" BorderThickness="1">
-                                        <Border.Effect>
+                                        <Grid><Border Margin="0" CornerRadius="10" Background="White" IsHitTestVisible="False"><Border.Effect>
                                             <DropShadowEffect BlurRadius="14" ShadowDepth="2" Opacity="0.12" Color="#000000"/>
-                                        </Border.Effect>
+                                        </Border.Effect></Border>
                                         <ScrollViewer Margin="4,4">
                                             <StackPanel IsItemsHost="True"
                                                         KeyboardNavigation.DirectionalNavigation="Contained"/>
                                         </ScrollViewer>
-                                    </Border>
+                                    </Grid></Border>
                                 </Grid>
                             </Popup>
                         </Grid>
@@ -120,53 +120,90 @@
             </Setter>
         </Style>
 
-        <Style x:Key="TopNavButton" TargetType="Button">
-            <Setter Property="Height" Value="34"/>
-            <Setter Property="MinWidth" Value="108"/>
-            <Setter Property="Padding" Value="13,0"/>
-            <Setter Property="Margin" Value="0,0,4,0"/>
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="Foreground" Value="#64748B"/>
-            <Setter Property="BorderBrush" Value="Transparent"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="FontSize" Value="13.5"/>
+        <!-- v2.5.0 — abas do topo: trilho cinza-lilás; aba ativa em pílula com degradê violeta e texto branco.
+             Sem DropShadowEffect (borra o texto); o realce é só cor. -->
+        <LinearGradientBrush x:Key="NavActivePill" StartPoint="0,0" EndPoint="1,1">
+            <GradientStop Color="#8B5CF6" Offset="0"/>
+            <GradientStop Color="#6D28D9" Offset="1"/>
+        </LinearGradientBrush>
+
+        <!-- rótulo e ícone das abas: "Segoe UI Variable Text" é a variante desenhada para texto
+             pequeno (mais nítida que a Display em 13 px); ícones da fonte Fluent do Windows (vetor
+             com hinting), com MDL2 como reserva no Windows 10. FontFamily explícita porque o estilo
+             implícito de TextBlock do App.xaml fixa a Display. -->
+        <Style x:Key="NavLabel" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="FontFamily" Value="Segoe UI Variable Text, Segoe UI"/>
+            <Setter Property="FontSize" Value="13"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style x:Key="NavIcon" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets"/>
+            <Setter Property="FontSize" Value="15"/>
+            <Setter Property="Margin" Value="0,0,8,0"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+
+        <Style x:Key="TopNavButton" TargetType="Button">
+            <Setter Property="Height" Value="38"/>
+            <Setter Property="MinWidth" Value="0"/>
+            <Setter Property="Padding" Value="15,0"/>
+            <Setter Property="Margin" Value="0,0,2,0"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="#334155"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="bd"
-                                Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="12">
+                        <Border x:Name="bd" Background="{TemplateBinding Background}"
+                                BorderBrush="Transparent" BorderThickness="1"
+                                CornerRadius="11" Padding="{TemplateBinding Padding}">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="bd" Property="Background" Value="#F4F1FF"/>
-                                <Setter TargetName="bd" Property="BorderBrush" Value="#DDD6FE"/>
+                                <Setter TargetName="bd" Property="Background" Value="White"/>
+                                <Setter TargetName="bd" Property="BorderBrush" Value="#E9E5F5"/>
                                 <Setter Property="Foreground" Value="#5B21B6"/>
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="bd" Property="Opacity" Value="0.82"/>
+                                <Setter TargetName="bd" Property="Opacity" Value="0.85"/>
                             </Trigger>
-                            <!-- Active: LAST — wins over IsMouseOver on same properties -->
-                            <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}" Value="active">
-                                <Setter TargetName="bd" Property="Background">
-                                    <Setter.Value>
-                                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                                            <GradientStop Color="#A78BFA" Offset="0"/>
-                                            <GradientStop Color="#C4B5FD" Offset="1"/>
-                                        </LinearGradientBrush>
-                                    </Setter.Value>
-                                </Setter>
-                                <Setter TargetName="bd" Property="BorderBrush" Value="#6D28D9"/>
-                                <Setter TargetName="bd" Property="BorderThickness" Value="2"/>
-                                <Setter Property="Foreground" Value="#1E0A4B"/>
-                                <Setter Property="FontWeight" Value="Bold"/>
-                            </DataTrigger>
+                            <!-- Ativa: por último — vence o IsMouseOver -->
+                            <Trigger Property="Tag" Value="active">
+                                <Setter TargetName="bd" Property="Background" Value="{StaticResource NavActivePill}"/>
+                                <Setter TargetName="bd" Property="BorderBrush" Value="#7C3AED"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Botão do usuário: cartão branco; a situação (Online/Offline) aparece no ponto do avatar e
+             na cor da segunda linha, pintados pelo código. Sem sombra. -->
+        <Style x:Key="StatusPillButton" TargetType="Button">
+            <Setter Property="Foreground" Value="#0F172A"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bd" Background="White" BorderBrush="#E6E2F1" BorderThickness="1" CornerRadius="14">
+                            <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="Left" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="#FAF8FF"/>
+                                <Setter TargetName="bd" Property="BorderBrush" Value="#C4B5FD"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="#F3EEFF"/>
+                            </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
@@ -174,8 +211,8 @@
         </Style>
 
         <Style x:Key="DialKeyButton" TargetType="Button">
-            <Setter Property="Width" Value="78"/>
-            <Setter Property="Height" Value="46"/>
+            <Setter Property="Width" Value="100"/>
+            <Setter Property="Height" Value="48"/>
             <Setter Property="FontSize" Value="20"/>
             <Setter Property="FontWeight" Value="Bold"/>
             <Setter Property="Padding" Value="0"/>
@@ -199,6 +236,117 @@
                             <Trigger Property="IsPressed" Value="True">
                                 <Setter TargetName="bd" Property="Background" Value="#DDD6FE"/>
                                 <Setter TargetName="bd" Property="Opacity" Value="0.90"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- v2.5.0 — topo do Histórico: botões de ação, seletor "Não atendidas" e subfiltros -->
+        <Style x:Key="HistAcaoButton" TargetType="Button">
+            <Setter Property="Height" Value="36"/>
+            <Setter Property="Padding" Value="14,0"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="#334155"/>
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="BorderBrush" Value="#E2E8F0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="UseLayoutRounding" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="#F8FAFC"/>
+                                <Setter TargetName="bd" Property="BorderBrush" Value="#CBD5E1"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True"><Setter TargetName="bd" Property="Background" Value="#F1F5F9"/></Trigger>
+                            <Trigger Property="IsEnabled" Value="False"><Setter TargetName="bd" Property="Opacity" Value="0.55"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="HistAcaoPrincipalButton" TargetType="Button" BasedOn="{StaticResource HistAcaoButton}">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bd" Background="#7C3AED" CornerRadius="10" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" TextElement.Foreground="White"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="bd" Property="Background" Value="#6D28D9"/></Trigger>
+                            <Trigger Property="IsPressed" Value="True"><Setter TargetName="bd" Property="Background" Value="#5B21B6"/></Trigger>
+                            <Trigger Property="IsEnabled" Value="False"><Setter TargetName="bd" Property="Opacity" Value="0.60"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="HistNaoAtendidasToggle" TargetType="ToggleButton">
+            <Setter Property="Height" Value="36"/>
+            <Setter Property="Padding" Value="12,0"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="#B91C1C"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="UseLayoutRounding" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="bd" Background="#FEF2F2" BorderBrush="#FCA5A5" BorderThickness="1" CornerRadius="10" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="#FEE2E2"/>
+                                <Setter TargetName="bd" Property="BorderBrush" Value="#F87171"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="#DC2626"/>
+                                <Setter TargetName="bd" Property="BorderBrush" Value="#DC2626"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="HistSubFiltroRadio" TargetType="RadioButton">
+            <Setter Property="Height" Value="28"/>
+            <Setter Property="Margin" Value="6,0,0,0"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="#B91C1C"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="UseLayoutRounding" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="bd" Background="White" BorderBrush="#FCA5A5" BorderThickness="1" CornerRadius="14" Padding="12,0">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock x:Name="rot" Text="{TemplateBinding Content}" Foreground="{TemplateBinding Foreground}" VerticalAlignment="Center"/>
+                                <TextBlock x:Name="num" Text="{TemplateBinding Tag}" Foreground="{TemplateBinding Foreground}" FontWeight="Bold" Margin="7,0,0,0" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="bd" Property="Background" Value="#FEE2E2"/></Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="#DC2626"/>
+                                <Setter TargetName="bd" Property="BorderBrush" Value="#DC2626"/>
+                                <Setter Property="Foreground" Value="White"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -267,11 +415,11 @@
                                 CornerRadius="12"
                                 Padding="5,4"
                                 MinWidth="200">
-                            <Border.Effect>
+                            <Grid><Border Margin="-5,-4" CornerRadius="12" Background="White" IsHitTestVisible="False"><Border.Effect>
                                 <DropShadowEffect BlurRadius="22" ShadowDepth="5" Opacity="0.14" Color="#000000"/>
-                            </Border.Effect>
+                            </Border.Effect></Border>
                             <StackPanel IsItemsHost="True"/>
-                        </Border>
+                        </Grid></Border>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
@@ -330,56 +478,77 @@
             </Grid.RowDefinitions>
 
             <!-- ══ HEADER: Logo | Nav | Status ════════════════════════════ -->
-            <Border Background="White" BorderBrush="#ECEEF5" BorderThickness="0,0,0,1">
-                <Grid Margin="16,0">
+            <!-- v2.5.0: fundo branco com leve lilás à direita e filete inferior em degradê da marca -->
+            <Border BorderThickness="0,0,0,2">
+                <Border.Background>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                        <GradientStop Color="#FFFFFF" Offset="0"/>
+                        <GradientStop Color="#FFFFFF" Offset="0.55"/>
+                        <GradientStop Color="#F7F3FF" Offset="1"/>
+                    </LinearGradientBrush>
+                </Border.Background>
+                <Border.BorderBrush>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                        <GradientStop Color="#EDE9FE" Offset="0"/>
+                        <GradientStop Color="#8B5CF6" Offset="0.3"/>
+                        <GradientStop Color="#C026D3" Offset="0.55"/>
+                        <GradientStop Color="#6366F1" Offset="0.8"/>
+                        <GradientStop Color="#EDE9FE" Offset="1"/>
+                    </LinearGradientBrush>
+                </Border.BorderBrush>
+                <Grid Margin="18,0,16,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
 
-                    <!-- Logo horizontal (400×100) → Height 44 = 176px wide -->
-                    <Image Grid.Column="0"
-                           Source="/Assets/Brand/waven_logo_compact_dark.png"
-                           Height="44"
-                           Stretch="Uniform"
-                           RenderOptions.BitmapScalingMode="HighQuality"
-                           SnapsToDevicePixels="True" UseLayoutRounding="True"
-                           VerticalAlignment="Center"
-                           Margin="0,10,18,10"/>
+                    <!-- Logo: símbolo da marca (164 px, reduzido para 38 DIP: nítido até 150%+) e nome em texto -->
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,11,20,11">
+                        <Image Source="/Assets/Brand/waven_mark.png" Width="40" Height="40" Stretch="Uniform"
+                               RenderOptions.BitmapScalingMode="HighQuality" VerticalAlignment="Center"/>
+                        <StackPanel VerticalAlignment="Center" Margin="10,0,0,0">
+                            <TextBlock Text="Waven" FontSize="20" FontWeight="Bold" Foreground="#1E1B4B" LineHeight="22"
+                                       LineStackingStrategy="BlockLineHeight"/>
+                            <TextBlock Text="VoIP" FontFamily="Segoe UI Variable Text, Segoe UI" FontSize="11" FontWeight="SemiBold" Margin="1,1,0,0">
+                                <TextBlock.Foreground>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                        <GradientStop Color="#7C3AED" Offset="0"/>
+                                        <GradientStop Color="#C026D3" Offset="1"/>
+                                    </LinearGradientBrush>
+                                </TextBlock.Foreground>
+                            </TextBlock>
+                        </StackPanel>
+                    </StackPanel>
 
                     <!-- Nav — centrado horizontalmente no header -->
-                    <StackPanel Grid.Column="1" Orientation="Horizontal"
-                                HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <Border Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center"
+                            Background="#F5F4F9" BorderBrush="#ECEAF3" BorderThickness="1" CornerRadius="15" Padding="4">
+                    <StackPanel Orientation="Horizontal">
                         <Button x:Name="btnNavDiscagem" Style="{StaticResource TopNavButton}" Click="NavDiscagem_Click">
                             <StackPanel Orientation="Horizontal">
-                                <Viewbox Width="16" Height="16" Margin="0,0,7,0" VerticalAlignment="Center">
-                                    <Path Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" Data="M6.62,10.79C8.06,13.62 10.38,15.93 13.21,17.38L15.41,15.18C15.68,14.91 16.08,14.82 16.43,14.94C17.54,15.31 18.73,15.5 20,15.5C20.55,15.5 21,15.95 21,16.5V20C21,20.55 20.55,21 20,21C10.61,21 3,13.39 3,4C3,3.45 3.45,3 4,3H7.5C8.05,3 8.5,3.45 8.5,4C8.5,5.25 8.7,6.45 9.06,7.57C9.17,7.92 9.08,8.31 8.81,8.59L6.62,10.79Z"/>
-                                </Viewbox>
-                                <TextBlock Text="Discagem" VerticalAlignment="Center"/>
+                                <TextBlock Text="&#xE717;" Style="{StaticResource NavIcon}"/>
+                                <TextBlock Text="Discagem" Style="{StaticResource NavLabel}"/>
                             </StackPanel>
                         </Button>
                         <Button x:Name="btnNavContatos" Style="{StaticResource TopNavButton}" Click="NavContatos_Click">
                             <StackPanel Orientation="Horizontal">
-                                <Viewbox Width="16" Height="16" Margin="0,0,7,0" VerticalAlignment="Center">
-                                    <Path Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" Data="M12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z"/>
-                                </Viewbox>
-                                <TextBlock Text="Contatos" VerticalAlignment="Center"/>
+                                <TextBlock Text="&#xE77B;" Style="{StaticResource NavIcon}"/>
+                                <TextBlock Text="Contatos" Style="{StaticResource NavLabel}"/>
                             </StackPanel>
                         </Button>
                         <!-- Badge wrapper for Histórico nav button -->
-                        <Grid Margin="0,0,6,0">
+                        <Grid Margin="0,0,2,0">
                             <Button x:Name="btnNavHistorico" Style="{StaticResource TopNavButton}" Margin="0" Click="NavHistorico_Click">
                                 <StackPanel Orientation="Horizontal">
-                                    <Viewbox Width="16" Height="16" Margin="0,0,7,0" VerticalAlignment="Center">
-                                        <Path Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" Data="M13,3A9,9 0 0,0 4,12H1L4.89,15.89L4.96,16.03L9,12H6A7,7 0 0,1 13,5A7,7 0 0,1 20,12A7,7 0 0,1 13,19C11.07,19 9.32,18.21 8.06,16.94L6.64,18.36C8.27,19.99 10.51,21 13,21A9,9 0 0,0 22,12A9,9 0 0,0 13,3M12,8V13L16.28,15.54L17,14.33L13.5,12.25V8H12Z"/>
-                                    </Viewbox>
-                                    <TextBlock Text="Histórico" VerticalAlignment="Center"/>
+                                    <TextBlock Text="&#xE81C;" Style="{StaticResource NavIcon}"/>
+                                    <TextBlock Text="Histórico" Style="{StaticResource NavLabel}"/>
                                 </StackPanel>
                             </Button>
-                            <Border x:Name="badgePerdidas" Width="18" Height="18" CornerRadius="9"
-                                    Background="#DC2626" HorizontalAlignment="Right" VerticalAlignment="Top"
-                                    Margin="0,-5,-5,0" Visibility="Collapsed">
+                            <Border x:Name="badgePerdidas" MinWidth="20" Height="20" CornerRadius="10" Padding="4,0"
+                                    Background="#E11D48" BorderBrush="White" BorderThickness="2"
+                                    HorizontalAlignment="Right" VerticalAlignment="Top"
+                                    Margin="0,-7,-5,0" Visibility="Collapsed">
                                 <TextBlock x:Name="txtBadgePerdidas" Text="0" FontSize="9"
                                            FontWeight="Bold" Foreground="White"
                                            HorizontalAlignment="Center" VerticalAlignment="Center"/>
@@ -387,28 +556,25 @@
                         </Grid>
                         <Button x:Name="btnNavConfiguracoes" Style="{StaticResource TopNavButton}" Click="NavConfiguracoes_Click">
                             <StackPanel Orientation="Horizontal">
-                                <Viewbox Width="16" Height="16" Margin="0,0,7,0" VerticalAlignment="Center">
-                                    <Path Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" Data="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.21,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,13L2.46,14.63C2.27,14.78 2.21,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.68 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/>
-                                </Viewbox>
-                                <TextBlock Text="Configurações" VerticalAlignment="Center"/>
+                                <TextBlock Text="&#xE713;" Style="{StaticResource NavIcon}"/>
+                                <TextBlock Text="Configurações" Style="{StaticResource NavLabel}"/>
                             </StackPanel>
                         </Button>
-                        <Button x:Name="btnNavDashboard" Style="{StaticResource TopNavButton}" Click="NavDashboard_Click">
+                        <Button x:Name="btnNavDashboard" Style="{StaticResource TopNavButton}" Margin="0" Click="NavDashboard_Click">
                             <StackPanel Orientation="Horizontal">
-                                <Viewbox Width="16" Height="16" Margin="0,0,7,0" VerticalAlignment="Center">
-                                    <Path Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" Data="M22,21H2V3H4V19H6V10H10V19H12V6H16V19H18V14H22V21Z"/>
-                                </Viewbox>
-                                <TextBlock Text="Dashboard" VerticalAlignment="Center"/>
+                                <TextBlock Text="&#xE9D2;" Style="{StaticResource NavIcon}"/>
+                                <TextBlock Text="Dashboard" Style="{StaticResource NavLabel}"/>
                             </StackPanel>
                         </Button>
                     </StackPanel>
+                    </Border>
 
                     <!-- Status/DND button: nome · ramal · status -->
                     <Button x:Name="btnDndToggle" Grid.Column="2"
-                            Background="#22C55E" Height="36" MinWidth="160"
-                            Style="{StaticResource PrimaryButtonStyle}"
+                            Height="46" MinWidth="180"
+                            Style="{StaticResource StatusPillButton}"
                             VerticalAlignment="Center"
-                            Click="BtnDndToggle_Click" Padding="10,0">
+                            Click="BtnDndToggle_Click" Padding="6,0,14,0">
                         <Button.ContextMenu>
                             <ContextMenu Style="{StaticResource ModernContextMenuStyle}">
                                 <MenuItem x:Name="menuOnline" Style="{StaticResource ModernMenuItemStyle}" Click="MenuOnline_Click">
@@ -439,15 +605,29 @@
                             </ContextMenu>
                         </Button.ContextMenu>
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <Border x:Name="dotStatusBtn" Width="8" Height="8" CornerRadius="4"
-                                    Background="White" Margin="0,0,8,0" VerticalAlignment="Center"/>
-                            <StackPanel VerticalAlignment="Center" Margin="0,0,8,0">
-                                <TextBlock x:Name="txtDndNomeRamal" Text="Carregando..." FontSize="12"
-                                           FontWeight="Bold" Foreground="White"/>
-                                <TextBlock x:Name="txtDndStatusLabel" Text="Online" FontSize="10"
-                                           Foreground="#BBF7D0"/>
+                            <!-- avatar em degradê da marca com o ponto de status no canto -->
+                            <Grid Width="34" Height="34" Margin="0,0,10,0" VerticalAlignment="Center">
+                                <Border CornerRadius="17">
+                                    <Border.Background>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                            <GradientStop Color="#8B5CF6" Offset="0"/>
+                                            <GradientStop Color="#6D28D9" Offset="1"/>
+                                        </LinearGradientBrush>
+                                    </Border.Background>
+                                    <TextBlock Text="&#xE77B;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="15" Foreground="White"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                                <Border x:Name="dotStatusBtn" Width="12" Height="12" CornerRadius="6"
+                                        Background="#22C55E" BorderBrush="White" BorderThickness="2"
+                                        HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-1,-1"/>
+                            </Grid>
+                            <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                                <TextBlock x:Name="txtDndNomeRamal" Text="Carregando..." FontFamily="Segoe UI Variable Text, Segoe UI"
+                                           FontSize="13" FontWeight="SemiBold" Foreground="#0F172A"/>
+                                <TextBlock x:Name="txtDndStatusLabel" Text="Online" FontFamily="Segoe UI Variable Text, Segoe UI"
+                                           FontSize="11" FontWeight="SemiBold" Foreground="#16A34A" Margin="0,1,0,0"/>
                             </StackPanel>
-                            <Path Data="M0,0 L5,5 L10,0" Stroke="White" StrokeThickness="1.5"
+                            <Path Data="M0,0 L5,5 L10,0" Stroke="#94A3B8" StrokeThickness="1.6"
                                   Width="9" Height="5" Stretch="Fill" VerticalAlignment="Center"/>
                         </StackPanel>
                     </Button>
@@ -474,15 +654,16 @@
                                 </Grid.ColumnDefinitions>
 
                                 <!-- Dialer block — centered vertically in the available space. -->
-                                <StackPanel Grid.Column="0"
-                                            HorizontalAlignment="Center"
-                                            VerticalAlignment="Center"
-                                            Margin="0,0,0,40">
+                                <Border Grid.Column="0" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                        Background="White" CornerRadius="22" BorderBrush="#E7EAF3" BorderThickness="1"
+                                        Padding="30,22">
+<Grid><Border Margin="-30,-22" CornerRadius="22" Background="White" IsHitTestVisible="False"><Border.Effect><StaticResourceExtension ResourceKey="CardShadow"/></Border.Effect></Border>
+                                <StackPanel>
 
                                     <!-- Number input -->
                                     <Border Background="White"
                                             CornerRadius="16"
-                                            Width="560" Height="46" Margin="0,0,0,8">
+                                            Width="320" Height="48" Margin="0,0,0,10">
                                         <Border.Style>
                                             <Style TargetType="Border">
                                                 <Setter Property="BorderBrush"     Value="#DDD6FE"/>
@@ -504,7 +685,7 @@
                                                      Background="Transparent"
                                                      BorderThickness="0"
                                                      FocusVisualStyle="{x:Null}"
-                                                     Padding="48,0,96,0"
+                                                     Padding="46,0,46,0"
                                                      TextWrapping="NoWrap"
                                                      HorizontalScrollBarVisibility="Auto"
                                                      ToolTip="Digite o número ou use o teclado">
@@ -525,18 +706,20 @@
                                                        FontSize="15" FontWeight="Normal" Foreground="#94A3B8"
                                                        HorizontalAlignment="Center" VerticalAlignment="Center"
                                                        IsHitTestVisible="False"/>
-                                            <Button Content="⌫"
+                                            <Button Width="40" Height="36"
                                                     HorizontalAlignment="Right"
                                                     VerticalAlignment="Center"
-                                                    Margin="0,0,6,0"
+                                                    Margin="0,0,5,0"
                                                     Style="{StaticResource InputEraseButton}"
                                                     ToolTip="Apagar último dígito"
-                                                    Click="BtnApagar_Click"/>
+                                                    Click="BtnApagar_Click">
+                                                <TextBlock Text="&#xE750;" FontFamily="Segoe MDL2 Assets" FontSize="16" FontWeight="Normal" Foreground="#475569"/>
+                                            </Button>
                                         </Grid>
                                     </Border>
 
                                     <!-- Numeric keypad -->
-                                    <UniformGrid Rows="4" Columns="3" HorizontalAlignment="Center" Width="278">
+                                    <UniformGrid Rows="4" Columns="3" HorizontalAlignment="Center" Width="320">
                                         <Button Tag="1" Click="Tecla_Click" Style="{StaticResource DialKeyButton}"><StackPanel><TextBlock Text="1" HorizontalAlignment="Center"/><TextBlock Text="" FontSize="9" HorizontalAlignment="Center"/></StackPanel></Button>
                                         <Button Tag="2" Click="Tecla_Click" Style="{StaticResource DialKeyButton}"><StackPanel><TextBlock Text="2" HorizontalAlignment="Center"/><TextBlock Text="ABC" FontSize="9" Foreground="#64748B" HorizontalAlignment="Center"/></StackPanel></Button>
                                         <Button Tag="3" Click="Tecla_Click" Style="{StaticResource DialKeyButton}"><StackPanel><TextBlock Text="3" HorizontalAlignment="Center"/><TextBlock Text="DEF" FontSize="9" Foreground="#64748B" HorizontalAlignment="Center"/></StackPanel></Button>
@@ -566,9 +749,6 @@
                                                 Style="{StaticResource IconActionButton}"
                                                 ToolTip="Ligar"
                                                 Click="BtnLigar_Click">
-                                            <Button.Effect>
-                                                <DropShadowEffect BlurRadius="8" ShadowDepth="2" Opacity="0.14" Color="#16A34A"/>
-                                            </Button.Effect>
                                             <Viewbox Width="26" Height="26"><Path Fill="White" Data="M6.62,10.79C8.06,13.62 10.38,15.93 13.21,17.38L15.41,15.18C15.68,14.91 16.08,14.82 16.43,14.94C17.54,15.31 18.73,15.5 20,15.5C20.55,15.5 21,15.95 21,16.5V20C21,20.55 20.55,21 20,21C10.61,21 3,13.39 3,4C3,3.45 3.45,3 4,3H7.5C8.05,3 8.5,3.45 8.5,4C8.5,5.25 8.7,6.45 9.06,7.57C9.17,7.92 9.08,8.31 8.81,8.59L6.62,10.79Z"/></Viewbox>
                                         </Button>
 
@@ -587,22 +767,55 @@
                                                 Style="{StaticResource SecondaryButtonStyle}"
                                                 Click="BtnLimparNumero_Click"/>
                                     </Grid>
+
+                                    <!-- v2.5.0: Puxar Ligação — mesma coluna do teclado, logo abaixo do botão de ligar -->
+                                    <Button x:Name="btnPuxarLigacao" HorizontalAlignment="Center" Margin="0,14,0,0"
+                                            Width="320" Height="46" Cursor="Hand" UseLayoutRounding="True" SnapsToDevicePixels="True"
+                                            ToolTip="Ver as ligações em andamento, na fila ou no atendimento automático e assumir uma delas no seu ramal"
+                                            Click="BtnPuxarLigacao_Click">
+                                        <Button.Template>
+                                            <ControlTemplate TargetType="Button">
+                                                <Border x:Name="bd" CornerRadius="14" BorderThickness="1" BorderBrush="#DDD6FE" Background="#F5F3FF">
+                                                    <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="Auto"/>
+                                                            <ColumnDefinition Width="Auto"/>
+                                                        </Grid.ColumnDefinitions>
+                                                        <Border Grid.Column="0" Width="28" Height="28" CornerRadius="14" Background="#7C3AED" Margin="0,0,10,0" VerticalAlignment="Center">
+                                                            <TextBlock Text="&#xE717;" FontFamily="Segoe MDL2 Assets" FontSize="14" Foreground="White"
+                                                                       HorizontalAlignment="Center" VerticalAlignment="Center" TextOptions.TextFormattingMode="Display"/>
+                                                        </Border>
+                                                        <TextBlock Grid.Column="1" Text="Puxar Ligação" Foreground="#5B21B6" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                                    </Grid>
+                                                </Border>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="bd" Property="Background" Value="#EDE9FE"/>
+                                                        <Setter TargetName="bd" Property="BorderBrush" Value="#C4B5FD"/>
+                                                    </Trigger>
+                                                    <Trigger Property="IsPressed" Value="True"><Setter TargetName="bd" Property="Background" Value="#DDD6FE"/></Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Button.Template>
+                                    </Button>
                                 </StackPanel>
+                                </Grid></Border>
 
                                 <!-- ⭐ Favorites sidebar -->
                                 <Border Grid.Column="1"
-                                        Background="#FAFBFF" BorderBrush="#EDE9FE"
-                                        BorderThickness="1" CornerRadius="14"
-                                        Padding="12" Margin="12,0,0,0">
+                                        Background="White" BorderBrush="#E7EAF3"
+                                        BorderThickness="1" CornerRadius="16"
+                                        Padding="14,12" Margin="12,0,0,0">
                                     <Grid>
                                         <Grid.RowDefinitions>
                                             <RowDefinition Height="Auto"/>
                                             <RowDefinition Height="*"/>
                                         </Grid.RowDefinitions>
 
-                                        <TextBlock Grid.Row="0" Text="⭐ Favoritos"
-                                                   FontSize="14" FontWeight="Bold"
-                                                   Foreground="#4C1D95" Margin="0,0,0,10"/>
+                                        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
+                                            <TextBlock Text="&#xE735;" FontFamily="Segoe MDL2 Assets" FontSize="14" Foreground="#F59E0B" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                            <TextBlock Text="Favoritos" FontSize="14" FontWeight="Bold" Foreground="#4C1D95" VerticalAlignment="Center"/>
+                                        </StackPanel>
 
                                         <Grid Grid.Row="1">
                                             <TextBlock x:Name="txtFavoritosVazio"
@@ -616,7 +829,7 @@
                                                 <ItemsControl x:Name="listFavoritos">
                                                     <ItemsControl.ItemTemplate>
                                                         <DataTemplate>
-                                                            <Border Padding="2,7" BorderBrush="#EDE9FE" BorderThickness="0,0,0,1">
+                                                            <Border Padding="2,7" BorderBrush="#F1F0FA" BorderThickness="0,0,0,1">
                                                                 <Grid>
                                                                     <Grid.ColumnDefinitions>
                                                                         <ColumnDefinition Width="26"/>
@@ -655,7 +868,7 @@
                                                                                 Width="24" Height="24" Background="#FEE2E2"
                                                                                 ToolTip="Remover dos favoritos"
                                                                                 Click="BtnRemoverFavorito_Click">
-                                                                            <TextBlock Text="✕" FontSize="11" Foreground="#EF4444" FontWeight="Bold"/>
+                                                                            <TextBlock Text="&#xE711;" FontFamily="Segoe MDL2 Assets" FontSize="9" Foreground="#EF4444"/>
                                                                         </Button>
                                                                     </StackPanel>
                                                                 </Grid>
@@ -670,7 +883,7 @@
                             </Grid>
 
                             <!-- Status bar — always in its own Auto row, never overlapped -->
-                            <Border Grid.Row="1" Background="#FAFBFF" BorderBrush="#EDE9FE" BorderThickness="1" CornerRadius="14" Padding="14,10" Margin="0,8,0,0">
+                            <Border Grid.Row="1" Background="White" BorderBrush="#E7EAF3" BorderThickness="1" CornerRadius="14" Padding="14,9" Margin="0,10,0,0">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto"/>
@@ -688,9 +901,9 @@
                             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                             <StackPanel Margin="0,0,0,8">
                                 <DockPanel>
-                                    <Button DockPanel.Dock="Right" Content="+ Adicionar contato" Height="34" Padding="12,0" Style="{StaticResource PrimaryButtonStyle}" Click="BtnAdicionarContato_Click" FontSize="12" VerticalAlignment="Center" Margin="8,0,0,0"/>
-                                    <Button DockPanel.Dock="Right" Content="↓ Exportar empresa" Height="34" Padding="10,0" Style="{StaticResource SecondaryButtonStyle}" Click="BtnExportarContatosEmpresa_Click" FontSize="12" VerticalAlignment="Center" Margin="8,0,0,0" ToolTip="Gerar company-contacts.json com contatos e favoritos atuais"/>
-                                    <Button x:Name="btnAtualizarContatos" DockPanel.Dock="Right" Height="34" Padding="10,0" Style="{StaticResource SecondaryButtonStyle}" Click="BtnAtualizarContatos_Click" FontSize="12" VerticalAlignment="Center">
+                                    <Button DockPanel.Dock="Right" Height="36" Padding="14,0" Style="{StaticResource PrimaryButtonStyle}" Click="BtnAdicionarContato_Click" FontSize="12" VerticalAlignment="Center" Margin="8,0,0,0"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE710;" FontFamily="Segoe MDL2 Assets" FontSize="12" Foreground="White" VerticalAlignment="Center" Margin="0,0,7,0"/><TextBlock Text="Adicionar contato" VerticalAlignment="Center"/></StackPanel></Button>
+                                    <Button DockPanel.Dock="Right" Height="36" Padding="12,0" Style="{StaticResource SecondaryButtonStyle}" Click="BtnExportarContatosEmpresa_Click" FontSize="12" VerticalAlignment="Center" Margin="8,0,0,0" ToolTip="Gerar company-contacts.json com contatos e favoritos atuais"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE896;" FontFamily="Segoe MDL2 Assets" FontSize="12" Foreground="#374151" VerticalAlignment="Center" Margin="0,0,7,0"/><TextBlock Text="Exportar empresa" VerticalAlignment="Center"/></StackPanel></Button>
+                                    <Button x:Name="btnAtualizarContatos" DockPanel.Dock="Right" Height="36" Padding="12,0" Margin="8,0,0,0" Style="{StaticResource SecondaryButtonStyle}" Click="BtnAtualizarContatos_Click" FontSize="12" VerticalAlignment="Center">
                                         <StackPanel Orientation="Horizontal">
                                             <Viewbox Width="13" Height="13" Margin="0,0,5,0" VerticalAlignment="Center">
                                                 <Canvas Width="24" Height="24"><Path Fill="#374151" Data="M17.65,6.35C16.2,4.9 14.21,4 12,4C7.58,4 4.01,7.58 4.01,12C4.01,16.42 7.58,20 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18C8.69,18 6,15.31 6,12C6,8.69 8.69,6 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/></Canvas>
@@ -698,13 +911,13 @@
                                             <TextBlock x:Name="txtBtnAtualizarLabel" Text="Atualizar" VerticalAlignment="Center"/>
                                         </StackPanel>
                                     </Button>
-                                    <Border HorizontalAlignment="Stretch" Background="White" CornerRadius="16" BorderBrush="#E7EAF3" BorderThickness="1" Height="44">
+                                    <Border HorizontalAlignment="Stretch" Background="White" CornerRadius="12" BorderBrush="#E7EAF3" BorderThickness="1" Height="40">
                                         <DockPanel Margin="12,0">
-                                            <TextBlock DockPanel.Dock="Left" Text="🔎" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                            <TextBlock DockPanel.Dock="Left" Text="&#xE721;" FontFamily="Segoe MDL2 Assets" FontSize="14" Foreground="#7C3AED" VerticalAlignment="Center" Margin="2,0,10,0"/>
                                             <Button x:Name="btnLimparBuscaContatos" DockPanel.Dock="Right" Click="BtnLimparBuscaContatos_Click" Width="22" Height="22" Margin="4,0,2,0" VerticalAlignment="Center" Style="{StaticResource IconActionButton}" Visibility="Collapsed" ToolTip="Limpar busca" Padding="0">
                                                 <TextBlock Text="✕" FontSize="11" Foreground="#94A3B8" VerticalAlignment="Center" HorizontalAlignment="Center"/>
                                             </Button>
-                                            <TextBox x:Name="txtBuscaContatosShell" BorderThickness="0" Background="Transparent" Height="38" Margin="0" Padding="0" VerticalContentAlignment="Center" TextChanged="TxtBuscaContatosShell_TextChanged" ToolTip="Buscar contato por nome, número ou observação"/>
+                                            <Grid><TextBox x:Name="txtBuscaContatosShell" BorderThickness="0" Background="Transparent" Height="36" Margin="0" Padding="0" VerticalContentAlignment="Center" TextChanged="TxtBuscaContatosShell_TextChanged" ToolTip="Buscar contato por nome, número ou observação"/><TextBlock Text="Buscar por nome, número ou observação" IsHitTestVisible="False" Foreground="#94A3B8" FontSize="13" VerticalAlignment="Center" Margin="2,0,0,0" TextTrimming="CharacterEllipsis"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding Text, ElementName=txtBuscaContatosShell}" Value=""><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock></Grid>
                                         </DockPanel>
                                     </Border>
                                 </DockPanel>
@@ -744,7 +957,18 @@
                                                                 </TextBlock.Style>
                                                             </TextBlock>
                                                         </StackPanel>
-                                                        <TextBlock Text="{Binding Observacao}" Foreground="{StaticResource MutedBrush}" FontSize="11" TextTrimming="CharacterEllipsis"/>
+                                                        <TextBlock Text="{Binding LinhaOrigem}" FontSize="11" TextTrimming="CharacterEllipsis" ToolTip="{Binding LinhaOrigem}">
+                                                            <TextBlock.Style>
+                                                                <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                                                                    <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding TemPendencia}" Value="True">
+                                                                            <Setter Property="Foreground" Value="#B45309"/>
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </TextBlock.Style>
+                                                        </TextBlock>
                                                     </StackPanel>
                                                     <TextBlock Grid.Column="2" Text="{Binding Numero}" VerticalAlignment="Center" FontSize="13" TextTrimming="CharacterEllipsis" Foreground="#475569"/>
                                                     <StackPanel Grid.Column="3" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
@@ -785,7 +1009,9 @@
                                                                 </TextBlock.Style>
                                                             </TextBlock>
                                                         </Button>
-                                                        <Button Content="Excluir" Tag="{Binding}" Style="{StaticResource SoftDangerButtonStyle}" Height="30" Padding="8,2" FontSize="11" Click="BtnExcluirContatoShell_Click"/>
+                                                        <Button Tag="{Binding}" Style="{StaticResource IconActionButton}" Width="34" Height="34" Margin="0" Background="#FEE2E2" ToolTip="Excluir contato" Click="BtnExcluirContatoShell_Click">
+                                                            <TextBlock Text="&#xE74D;" FontFamily="Segoe MDL2 Assets" FontSize="14" Foreground="#DC2626"/>
+                                                        </Button>
                                                     </StackPanel>
                                                 </Grid>
                                             </Border>
@@ -799,57 +1025,98 @@
                     <TabItem>
                         <Grid>
                             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                            <StackPanel Margin="0,0,0,8">
-                                <DockPanel LastChildFill="False">
-                                    <TextBlock Text="Histórico" FontSize="26" FontWeight="Bold" DockPanel.Dock="Left" VerticalAlignment="Center"/>
-                                    <Button x:Name="btnReprocessarHistorico" DockPanel.Dock="Right" Height="34" Padding="10,0" Style="{StaticResource SecondaryButtonStyle}" Click="BtnReprocessarHistorico_Click" FontSize="12" VerticalAlignment="Center" Margin="8,0,0,0" ToolTip="Corrigir números duplicados, remover ramais inválidos e revalidar URLs de gravação">
-                                        <TextBlock x:Name="txtBtnReprocessarLabel" Text="Reprocessar" VerticalAlignment="Center"/>
-                                    </Button>
-                                    <Button x:Name="btnAtualizarHistoricoCdr" DockPanel.Dock="Right" Height="34" Padding="10,0" Style="{StaticResource SecondaryButtonStyle}" Click="BtnAtualizarHistoricoCdr_Click" FontSize="12" VerticalAlignment="Center" Margin="8,0,0,0">
-                                        <StackPanel Orientation="Horizontal">
-                                            <Viewbox Width="13" Height="13" Margin="0,0,5,0" VerticalAlignment="Center">
-                                                <Canvas Width="24" Height="24"><Path Fill="#374151" Data="M17.65,6.35C16.2,4.9 14.21,4 12,4C7.58,4 4.01,7.58 4.01,12C4.01,16.42 7.58,20 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18C8.69,18 6,15.31 6,12C6,8.69 8.69,6 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/></Canvas>
-                                            </Viewbox>
-                                            <TextBlock x:Name="txtBtnHistoricoLabel" Text="Atualizar CDR" VerticalAlignment="Center"/>
+                            <StackPanel Margin="0,0,0,10" UseLayoutRounding="True" SnapsToDevicePixels="True">
+                                <!-- v2.5.0 — linha 1: título, situação do CDR e ações -->
+                                <Grid Margin="0,0,0,10">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="Histórico" FontSize="22" FontWeight="SemiBold" Foreground="#0F172A"/>
+                                        <TextBlock x:Name="txtStatusHistorico" Text="" FontSize="12" Foreground="#64748B" Margin="0,2,0,0" TextTrimming="CharacterEllipsis"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Button x:Name="btnAtualizarHistoricoCdr" Style="{StaticResource HistAcaoPrincipalButton}" Click="BtnAtualizarHistoricoCdr_Click" ToolTip="Buscar agora as ligações novas no PABX">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="&#xE72C;" FontFamily="Segoe MDL2 Assets" FontSize="13" VerticalAlignment="Center" Margin="0,1,8,0"/>
+                                                <TextBlock x:Name="txtBtnHistoricoLabel" Text="Atualizar CDR" VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                        </Button>
+                                        <Button x:Name="btnReprocessarHistorico" Style="{StaticResource HistAcaoButton}" Margin="8,0,0,0" Click="BtnReprocessarHistorico_Click" ToolTip="Corrigir números duplicados, remover ramais inválidos e revalidar URLs de gravação">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="&#xE90F;" FontFamily="Segoe MDL2 Assets" FontSize="13" Foreground="#64748B" VerticalAlignment="Center" Margin="0,1,8,0"/>
+                                                <TextBlock x:Name="txtBtnReprocessarLabel" Text="Reprocessar" VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                        </Button>
+                                    </StackPanel>
+                                </Grid>
+                                <!-- linha 2: busca e filtros numa barra só -->
+                                <Border Background="White" CornerRadius="12" BorderBrush="#E2E8F0" BorderThickness="1" Padding="8">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" MinWidth="200"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Border x:Name="bdBuscaHistorico" Background="#F8FAFC" CornerRadius="10" BorderBrush="#E2E8F0" BorderThickness="1" Height="36">
+                                            <DockPanel Margin="12,0,6,0">
+                                                <TextBlock DockPanel.Dock="Left" Text="&#xE721;" FontFamily="Segoe MDL2 Assets" FontSize="13" Foreground="#64748B" VerticalAlignment="Center" Margin="0,1,10,0"/>
+                                                <Button x:Name="btnLimparBuscaHistorico" DockPanel.Dock="Right" Click="BtnLimparBuscaHistorico_Click" Width="22" Height="22" Margin="4,0,0,0" VerticalAlignment="Center" Style="{StaticResource IconActionButton}" Visibility="Collapsed" ToolTip="Limpar busca" Padding="0">
+                                                    <TextBlock Text="&#xE711;" FontFamily="Segoe MDL2 Assets" FontSize="10" Foreground="#64748B" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                                                </Button>
+                                                <Grid>
+                                                    <TextBox x:Name="txtBuscaHistoricoShell" BorderThickness="0" Background="Transparent" Height="34" Margin="0" Padding="0" FontSize="13" Foreground="#0F172A" CaretBrush="#7C3AED" VerticalContentAlignment="Center" TextChanged="TxtBuscaHistoricoShell_TextChanged" ToolTip="Buscar por nome, número, canal ou tipo"/>
+                                                    <TextBlock Text="Buscar por nome, número, canal ou tipo" IsHitTestVisible="False" Foreground="#94A3B8" FontSize="13" VerticalAlignment="Center" Margin="2,0,0,0" TextTrimming="CharacterEllipsis">
+                                                        <TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding Text, ElementName=txtBuscaHistoricoShell}" Value=""><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+                                                    </TextBlock>
+                                                </Grid>
+                                            </DockPanel>
+                                        </Border>
+                                        <ToggleButton x:Name="btnFiltroNaoAtendidas" Grid.Column="1" Margin="8,0,0,0" Style="{StaticResource HistNaoAtendidasToggle}" Click="BtnFiltroNaoAtendidas_Click"
+                                                      ToolTip="Mostrar só as chamadas recebidas que ninguém atendeu: Perdida, Cliente desistiu e Abandono na fila. O número indica as que você ainda não viu.">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="&#xE778;" FontFamily="Segoe MDL2 Assets" FontSize="13" VerticalAlignment="Center" Margin="0,1,8,0"/>
+                                                <TextBlock Text="Não atendidas" VerticalAlignment="Center"/>
+                                                <Border x:Name="bdContNaoAtendidas" CornerRadius="9" MinWidth="22" Height="18" Padding="6,0" Margin="8,0,0,0" VerticalAlignment="Center" Background="#DC2626">
+                                                    <TextBlock x:Name="txtContNaoAtendidas" Text="0" FontSize="11" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                </Border>
+                                            </StackPanel>
+                                        </ToggleButton>
+                                        <ComboBox x:Name="cmbFiltroTipoHistorico" Grid.Column="2" Width="178" Height="36" Margin="8,0,0,0" VerticalAlignment="Center"
+                                                  Style="{StaticResource CompactFilterComboBox}" SelectedIndex="0" SelectionChanged="CmbFiltroTipoHistorico_SelectionChanged">
+                                            <ComboBoxItem Content="Todos os tipos"/>
+                                            <ComboBoxItem Content="Recebidas"/>
+                                            <ComboBoxItem Content="Realizadas"/>
+                                            <ComboBoxItem Content="Não atendidas"/>
+                                            <ComboBoxItem Content="Recusadas"/>
+                                            <ComboBoxItem Content="Sem resposta (realizadas)"/>
+                                            <ComboBoxItem Content="Canceladas"/>
+                                            <ComboBoxItem Content="Atendida em outro ramal"/>
+                                            <ComboBoxItem Content="Fora do Horário"/>
+                                        </ComboBox>
+                                        <ComboBox x:Name="cmbFiltroCanalHistorico" Grid.Column="3" Width="168" Height="36" Margin="8,0,0,0" VerticalAlignment="Center"
+                                                  Style="{StaticResource CompactFilterComboBox}" SelectedIndex="0" SelectionChanged="CmbFiltroCanalHistorico_SelectionChanged">
+                                            <ComboBoxItem Content="Todos os canais"/>
+                                            <ComboBoxItem Content="Operadora"/>
+                                            <ComboBoxItem Content="0800"/>
+                                            <ComboBoxItem Content="WhatsApp TIM"/>
+                                            <ComboBoxItem Content="WhatsApp Vivo"/>
+                                            <ComboBoxItem Content="Entrada não identificada"/>
+                                        </ComboBox>
+                                    </Grid>
+                                </Border>
+                                <!-- área "Não atendidas": soma das três classificações, cada uma com o seu total -->
+                                <Border x:Name="painelNaoAtendidas" Visibility="Collapsed" Background="#FEF2F2" BorderBrush="#FECACA" BorderThickness="1" CornerRadius="12" Padding="12,8" Margin="0,8,0,0">
+                                    <DockPanel LastChildFill="False">
+                                        <TextBlock DockPanel.Dock="Left" Text="&#xE778;" FontFamily="Segoe MDL2 Assets" FontSize="14" Foreground="#DC2626" VerticalAlignment="Center" Margin="0,1,8,0"/>
+                                        <TextBlock x:Name="txtResumoNaoAtendidas" DockPanel.Dock="Left" Text="Não atendidas" FontSize="13" FontWeight="SemiBold" Foreground="#B91C1C" VerticalAlignment="Center"/>
+                                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                            <RadioButton x:Name="rbNaTodas" GroupName="histNaoAtendidas" Style="{StaticResource HistSubFiltroRadio}" Content="Todas" Tag="0" IsChecked="True" Checked="RbNaoAtendidas_Checked"/>
+                                            <RadioButton x:Name="rbNaPerdida" GroupName="histNaoAtendidas" Style="{StaticResource HistSubFiltroRadio}" Content="Perdida" Tag="0" Checked="RbNaoAtendidas_Checked" ToolTip="Tocou até o fim e ninguém atendeu"/>
+                                            <RadioButton x:Name="rbNaDesistiu" GroupName="histNaoAtendidas" Style="{StaticResource HistSubFiltroRadio}" Content="Cliente desistiu" Tag="0" Checked="RbNaoAtendidas_Checked" ToolTip="O cliente desligou enquanto os ramais ainda tocavam"/>
+                                            <RadioButton x:Name="rbNaAbandono" GroupName="histNaoAtendidas" Style="{StaticResource HistSubFiltroRadio}" Content="Abandono na fila" Tag="0" Checked="RbNaoAtendidas_Checked" ToolTip="O cliente desligou enquanto aguardava na fila"/>
                                         </StackPanel>
-                                    </Button>
-                                    <ComboBox x:Name="cmbFiltroTipoHistorico"
-                                              DockPanel.Dock="Right" Width="160" Height="34"
-                                              Margin="8,0,0,0" VerticalAlignment="Center"
-                                              Style="{StaticResource CompactFilterComboBox}"
-                                              SelectedIndex="0" SelectionChanged="CmbFiltroTipoHistorico_SelectionChanged">
-                                        <ComboBoxItem Content="Todos os tipos"/>
-                                        <ComboBoxItem Content="Recebidas"/>
-                                        <ComboBoxItem Content="Realizadas"/>
-                                        <ComboBoxItem Content="Perdidas"/>
-                                        <ComboBoxItem Content="Recusadas"/>
-                                        <ComboBoxItem Content="Não atendidas"/>
-                                        <ComboBoxItem Content="Canceladas"/>
-                                        <ComboBoxItem Content="Atendida em outro ramal"/>
-                                    </ComboBox>
-                                    <ComboBox x:Name="cmbFiltroCanalHistorico"
-                                              DockPanel.Dock="Right" Width="160" Height="34"
-                                              Margin="8,0,0,0" VerticalAlignment="Center"
-                                              Style="{StaticResource CompactFilterComboBox}"
-                                              SelectedIndex="0" SelectionChanged="CmbFiltroCanalHistorico_SelectionChanged">
-                                        <ComboBoxItem Content="Todos os canais"/>
-                                        <ComboBoxItem Content="Operadora"/>
-                                        <ComboBoxItem Content="0800"/>
-                                        <ComboBoxItem Content="WhatsApp TIM"/>
-                                        <ComboBoxItem Content="WhatsApp Vivo"/>
-                                        <ComboBoxItem Content="Entrada não identificada"/>
-                                    </ComboBox>
-                                    <Border DockPanel.Dock="Right" Background="White" CornerRadius="16" BorderBrush="#E7EAF3" BorderThickness="1" Width="280" Height="44" Margin="8,0,0,0">
-                                        <DockPanel Margin="12,0">
-                                            <TextBlock DockPanel.Dock="Left" Text="🔎" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                            <Button x:Name="btnLimparBuscaHistorico" DockPanel.Dock="Right" Click="BtnLimparBuscaHistorico_Click" Width="22" Height="22" Margin="4,0,2,0" VerticalAlignment="Center" Style="{StaticResource IconActionButton}" Visibility="Collapsed" ToolTip="Limpar busca" Padding="0">
-                                                <TextBlock Text="✕" FontSize="11" Foreground="#94A3B8" VerticalAlignment="Center" HorizontalAlignment="Center"/>
-                                            </Button>
-                                            <TextBox x:Name="txtBuscaHistoricoShell" BorderThickness="0" Background="Transparent" Height="38" Margin="0" Padding="0" VerticalContentAlignment="Center" TextChanged="TxtBuscaHistoricoShell_TextChanged" ToolTip="Buscar por nome, número, canal ou tipo"/>
-                                        </DockPanel>
-                                    </Border>
-                                </DockPanel>
-                                <TextBlock x:Name="txtStatusHistorico" Text="" FontSize="11" Foreground="#94A3B8" HorizontalAlignment="Right" Margin="0,4,0,0"/>
+                                    </DockPanel>
+                                </Border>
                             </StackPanel>
                             <Border Grid.Row="1" Style="{StaticResource CardStyle}" Padding="0">
                                 <ListView x:Name="gridHistoricoShell" BorderThickness="0" Background="Transparent" ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.HorizontalScrollBarVisibility="Disabled" MouseDoubleClick="GridHistoricoShell_MouseDoubleClick" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" VirtualizingPanel.ScrollUnit="Pixel">
@@ -880,23 +1147,38 @@
                                     </ListView.ItemContainerStyle>
                                     <ListView.ItemTemplate>
                                         <DataTemplate>
-                                            <Border Padding="12,9" BorderBrush="#EEF2F7" BorderThickness="0,0,0,1">
+                                            <Border BorderBrush="{Binding CorFaixa}" BorderThickness="3,0,0,0"><Border Padding="9,9,12,9" BorderBrush="#EEF2F7" BorderThickness="0,0,0,1">
                                                 <Grid>
                                                     <Grid.ColumnDefinitions>
                                                         <ColumnDefinition Width="46"/>
                                                         <ColumnDefinition Width="*" MinWidth="90"/>
                                                         <ColumnDefinition Width="155"/>
-                                                        <ColumnDefinition Width="86"/>
+                                                        <ColumnDefinition Width="108"/>
                                                         <ColumnDefinition Width="88"/>
                                                         <ColumnDefinition Width="148"/>
                                                     </Grid.ColumnDefinitions>
                                                     <!-- Col 0: Ícone tipo chamada -->
-                                                    <Border Width="36" Height="36" CornerRadius="10" Background="{Binding CorTipoFundo}" VerticalAlignment="Center">
-                                                        <TextBlock Text="{Binding Icone}" Foreground="{Binding CorTipo}" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                    <Border Width="36" Height="36" CornerRadius="10" Background="{Binding CorSeloFundo}" VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding Icone}" Foreground="{Binding CorSeloTexto}" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                            <TextBlock.Style>
+                                                                <Style TargetType="TextBlock">
+                                                                    <Setter Property="FontSize" Value="16"/>
+                                                                    <Setter Property="FontWeight" Value="Bold"/>
+                                                                    <Style.Triggers>
+                                                                        <!-- v2.5.0: fora do horário usa o ícone "lua" nativo do Windows (Segoe MDL2 Assets) -->
+                                                                        <DataTrigger Binding="{Binding IconeEhSimboloDoSistema}" Value="True">
+                                                                            <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
+                                                                            <Setter Property="FontWeight" Value="Normal"/>
+                                                                            <Setter Property="FontSize" Value="17"/>
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </TextBlock.Style>
+                                                        </TextBlock>
                                                     </Border>
                                                     <!-- Col 1: Contato / Número -->
                                                     <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="4,0,8,0">
-                                                        <TextBlock Text="{Binding NomeExibido}" FontWeight="Bold" FontSize="13" TextTrimming="CharacterEllipsis" ToolTip="{Binding NomeExibido}"/>
+                                                        <TextBlock Text="{Binding NomeExibido}" Foreground="{Binding CorNome}" FontWeight="Bold" FontSize="13" TextTrimming="CharacterEllipsis" ToolTip="{Binding NomeExibido}"/>
                                                         <TextBlock Text="{Binding NumeroSubtitulo}" Foreground="{StaticResource MutedBrush}" FontSize="11" TextTrimming="CharacterEllipsis" ToolTip="{Binding NumeroSubtitulo}" Visibility="{Binding VisibilidadeNumero}"/>
                                                     </StackPanel>
                                                     <!-- Col 2: Ramal / Origem (wider to show "Sabrina Pereira (102)") -->
@@ -905,8 +1187,8 @@
                                                         <TextBlock Text="{Binding OrigemSaidaVisual}" Foreground="{Binding CorCanal}" FontSize="11" TextTrimming="CharacterEllipsis"/>
                                                     </StackPanel>
                                                     <!-- Col 3: Tipo badge (wider so "Não atendida" fits) -->
-                                                    <Border Grid.Column="3" VerticalAlignment="Center" HorizontalAlignment="Left" Background="{Binding CorTipoFundo}" CornerRadius="6" Padding="5,3" Margin="0,0,4,0">
-                                                        <TextBlock Text="{Binding TipoTexto}" Foreground="{Binding CorTipo}" FontWeight="SemiBold" FontSize="10" TextTrimming="CharacterEllipsis" ToolTip="{Binding TipoTextoDetalhado}"/>
+                                                    <Border Grid.Column="3" VerticalAlignment="Center" HorizontalAlignment="Left" Background="{Binding CorSeloFundo}" CornerRadius="6" Padding="7,3" Margin="0,0,4,0">
+                                                        <TextBlock Text="{Binding TipoTexto}" Foreground="{Binding CorSeloTexto}" FontWeight="SemiBold" FontSize="11" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" ToolTip="{Binding TipoTextoDetalhado}"/>
                                                     </Border>
                                                     <!-- Col 4: Data / Duração -->
                                                     <StackPanel Grid.Column="4" VerticalAlignment="Center" Margin="0,0,4,0">
@@ -940,14 +1222,14 @@
                                                                 Width="42" Height="42"
                                                                 Background="#F1F5F9" ToolTip="Mais opções"
                                                                 Click="BtnMenuHistorico_Click">
-                                                            <TextBlock Text="⋯" FontSize="16" FontWeight="Bold"
+                                                            <TextBlock Text="&#xE712;" FontFamily="Segoe MDL2 Assets" FontSize="15"
                                                                        Foreground="#475569"
                                                                        VerticalAlignment="Center"
                                                                        HorizontalAlignment="Center"/>
                                                         </Button>
                                                     </StackPanel>
                                                 </Grid>
-                                            </Border>
+                                            </Border></Border>
                                         </DataTemplate>
                                     </ListView.ItemTemplate>
                                 </ListView>
@@ -1359,9 +1641,7 @@
                             <GradientStop Color="#F9F8FF" Offset="1"/>
                         </LinearGradientBrush>
                     </Border.Background>
-                    <Border.Effect>
-                        <DropShadowEffect BlurRadius="40" ShadowDepth="8" Opacity="0.22" Color="#000000"/>
-                    </Border.Effect>
+                    
                     <StackPanel>
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                             <Border Width="36" Height="36" CornerRadius="10" Background="{StaticResource PrimarySoftBrush}" Margin="0,0,12,0" VerticalAlignment="Center">

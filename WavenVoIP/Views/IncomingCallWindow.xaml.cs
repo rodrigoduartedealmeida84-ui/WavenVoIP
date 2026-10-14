@@ -25,7 +25,7 @@ namespace WavenVoIP.Views
             SetarInfoChamador(caller);
             Loaded += IncomingCallWindow_Loaded;
             Closing += (_, __) => PararToque();
-            Closed += (_, __) => _ringtoneService.Dispose();
+            Closed += (_, __) => System.Threading.Tasks.Task.Run(() => { try { _ringtoneService.Dispose(); } catch { } });
         }
 
         private void SetarInfoChamador(string caller)
@@ -54,17 +54,49 @@ namespace WavenVoIP.Views
             var partes = nome.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
             if (partes.Length >= 2) return $"{partes[0][0]}{partes[1][0]}".ToUpperInvariant();
             if (partes.Length == 1 && partes[0].Length > 0) return partes[0][0].ToString().ToUpperInvariant();
-            return "☎";
+            return "\uE717";
+        }
+
+        // Fica no canto inferior direito; se já houver outra janela do Waven nesse canto (chamada
+        // em andamento, aviso de cliente aguardando), sobe para não cobrir nem ser coberta.
+        private void Posicionar()
+        {
+            var area = SystemParameters.WorkArea;
+            Left = area.Right - ActualWidth - 6;
+            var top = area.Bottom - ActualHeight - 6;
+            try
+            {
+                foreach (Window w in Application.Current.Windows)
+                {
+                    if (ReferenceEquals(w, this) || !w.IsVisible || w.WindowState == WindowState.Minimized) continue;
+                    if (w is not (CallWindow or ChamadasAguardandoPopup)) continue;
+                    bool sobrepoeH = w.Left < Left + ActualWidth && w.Left + w.ActualWidth > Left;
+                    bool sobrepoeV = w.Top < top + ActualHeight && w.Top + w.ActualHeight > top;
+                    if (sobrepoeH && sobrepoeV) top = w.Top - ActualHeight - 4;
+                }
+            }
+            catch { }
+            Top = Math.Max(area.Top + 6, top);
+        }
+
+        private void Cabecalho_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            try { if (e.ButtonState == System.Windows.Input.MouseButtonState.Pressed) DragMove(); } catch { }
         }
 
         private void IncomingCallWindow_Loaded(object sender, RoutedEventArgs e)
         {
+            try { Posicionar(); } catch { }
+            try { if (txtInitials.Text == "\uE717") { txtInitials.FontFamily = new System.Windows.Media.FontFamily("Segoe MDL2 Assets"); txtInitials.FontWeight = FontWeights.Normal; } } catch { }
+            Activate();
+
+            // v2.5.0 — travamentos: procurar o dispositivo de toque e abrir o áudio levava de
+            // décimos a segundos na thread da interface, bem na hora em que a chamada chega.
+            System.Threading.Tasks.Task.Run(() =>
+            {
             try
             {
-                var area = SystemParameters.WorkArea;
-                Left = area.Right - Width - 18;
-                Top = area.Bottom - Height - 18;
-
+                if (_toqueParado) return;
                 var sipCfg = SipConfig.CarregarSalva();
                 var audioCfg = ConfiguracaoAudioService.Carregar();
 
@@ -87,10 +119,12 @@ namespace WavenVoIP.Views
                     ? (float)sipCfg.RingVolume / 100f
                     : 0.8f;
 
+                if (_toqueParado) return;
                 _ringtoneService.Tocar(fullPath, ringId, ringNome, "IncomingCallWindow", volume: volume);
+                if (_toqueParado) _ringtoneService.Parar();
             }
             catch { }
-            Activate();
+            });
         }
 
         public void FecharPorSistema()
@@ -107,7 +141,12 @@ namespace WavenVoIP.Views
             catch { }
         }
 
-        private void PararToque() => _ringtoneService.Parar();
+        private volatile bool _toqueParado;
+        private void PararToque()
+        {
+            _toqueParado = true;
+            System.Threading.Tasks.Task.Run(() => { try { _ringtoneService.Parar(); } catch { } });
+        }
 
         private void BtnAtender_Click(object sender, RoutedEventArgs e)
         {
@@ -121,7 +160,7 @@ namespace WavenVoIP.Views
         private void BtnSilenciar_Click(object sender, RoutedEventArgs e)
         {
             PararToque();
-            try { if (btnSilenciar != null) btnSilenciar.IsEnabled = false; } catch { }
+            try { if (btnSilenciar != null) btnSilenciar.IsEnabled = false; if (txtSilenciar != null) txtSilenciar.Text = "Silenciado"; } catch { }
         }
 
         private void BtnRecusar_Click(object sender, RoutedEventArgs e)

@@ -9,14 +9,23 @@ namespace WavenVoIP.Services
     {
         public static DashboardMetrics Calcular(List<HistoricoLigacaoItem> todos, DateTime dataInicio, DateTime dataFim)
         {
+            // v2.5.0 — chamadas que só o PABX atendeu (URA abandonada, anúncio, mensagem de fora do
+            // horário) vêm do CDR como Recebida/ANSWERED, mas nenhum operador falou com o cliente:
+            // não contam em Recebidas, Total de atendimentos nem no tempo médio. O gráfico de
+            // chamadas por hora continua mostrando todo o volume que chegou.
             var itens = todos
                 .Where(i => i.DataHora >= dataInicio && i.DataHora <= dataFim)
+                .Where(i => !i.EhEventoTecnico) // ponta de volta da própria ligação: não é chamada de cliente
                 .ToList();
 
-            var recebidas  = itens.Count(i => i.Tipo == TipoHistoricoLigacao.Recebida);
+            var recebidas  = itens.Count(i => i.EhRecebidaPorOperador);
             var realizadas = itens.Count(i => i.Tipo == TipoHistoricoLigacao.Realizada);
-            var perdidas   = itens.Count(i => i.Tipo == TipoHistoricoLigacao.Perdida
+            // v2.5.0 — três indicadores separados para a chamada recebida sem atendimento:
+            // perdida (tocou até o fim), cliente desistiu (desligou tocando) e abandono na fila.
+            var perdidas   = itens.Count(i => (i.Tipo == TipoHistoricoLigacao.Perdida && !i.EhDesistenciaRapida && !i.EhAbandonoFila)
                                            || i.Tipo == TipoHistoricoLigacao.NaoAtendidaNesseRamal);
+            var desistiu   = itens.Count(i => i.EhDesistenciaRapida);
+            var abandono   = itens.Count(i => i.EhAbandonoFila);
             var gravacoes  = itens.Count(i => !string.IsNullOrWhiteSpace(i.GravacaoUrl)
                                            || !string.IsNullOrWhiteSpace(i.GravacaoArquivo));
 
@@ -24,7 +33,8 @@ namespace WavenVoIP.Services
                 .Where(i => i.Tipo != TipoHistoricoLigacao.Perdida
                          && i.Tipo != TipoHistoricoLigacao.NaoAtendidaNesseRamal
                          && i.Tipo != TipoHistoricoLigacao.Recusada
-                         && i.Tipo != TipoHistoricoLigacao.NaoAtendida)
+                         && i.Tipo != TipoHistoricoLigacao.NaoAtendida
+                         && !i.EhAtendimentoAutomatico)
                 .Select(i => ParseDuracao(i.Duracao))
                 .Where(s => s > 0)
                 .ToList();
@@ -38,6 +48,8 @@ namespace WavenVoIP.Services
                 Recebidas        = recebidas,
                 Realizadas       = realizadas,
                 Perdidas         = perdidas,
+                ClienteDesistiu  = desistiu,
+                AbandonoFila     = abandono,
                 TotalAtendimentos = recebidas + realizadas,
                 TempoMedio       = tempoMedio,
                 Gravacoes        = gravacoes,
@@ -122,6 +134,8 @@ namespace WavenVoIP.Services
                 case TipoHistoricoLigacao.Recebida:
                     // Entrada atendida: quem atendeu (RamalAtendeu = agente real, não fila/tronco).
                     // RamalDestino pode ser a fila (600) — não usar como chave principal.
+                    // v2.5.0 — só o PABX atendeu (URA/anúncio/fora do horário): não é de nenhum ramal.
+                    if (item.EhAtendimentoAutomatico) return string.Empty;
                     if (!string.IsNullOrWhiteSpace(item.RamalAtendeu))  return item.RamalAtendeu;
                     if (!string.IsNullOrWhiteSpace(item.RamalDestino))  return item.RamalDestino;
                     if (!string.IsNullOrWhiteSpace(item.RamalOrigem))   return item.RamalOrigem;

@@ -58,6 +58,8 @@ namespace WavenVoIP.Services
 
         // ── Sync principal ────────────────────────────────────────────────────
 
+        private static bool _syncCompletoFeito;
+
         public async Task SincronizarAsync()
         {
             var cfg = SipConfig.CarregarSalva();
@@ -84,11 +86,26 @@ namespace WavenVoIP.Services
                 SalvarState(state);
             }
 
+            // 1c. Nomes que mudaram neste computador (ex.: o Google tinha o nome mais recente) e
+            // precisam chegar à Waven API para valer em todos os computadores.
+            while (ContatoSyncCoordinator.RenomearNaApi.TryDequeue(out var r))
+            {
+                EnfileirarOffline(new WavenApiOfflineOp
+                {
+                    Op = "UPDATE", ContactId = r.wavenApiId, Ramal = _ramal,
+                    Payload = JsonSerializer.Serialize(new UpdateOpPayload(r.nome, null, r.observacao, r.quandoUtc))
+                });
+            }
+
             // 2. Drena fila offline antes de sincronizar
             await DrenaFilaOfflineAsync();
 
             // 3. Sync incremental
-            var sync = await WavenApiService.SyncAsync(_ramal, state.LastSyncUtc).ConfigureAwait(false);
+            // v2.5.0 — a primeira sincronização de cada abertura do app é COMPLETA: um contato da
+            // empresa que tenha se perdido neste computador volta sozinho (a incremental só traz
+            // o que mudou desde a última vez e nunca o devolveria).
+            var completo = !_syncCompletoFeito;
+            var sync = await WavenApiService.SyncAsync(_ramal, completo ? null : state.LastSyncUtc).ConfigureAwait(false);
 
             if (sync == null)
             {
@@ -98,6 +115,7 @@ namespace WavenVoIP.Services
 
             // 4. Aplica contatos recebidos na storage local
             AplicarContatos(sync.Contacts, sync.FavoritosAtuais);
+            if (completo) { _syncCompletoFeito = true; Log($"API_CONTACT_SYNC_FULL | contacts={sync.Contacts.Count}"); }
 
             state.LastSyncUtc = sync.ServerTime;
             SalvarState(state);
@@ -320,7 +338,7 @@ namespace WavenVoIP.Services
                     {
                         existente.Nome        = ac.Nome;
                         existente.Observacao  = ac.Empresa ?? ac.Observacao ?? string.Empty;
-                        existente.AtualizadoEm = ac.AtualizadoEm;
+                        existente.AtualizadoEm = ContatoSyncCoordinator.ParaUtc(ac.AtualizadoEm);
                         Log($"API_CONTACT_UPDATED | nome={ac.Nome} numero={ac.NumeroNormalizado}");
                         alterou = true;
                     }
@@ -524,7 +542,15 @@ namespace WavenVoIP.Services
             foreach (var op in fila)
             {
                 var ok = await ExecutarOpAsync(op).ConfigureAwait(false);
-                if (!ok) pendentes.Add(op); // reenfileira se falhar
+                if (ok) continue;
+                // v2.5.0 — havia operações de junho/agosto sendo reenviadas a cada minuto: depois
+                // de 30 dias falhando, a operação é descartada (com registro) em vez de repetir.
+                if (DateTime.UtcNow - NormalizarParaUtc(op.CriadoEm) > TimeSpan.FromDays(30))
+                {
+                    Log($"API_CONTACT_OFFLINE_QUEUE_EXPIRED | op={op.Op} contactId={op.ContactId} criadoEm={op.CriadoEm:yyyy-MM-dd}");
+                    continue;
+                }
+                pendentes.Add(op); // reenfileira se falhar
             }
 
             SalvarFila(pendentes);
@@ -532,6 +558,10 @@ namespace WavenVoIP.Services
             if (enviados > 0)
                 Log($"API_CONTACT_OFFLINE_QUEUE_SENT | enviados={enviados} restantes={pendentes.Count}");
         }
+
+        // As operações são gravadas com chaves minúsculas ("nome") e lidas em registros com
+        // inicial maiúscula ("Nome"): sem isto o nome chegava vazio e a API recusava para sempre.
+        private static readonly JsonSerializerOptions _payloadOpts = new() { PropertyNameCaseInsensitive = true };
 
         private static async Task<bool> ExecutarOpAsync(WavenApiOfflineOp op)
         {
@@ -541,7 +571,7 @@ namespace WavenVoIP.Services
                 {
                     case "CREATE":
                     {
-                        var p = JsonSerializer.Deserialize<CreateOpPayload>(op.Payload);
+                        var p = JsonSerializer.Deserialize<CreateOpPayload>(op.Payload, _payloadOpts);
                         if (p == null) return true;
                         var (ok, _, _) = await WavenApiService.CriarContatoAsync(
                             p.Nome, p.Numero, empresa: null, observacao: p.Observacao,
@@ -551,7 +581,8 @@ namespace WavenVoIP.Services
 
                     case "UPDATE" when op.ContactId != null:
                     {
-                        var p = JsonSerializer.Deserialize<UpdateOpPayload>(op.Payload);
+                        var p = JsonSerializer.Deserialize<UpdateOpPayload>(op.Payload, _payloadOpts);
+                        if (p != null && string.IsNullOrWhiteSpace(p.Nome)) return true;   // operação antiga sem nome: descarta
                         if (p == null) return true;
                         return await WavenApiService.AtualizarContatoAsync(
                             op.ContactId, p.Nome, empresa: p.Empresa, observacao: p.Observacao,
@@ -655,7 +686,9 @@ namespace WavenVoIP.Services
             {
                 DateTimeKind.Utc   => dt,
                 DateTimeKind.Local => dt.ToUniversalTime(),
-                _                  => DateTime.SpecifyKind(dt, DateTimeKind.Local).ToUniversalTime()
+                // v2.5.0 — data sem fuso vem da Waven API, que grava em UTC. Tratá-la como hora local
+                // fazia o nome antigo da API parecer 3–4 h mais novo que uma edição recém-feita.
+                _                  => DateTime.SpecifyKind(dt, DateTimeKind.Utc)
             };
         }
 

@@ -50,5 +50,9 @@ public class WavenApiOptions
         public string User            { get; set; } = string.Empty;
         public string Password        { get; set; } = string.Empty;
         public int    ConnectTimeoutMs { get; set; } = 5000;
+
+        // Ramais que podem usar "Remover atendente" numa ligação puxada em conferência
+        // (WavenVoIP 2.5.0). Ajustável em appsettings: "Ami": { "RamaisQuePodemRemoverAtendente": ["100","104"] }.
+        public string[] RamaisQuePodemRemoverAtendente { get; set; } = new[] { "100" };
     }
 }

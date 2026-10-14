@@ -76,6 +76,20 @@ namespace WavenVoIP
         {
             AplicarPadroes();
             Directory.CreateDirectory(ConfigDir);
+
+            // v2.5.0 — a sincronização de ramais grava a configuração a cada minuto, quase sempre
+            // sem mudança. Cada gravação girava os 3 backups, que em 3 minutos ficavam todos
+            // iguais ao arquivo atual (deixavam de servir como backup). Conteúdo igual = não grava.
+            try
+            {
+                if (File.Exists(ConfigFilePath))
+                {
+                    var igual = JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
+                    if (string.Equals(File.ReadAllText(ConfigFilePath), igual, StringComparison.Ordinal)) return;
+                }
+            }
+            catch { }
+
             LogHelper.Info($"CONFIG_SAVE_START | path={ConfigFilePath}");
 
             try
@@ -385,6 +399,25 @@ namespace WavenVoIP
         public string GravacaoCaminhoLocal { get; set; } = string.Empty;
 
         public bool AutoUpdateEnabled { get; set; } = true;
+
+        // v2.5.0 — nivelamento automático do microfone (ver Services/MicAutoGain). Ligado por
+        // padrão; "MicAutoGainEnabled": false no sipconfig.json volta ao microfone cru da 2.4.7.
+        public bool MicAutoGainEnabled { get; set; } = true;
+
+        // v2.5.0 — ajuste gradual do nível de captura do microfone no Windows quando a fala chega
+        // baixa/alta demais (ver Services/MicNivelWindows). DESLIGADO por padrão: o aplicativo não
+        // mexe no volume do microfone do Windows; "MicNivelWindowsAuto": true liga.
+        public bool MicNivelWindowsAuto { get; set; } = false;
+
+        // v2.5.0 — permite a este posto usar "Puxar ligação" (assumir a chamada de outro ramal).
+        // "PuxarLigacaoHabilitado": false no sipconfig.json esconde o botão e bloqueia a ação.
+        public bool PuxarLigacaoHabilitado { get; set; } = true;
+
+        // v2.5.0 — popup quando há cliente aguardando na fila de atendimento (não avisa URA nem
+        // fora do horário). "AvisoClienteAguardandoHabilitado": false desliga o aviso neste posto.
+        public bool AvisoClienteAguardandoHabilitado { get; set; } = true;
+        // Filas que geram o aviso (separadas por vírgula). Outras filas e grupos não avisam.
+        public string AvisoClienteAguardandoFilas { get; set; } = Services.AvisoFilaPolicy.FilasPadrao;
 
         public bool LogEnabled         { get; set; } = true;
         public bool LogDetailedEnabled { get; set; } = false;

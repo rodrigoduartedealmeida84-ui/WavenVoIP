@@ -17,11 +17,11 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
                         <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="14">
-                            <Border.Effect>
+                            <Grid><Border Margin="0" CornerRadius="14" Background="{TemplateBinding Background}" IsHitTestVisible="False"><Border.Effect>
                                 <DropShadowEffect BlurRadius="12" ShadowDepth="2" Opacity="0.22" Color="#000000"/>
-                            </Border.Effect>
+                            </Border.Effect></Border>
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
+                        </Grid></Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="bd" Property="Opacity" Value="0.90"/>

@@ -2,60 +2,63 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Em chamada" Icon="/Assets/wavenvoip.ico"
-        Height="720" Width="430" MinHeight="700" MinWidth="420"
+        Height="628" Width="410" MinHeight="610" MinWidth="390"
         WindowStartupLocation="Manual"
         ResizeMode="CanResize" ShowInTaskbar="True">
     <Window.Resources>
         <Style x:Key="CallActionButton" TargetType="Button" BasedOn="{StaticResource SecondaryButtonStyle}">
-            <Setter Property="Height" Value="78"/>
-            <Setter Property="Margin" Value="5"/>
-            <Setter Property="Padding" Value="6"/>
+            <Setter Property="Height" Value="68"/>
+            <Setter Property="Margin" Value="4"/>
+            <Setter Property="Padding" Value="4"/>
             <Setter Property="FontSize" Value="11.5"/>
+            <Setter Property="Background" Value="#F7F5FF"/>
+            <Setter Property="BorderBrush" Value="#E9E5FB"/>
+            <Setter Property="Foreground" Value="#1E1B4B"/>
         </Style>
         <Style x:Key="CallIconText" TargetType="TextBlock">
-            <Setter Property="FontFamily" Value="Segoe UI Symbol, Segoe Fluent Icons, Segoe MDL2 Assets"/>
-            <Setter Property="FontSize" Value="22"/>
+            <Setter Property="FontFamily" Value="Segoe MDL2 Assets, Segoe Fluent Icons, Segoe UI Symbol"/>
+            <Setter Property="FontSize" Value="19"/>
+            <Setter Property="Foreground" Value="#6D28D9"/>
             <Setter Property="HorizontalAlignment" Value="Center"/>
-            <Setter Property="Margin" Value="0,0,0,4"/>
+            <Setter Property="Margin" Value="0,0,0,5"/>
         </Style>
     </Window.Resources>
 
-    <Grid Margin="16">
+    <Grid Margin="14">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <!-- ── HEADER CARD ────────────────────────────────── -->
-        <Border Grid.Row="0" Style="{StaticResource CardStyle}" Padding="20,26,20,22" Margin="0,0,0,14">
-            <Border.Effect>
-                <DropShadowEffect BlurRadius="22" ShadowDepth="3" Opacity="0.09" Color="#6366F1"/>
-            </Border.Effect>
+        <Border Grid.Row="0" Style="{StaticResource CardStyle}" Padding="18,18,18,16" Margin="0,0,0,10">
+            <Grid><Border Margin="-18,-18,-18,-16" CornerRadius="16" Background="White" IsHitTestVisible="False"><Border.Effect>
+                <DropShadowEffect BlurRadius="18" ShadowDepth="2" Opacity="0.08" Color="#7C3AED"/>
+            </Border.Effect></Border>
             <StackPanel>
 
                 <!-- Avatar + recording badge -->
-                <Grid Width="88" Height="88" HorizontalAlignment="Center">
-                    <Border x:Name="borderAvatar" Width="88" Height="88" CornerRadius="44" Background="#6366F1">
-                        <TextBlock x:Name="txtAvatar" Text="?" FontSize="34" FontWeight="Bold"
+                <Grid Width="72" Height="72" HorizontalAlignment="Center">
+                    <Border x:Name="borderAvatar" Width="72" Height="72" CornerRadius="36" Background="#7C3AED">
+                        <TextBlock x:Name="txtAvatar" Text="?" FontSize="27" FontWeight="Bold"
                                    Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Border>
                     <Border x:Name="dotGravando" Width="22" Height="22" CornerRadius="11"
                             Background="#EF4444" BorderBrush="White" BorderThickness="2"
                             HorizontalAlignment="Right" VerticalAlignment="Top" Visibility="Collapsed">
-                        <Border.Effect>
-                            <DropShadowEffect BlurRadius="6" ShadowDepth="0" Opacity="0.5" Color="#EF4444"/>
-                        </Border.Effect>
+                        
                     </Border>
                 </Grid>
 
                 <!-- Contact name / number -->
-                <TextBlock x:Name="txtNomeNumero" Margin="0,16,0,0" Text="Número"
-                           FontSize="22" FontWeight="Bold"
+                <TextBlock x:Name="txtNomeNumero" Margin="0,12,0,0" Text="Número"
+                           FontSize="19" FontWeight="Bold" Foreground="#1E1B4B" MaxHeight="60" TextTrimming="CharacterEllipsis"
                            HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"/>
 
                 <!-- Status: pulse dot + label -->
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,9,0,0" VerticalAlignment="Center">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,6,0,0" VerticalAlignment="Center">
                     <Grid Width="14" Height="14" Margin="0,0,7,0" VerticalAlignment="Center">
                         <Ellipse x:Name="dotStatusPulse" Width="14" Height="14"
                                  Fill="#F59E0B" Opacity="0"
@@ -69,14 +72,62 @@
                 </StackPanel>
 
                 <!-- Call timer -->
-                <TextBlock x:Name="txtTempo" Margin="0,11,0,0" Text="00:00"
-                           FontSize="30" FontWeight="Light"
+                <TextBlock x:Name="txtTempo" Margin="0,6,0,0" Text="00:00"
+                           FontSize="26" FontWeight="Light"
                            HorizontalAlignment="Center" Foreground="#1E293B"/>
+            </StackPanel>
+        </Grid></Border>
+
+        <!-- ── PARTICIPANTES DA LIGAÇÃO (só em conferência, após "Puxar ligação") ── -->
+        <Border x:Name="painelParticipantes" Grid.Row="1" Visibility="Collapsed" Background="White" CornerRadius="14"
+                BorderBrush="#DDD6FE" BorderThickness="1" Padding="12,10" Margin="0,0,0,10">
+            <StackPanel>
+                <DockPanel Margin="0,0,0,4">
+                    <TextBlock x:Name="txtParticipantesAoVivo" DockPanel.Dock="Right" Text="ao vivo" FontSize="10.5" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                    <TextBlock Text="&#xE716;" FontFamily="Segoe MDL2 Assets" FontSize="13" Foreground="#6D28D9" VerticalAlignment="Center" Margin="0,0,7,0"/>
+                    <TextBlock Text="Participantes da ligação" FontSize="12.5" FontWeight="Bold" Foreground="#1E1B4B" VerticalAlignment="Center"/>
+                </DockPanel>
+                <ItemsControl x:Name="listaParticipantes">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Margin="0,4,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <Ellipse Width="8" Height="8" Fill="{Binding Cor}" VerticalAlignment="Center" Margin="2,0,8,0"/>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding Titulo}" FontSize="12.5" FontWeight="SemiBold" Foreground="#1E1B4B" TextTrimming="CharacterEllipsis" ToolTip="{Binding Titulo}"/>
+                                    <TextBlock Text="{Binding Situacao}" FontSize="10.5" Foreground="{Binding Cor}"/>
+                                </StackPanel>
+                                <Button Grid.Column="2" Tag="{Binding Identificador}" Click="BtnRemoverAtendente_Click" Visibility="{Binding BotaoVisivel}"
+                                        Cursor="Hand" VerticalAlignment="Center" Margin="8,0,0,0" ToolTip="Tirar este atendente da ligação: ele deixa de ouvir a conversa">
+                                    <Button.Template>
+                                        <ControlTemplate TargetType="Button">
+                                            <Border x:Name="b" Background="#FEF2F2" BorderBrush="#FECACA" BorderThickness="1" CornerRadius="9" Padding="9,5">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="&#xE8F8;" FontFamily="Segoe MDL2 Assets" FontSize="11" Foreground="#DC2626" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                                                    <TextBlock Text="Remover atendente" FontSize="11" FontWeight="SemiBold" Foreground="#DC2626" VerticalAlignment="Center"/>
+                                                </StackPanel>
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="Background" Value="#FEE2E2"/></Trigger>
+                                                <Trigger Property="IsEnabled" Value="False"><Setter TargetName="b" Property="Opacity" Value="0.5"/></Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Button.Template>
+                                </Button>
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock x:Name="txtParticipantesAviso" Visibility="Collapsed" FontSize="11" Foreground="#5B21B6" TextWrapping="Wrap" Margin="0,7,0,0"/>
             </StackPanel>
         </Border>
 
         <!-- ── ACTION BUTTONS 3×3 ─────────────────────────── -->
-        <UniformGrid Grid.Row="1" Rows="3" Columns="3" Margin="0,0,0,12">
+        <UniformGrid Grid.Row="2" Rows="3" Columns="3" Margin="-4,0,-4,10">
 
             <Button x:Name="btnMudo" Click="BtnMudo_Click" Style="{StaticResource CallActionButton}" ToolTip="Alternar mudo / com áudio">
                 <StackPanel VerticalAlignment="Center">
@@ -118,7 +169,7 @@
 
             <Button Click="BtnWhatsApp_Click" Style="{StaticResource CallActionButton}" ToolTip="Abrir conversa no WhatsApp">
                 <StackPanel VerticalAlignment="Center">
-                    <Viewbox Width="24" Height="24" HorizontalAlignment="Center" Margin="0,0,0,4">
+                    <Viewbox Width="20" Height="20" HorizontalAlignment="Center" Margin="0,0,0,4">
                         <Canvas Width="24" Height="24">
                             <Path Fill="#16A34A" Data="M12.04,2C6.58,2 2.13,6.45 2.13,11.91C2.13,13.66 2.59,15.37 3.46,16.88L2,22L7.25,20.62C8.71,21.42 10.36,21.84 12.04,21.84H12.05C17.51,21.84 21.96,17.39 21.96,11.93C21.96,9.28 20.93,6.79 19.06,4.92C17.19,3.05 14.7,2 12.04,2ZM12.05,20.16H12.04C10.54,20.16 9.08,19.76 7.81,19L7.51,18.82L4.39,19.64L5.22,16.6L5.02,16.29C4.19,14.97 3.75,13.45 3.75,11.91C3.75,7.34 7.47,3.62 12.04,3.62C14.26,3.62 16.34,4.49 17.91,6.06C19.48,7.63 20.34,9.71 20.34,11.93C20.34,16.5 16.62,20.16 12.05,20.16ZM16.61,13.96C16.36,13.84 15.14,13.24 14.91,13.16C14.68,13.07 14.52,13.03 14.35,13.28C14.19,13.53 13.71,14.08 13.57,14.24C13.42,14.41 13.28,14.43 13.03,14.31C12.78,14.18 11.98,13.92 11.03,13.07C10.29,12.41 9.79,11.59 9.64,11.34C9.5,11.09 9.63,10.95 9.75,10.83C9.86,10.72 10,10.54 10.13,10.39C10.25,10.25 10.29,10.14 10.38,9.98C10.46,9.81 10.42,9.67 10.36,9.55C10.29,9.42 9.8,8.2 9.59,7.71C9.39,7.23 9.19,7.3 9.03,7.29C8.89,7.28 8.72,7.28 8.55,7.28C8.39,7.28 8.12,7.34 7.89,7.59C7.66,7.84 7.03,8.44 7.03,9.66C7.03,10.88 7.92,12.06 8.04,12.22C8.17,12.39 9.79,14.87 12.29,15.94C12.88,16.2 13.35,16.35 13.72,16.46C14.32,16.65 14.86,16.62 15.29,16.56C15.77,16.49 16.76,15.96 16.97,15.38C17.18,14.8 17.18,14.3 17.12,14.2C17.05,14.1 16.86,14.04 16.61,13.96Z"/>
                         </Canvas>
@@ -128,7 +179,7 @@
             </Button>
             <Button x:Name="btnSegurar" Click="BtnSegurar_Click" Style="{StaticResource CallActionButton}" ToolTip="Colocar em espera / retomar">
                 <StackPanel VerticalAlignment="Center">
-                    <TextBlock Text="⏸" Style="{StaticResource CallIconText}"/>
+                    <TextBlock Text="&#xE769;" Style="{StaticResource CallIconText}"/>
                     <TextBlock Text="Segurar" HorizontalAlignment="Center"/>
                 </StackPanel>
             </Button>
@@ -141,14 +192,11 @@
         </UniformGrid>
 
         <!-- ── HANG-UP BUTTON ─────────────────────────────── -->
-        <StackPanel Grid.Row="2" HorizontalAlignment="Center" Margin="0,2,0,4">
-            <Button Width="200" Height="62" Click="BtnDesligar_Click"
+        <StackPanel Grid.Row="3" HorizontalAlignment="Center" Margin="0,2,0,4">
+            <Button Width="190" Height="54" Click="BtnDesligar_Click"
                     Style="{StaticResource DangerButtonStyle}" Padding="0"
                     ToolTip="Desligar chamada">
-                <Button.Effect>
-                    <DropShadowEffect BlurRadius="26" ShadowDepth="4" Opacity="0.42" Color="#DC2626"/>
-                </Button.Effect>
-                <Viewbox Width="32" Height="32">
+                <Viewbox Width="28" Height="28">
                     <Path Fill="White" RenderTransformOrigin="0.5,0.5"
                           Data="M6.62,10.79C8.06,13.62 10.38,15.93 13.21,17.38L15.41,15.18C15.68,14.91 16.08,14.82 16.43,14.94C17.54,15.31 18.73,15.5 20,15.5C20.55,15.5 21,15.95 21,16.5V20C21,20.55 20.55,21 20,21C10.61,21 3,13.39 3,4C3,3.45 3.45,3 4,3H7.5C8.05,3 8.5,3.45 8.5,4C8.5,5.25 8.7,6.45 9.06,7.57C9.17,7.92 9.08,8.31 8.81,8.59L6.62,10.79Z">
                         <Path.RenderTransform><RotateTransform Angle="135"/></Path.RenderTransform>

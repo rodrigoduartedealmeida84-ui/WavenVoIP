@@ -129,6 +129,13 @@ namespace WavenVoIP.Views
 
                         if (apiOk && apiContact != null)
                         {
+                            // já existia na API com outro nome: o nome editado agora passa a valer lá também
+                            if (!ContatoSyncCoordinator.NomesIguais(apiContact.Nome, nome))
+                            {
+                                var ren = await WavenApiService.AtualizarContatoAsync(apiContact.Id, nome, empresa: apiContact.Empresa,
+                                    observacao: obs, ramal: cfgGoogle.Ramal ?? "", atualizadoEm: DateTime.UtcNow).ConfigureAwait(true);
+                                LogHelper.Info($"CONTACT_UPDATE_API_RENAMED | id={apiContact.Id} de={apiContact.Nome} para={nome} ok={ren}");
+                            }
                             // Vincula WavenApiId ao contato local recém-criado
                             var todosAtual = ContatoStorageService.Carregar();
                             var localCopy = todosAtual.FirstOrDefault(c =>
@@ -173,6 +180,7 @@ namespace WavenVoIP.Views
                         AdicionadoAosFavoritos = adicionado;
                     }
 
+                    await SincronizarEdicaoComGoogleAsync(numeroNorm, nome);
                     DialogResult = true;
                     Close();
                     return;
@@ -263,6 +271,7 @@ namespace WavenVoIP.Views
                         AdicionadoAosFavoritos = adicionado;
                     }
 
+                    await SincronizarEdicaoComGoogleAsync(numeroNorm, nome);
                     DialogResult = true;
                     Close();
                     return;
@@ -339,6 +348,15 @@ namespace WavenVoIP.Views
                         localCopy.WavenApiId = apiContact.Id;
                         ContatoStorageService.Salvar(todosAtual);
                     }
+                    // já existia na API com outro nome/observação: o que o usuário acabou de salvar
+                    // passa a valer para todos os computadores
+                    if (!string.Equals(apiContact.Nome, nome, StringComparison.Ordinal))
+                    {
+                        var renomeou = await WavenApiService.AtualizarContatoAsync(
+                            apiContact.Id, nome, empresa: apiContact.Empresa, observacao: obs,
+                            ramal: cfgNovo.Ramal ?? "", atualizadoEm: DateTime.UtcNow).ConfigureAwait(true);
+                        LogHelper.Info($"CONTACT_SAVE_API_RENAMED | id={apiContact.Id} de={apiContact.Nome} para={nome} ok={renomeou}");
+                    }
                     LogHelper.Info($"CONTACT_SAVE_API_OK | id={apiContact.Id} nome={nome}");
                 }
                 else if (!apiOk)
@@ -370,6 +388,51 @@ namespace WavenVoIP.Views
 
             DialogResult = true;
             Close();
+        }
+
+        // v2.5.0 — depois de editar um contato que também existe no Google: marca que o Google
+        // está com o nome antigo (para ele não sobrescrever a edição), tenta enviar o nome novo e,
+        // se o WavenVoIP só tem leitura no Google, avisa e oferece a autorização.
+        private async System.Threading.Tasks.Task SincronizarEdicaoComGoogleAsync(string numeroNorm, string nome)
+        {
+            try
+            {
+                var marcou = ContatoStorageService.ComArquivoTravado(() =>
+                {
+                    var todos = ContatoStorageService.Carregar();
+                    var c = todos.FirstOrDefault(x => !x.FonteGoogle && !x.EhRamalIssabel && !string.IsNullOrWhiteSpace(x.GoogleContactId) &&
+                        PhoneNumberNormalizer.NormalizeBrazilPhone(SomenteDigitos(x.Numero)) == numeroNorm);
+                    if (c == null) return false;
+                    var nomeNoGoogle = _contatoOriginal != null && _contatoOriginal.FonteGoogle ? _contatoOriginal.Nome : null;
+                    if (nomeNoGoogle != null && ContatoSyncCoordinator.NomesIguais(nomeNoGoogle, nome)) return false;
+                    c.SincronizacaoPendente = ContatoSyncCoordinator.PendenteGoogle;
+                    ContatoStorageService.Salvar(todos);
+                    return true;
+                });
+                if (!marcou) return;
+
+                var (_, semPermissao) = await ContatoSyncCoordinator.EnviarPendentesGoogleAsync().ConfigureAwait(true);
+                if (semPermissao == 0) return;
+
+                var resp = MessageBox.Show(this,
+                    "O nome foi salvo no WavenVoIP e não será mais substituído pelo nome antigo do Google.\n\n" +
+                    "No Google Contacts ele continua com o nome antigo, porque o WavenVoIP só tem permissão de leitura na sua conta Google.\n\n" +
+                    "Deseja autorizar agora a edição dos contatos no Google? (abre o navegador)",
+                    "Contato não enviado ao Google", MessageBoxButton.YesNo, MessageBoxImage.Information, MessageBoxResult.No);
+                if (resp != MessageBoxResult.Yes) return;
+
+                var autorizou = await GoogleContactsService.AutorizarEscritaAsync().ConfigureAwait(true);
+                if (!autorizou)
+                {
+                    MessageBox.Show(this, "A permissão de edição não foi concedida. O contato continua salvo no WavenVoIP e marcado como não enviado ao Google.",
+                        "Google Contacts", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+                var (enviados, aindaSem) = await ContatoSyncCoordinator.EnviarPendentesGoogleAsync().ConfigureAwait(true);
+                MessageBox.Show(this, aindaSem == 0 ? $"Pronto: {enviados} contato(s) atualizado(s) no Google Contacts." : "Não foi possível atualizar o Google Contacts agora. O contato continua marcado como não enviado.",
+                    "Google Contacts", MessageBoxButton.OK, aindaSem == 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
+            }
+            catch (Exception ex) { LogHelper.Info($"CONTACT_GOOGLE_SYNC_AFTER_EDIT_ERROR | {ex.Message}"); }
         }
 
         private void BtnCancelar_Click(object sender, RoutedEventArgs e)

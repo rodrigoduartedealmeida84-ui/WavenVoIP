@@ -38,6 +38,31 @@ Check("Celular com 55 e ja com 9", "66984263277", PhoneNumberNormalizer.Normaliz
 // Com +55
 Check("Celular com +55 sem 9", "66984263277", PhoneNumberNormalizer.NormalizeBrazilPhone("+5566984263277"));
 
+// v2.5.0 — "00" de acesso internacional na frente do 55 (tronco WhatsApp)
+Check("00+55 caso real: exibicao sem 00 nem 55", "9176103726", PhoneNumberNormalizer.NormalizeForDisplay("00559176103726"));
+Check("00+55 caso real: discagem com 9o digito", "91976103726", PhoneNumberNormalizer.NormalizeBrazilPhone("00559176103726"));
+Check("00+55 celular ja com 9", "66999990000", PhoneNumberNormalizer.NormalizeBrazilPhone("005566999990000"));
+Check("00+55 fixo", "6631998716", PhoneNumberNormalizer.NormalizeForDisplay("00556631998716"));
+Check("+0055 com simbolos", "9176103726", PhoneNumberNormalizer.NormalizeForDisplay("+00 55 (91) 7610-3726"));
+Check("Internacional real 00+1 (EUA) intacto", "0013055551234", PhoneNumberNormalizer.NormalizeForDisplay("0013055551234"));
+Check("Internacional real 00+351 (Portugal) intacto", "00351912345678", PhoneNumberNormalizer.NormalizeBrazilPhone("00351912345678"));
+Check("Internacional real 00+54 (Argentina) intacto", "005491123456789", PhoneNumberNormalizer.NormalizeForDisplay("005491123456789"));
+Check("00+55 com DDD inexistente intacto", "00552012345678", PhoneNumberNormalizer.NormalizeForDisplay("00552012345678"));
+Check("0800 intacto", "08007021200", PhoneNumberNormalizer.NormalizeForDisplay("08007021200"));
+Check("55 sem 00 continua como antes", "9176103726", PhoneNumberNormalizer.NormalizeForDisplay("559176103726"));
+
+// v2.5.0 — prefixo de rota na frente de numero de 10 digitos (fixo / celular antigo)
+Check("Rota 1 + fixo (caso real 13832010900)", "3832010900", WavenVoIP.DialPlanService.RemoverPrefixoDeRota("13832010900"));
+Check("Rota 2 + fixo", "6631998716", WavenVoIP.DialPlanService.RemoverPrefixoDeRota("26631998716"));
+Check("Rota 1 + celular antigo sem 9", "6684263277", WavenVoIP.DialPlanService.RemoverPrefixoDeRota("16684263277"));
+Check("Celular real de SP (11 9...) nao perde digito", "11987654321", WavenVoIP.DialPlanService.RemoverPrefixoDeRota("11987654321"));
+Check("Celular real do RJ (21 9...) nao perde digito", "21987654321", WavenVoIP.DialPlanService.RemoverPrefixoDeRota("21987654321"));
+Check("Celular real do ES (27 9...) nao perde digito", "27999998888", WavenVoIP.DialPlanService.RemoverPrefixoDeRota("27999998888"));
+Check("Celular real (31 9...) nao perde digito", "31988887777", WavenVoIP.DialPlanService.RemoverPrefixoDeRota("31988887777"));
+Check("Fixo de 10 digitos sem rota intacto", "3832010900", WavenVoIP.DialPlanService.RemoverPrefixoDeRota("3832010900"));
+Check("11 digitos com DDD inexistente depois da rota intacto", "12332010900", WavenVoIP.DialPlanService.RemoverPrefixoDeRota("12332010900"));
+Check("Rota + celular com 9 (12 digitos) continua como antes", "66984671226", WavenVoIP.DialPlanService.RemoverPrefixoDeRota("266984671226"));
+
 // Pontuacao / espacos / parenteses / hifen
 Check("Formatado (66) 8426-3277", "66984263277", PhoneNumberNormalizer.NormalizeBrazilPhone("(66) 8426-3277"));
 Check("Formatado com espacos 66 9 8426 3277", "66984263277", PhoneNumberNormalizer.NormalizeBrazilPhone("66 9 8426 3277"));

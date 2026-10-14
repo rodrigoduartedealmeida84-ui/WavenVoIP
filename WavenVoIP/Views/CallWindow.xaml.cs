@@ -44,6 +44,105 @@ namespace WavenVoIP.Views
 
         public string NomeNumeroAtual => txtNomeNumero?.Text ?? string.Empty;
 
+        // ── v2.5.0: participantes da ligação em conferência + "Remover atendente" ──
+        public event Action<string>? OnRemoverAtendenteRequested;
+
+        public sealed class ParticipanteLinha
+        {
+            public string Identificador { get; init; } = "";
+            public string Titulo { get; init; } = "";
+            public string Situacao { get; init; } = "";
+            public Brush Cor { get; init; } = Brushes.Gray;
+            public Visibility BotaoVisivel { get; init; } = Visibility.Collapsed;
+        }
+
+        private static readonly Brush _corCliente = Congelar(37, 99, 235), _corAtendente = Congelar(180, 83, 9), _corConvidado = Congelar(100, 116, 139);
+        private static Brush Congelar(byte r, byte g, byte b) { var br = new SolidColorBrush(Color.FromRgb(r, g, b)); br.Freeze(); return br; }
+        private string _assinaturaParticipantes = string.Empty;
+        private double _alturaExtra;
+
+        // Chamado pelo shell a cada leitura das chamadas ativas. Lista vazia = fora de conferência.
+        public void AtualizarParticipantes(System.Collections.Generic.IReadOnlyList<Models.ParticipanteLigacao> participantes, bool podeRemover, Func<string, string>? nomeDoRamal = null)
+        {
+            if (!Dispatcher.CheckAccess()) { Dispatcher.BeginInvoke(() => AtualizarParticipantes(participantes, podeRemover, nomeDoRamal)); return; }
+            try
+            {
+                var linhas = new System.Collections.Generic.List<ParticipanteLinha>();
+                foreach (var p in participantes)
+                {
+                    if (p.Tipo == "atendente")
+                    {
+                        var nome = nomeDoRamal?.Invoke(p.Identificador) ?? string.Empty;
+                        linhas.Add(new ParticipanteLinha
+                        {
+                            Identificador = p.Identificador,
+                            Titulo = string.IsNullOrWhiteSpace(nome) || nome == p.Identificador ? $"Ramal {p.Identificador}" : $"{nome} ({p.Identificador})",
+                            Situacao = "Atendente · ouvindo a conversa", Cor = _corAtendente,
+                            BotaoVisivel = podeRemover ? Visibility.Visible : Visibility.Collapsed
+                        });
+                    }
+                    else
+                    {
+                        var num = Services.PhoneNumberNormalizer.NormalizeForDisplay(DialPlanService.RemoverPrefixoDeRota(p.Identificador));
+                        var nome = string.IsNullOrWhiteSpace(num) ? p.Nome : Services.ContatoStorageService.ResolverNomePorNumero(num);
+                        var titulo = string.IsNullOrWhiteSpace(num) ? (string.IsNullOrWhiteSpace(p.Nome) ? "Cliente" : p.Nome)
+                                   : string.Equals(nome, num, StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(nome) ? num : $"{nome} ({num})";
+                        linhas.Add(new ParticipanteLinha
+                        {
+                            Identificador = p.Identificador, Titulo = titulo,
+                            Situacao = p.Tipo == "cliente" ? "Cliente · na ligação" : "Convidado · na ligação",
+                            Cor = p.Tipo == "cliente" ? _corCliente : _corConvidado
+                        });
+                    }
+                }
+
+                var assinatura = string.Join("|", linhas.Select(l => l.Identificador + ":" + l.Titulo + ":" + l.BotaoVisivel));
+                if (assinatura == _assinaturaParticipantes) return;
+                _assinaturaParticipantes = assinatura;
+
+                listaParticipantes.ItemsSource = linhas;
+                var mostrar = linhas.Count > 0;
+                painelParticipantes.Visibility = mostrar ? Visibility.Visible : Visibility.Collapsed;
+                if (mostrar && !linhas.Any(l => l.Situacao.StartsWith("Atendente")) && _houveAtendente)
+                {
+                    txtParticipantesAviso.Text = "Conversa privada: nenhum outro atendente está na ligação.";
+                    txtParticipantesAviso.Visibility = Visibility.Visible;
+                }
+                if (linhas.Any(l => l.Situacao.StartsWith("Atendente"))) _houveAtendente = true;
+
+                // a janela cresce para cima o suficiente para o painel, sem cobrir os botões
+                var extra = mostrar ? 34 + 36 * linhas.Count + (txtParticipantesAviso.Visibility == Visibility.Visible ? 22 : 0) : 0;
+                if (Math.Abs(extra - _alturaExtra) > 0.5 && WindowState == WindowState.Normal)
+                {
+                    var delta = extra - _alturaExtra;
+                    MinHeight = Math.Max(0, MinHeight + delta);
+                    Height += delta;
+                    Top = Math.Max(SystemParameters.WorkArea.Top, Top - delta);
+                    _alturaExtra = extra;
+                }
+            }
+            catch { }
+        }
+        private bool _houveAtendente;
+
+        public void MostrarAvisoParticipantes(string texto)
+        {
+            if (!Dispatcher.CheckAccess()) { Dispatcher.BeginInvoke(() => MostrarAvisoParticipantes(texto)); return; }
+            try
+            {
+                txtParticipantesAviso.Text = texto;
+                txtParticipantesAviso.Visibility = string.IsNullOrWhiteSpace(texto) ? Visibility.Collapsed : Visibility.Visible;
+                _assinaturaParticipantes = string.Empty;   // recalcula a altura na próxima leitura
+            }
+            catch { }
+        }
+
+        private void BtnRemoverAtendente_Click(object sender, RoutedEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.Tag is string ramal && ramal.Length > 0)
+                OnRemoverAtendenteRequested?.Invoke(ramal);
+        }
+
         public CallWindow(string nomeNumero, string statusInicial = "Ligando...")
         {
             InitializeComponent();
@@ -236,10 +335,10 @@ namespace WavenVoIP.Views
                 }
                 _pulseTimer?.Stop();
                 _pulsePhase = 0;
-                _pulseTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(40) };
+                _pulseTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(80) };
                 _pulseTimer.Tick += (_, _) =>
                 {
-                    _pulsePhase = (_pulsePhase + 0.055) % (2 * Math.PI);
+                    _pulsePhase = (_pulsePhase + 0.11) % (2 * Math.PI);
                     var p = (1 - Math.Cos(_pulsePhase)) / 2;
                     _pulseScale.ScaleX = 1 + 1.8 * p;
                     _pulseScale.ScaleY = 1 + 1.8 * p;
@@ -322,7 +421,7 @@ namespace WavenVoIP.Views
         {
             if (btnSegurar.Content is System.Windows.Controls.StackPanel sp && sp.Children.Count > 1)
             {
-                ((System.Windows.Controls.TextBlock)sp.Children[0]).Text = _segurado ? "▶" : "⏸";
+                ((System.Windows.Controls.TextBlock)sp.Children[0]).Text = _segurado ? "" : "";
                 ((System.Windows.Controls.TextBlock)sp.Children[1]).Text = _segurado ? "Retomar" : "Segurar";
             }
         }

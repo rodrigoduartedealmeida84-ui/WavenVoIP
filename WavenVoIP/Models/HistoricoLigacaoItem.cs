@@ -65,6 +65,62 @@ namespace WavenVoIP.Models
         // Campo novo opcional — historico.json antigo sem ele desserializa como false, sem quebrar.
         public bool CanceladaPeloOperador { get; set; } = false;
 
+        // v2.5.0 — chamada RECEBIDA que só o próprio PABX atendeu (URA ou anúncio, ex.: mensagem
+        // de fora do horário) e que terminou sem chegar a nenhum ramal. O CDR marca ANSWERED
+        // porque o Asterisk atende o canal para tocar o áudio, então o Tipo fica Recebida mas não
+        // existe atendente humano a mostrar — antes o Histórico exibia a linha sem ninguém, como
+        // se faltasse o nome de quem atendeu. Valores: "URA", "Anuncio", "ForaHorario" ou vazio
+        // (ver IssabelCdrService.IdentificarAtendimentoAutomatico). Campo novo opcional —
+        // historico.json antigo sem ele desserializa como vazio.
+        // O Tipo persistido continua Recebida de propósito: um valor novo no enum quebraria a
+        // leitura do historico.json por uma versão anterior (rollback para a 2.4.7).
+        public string AtendimentoAutomatico { get; set; } = string.Empty;
+
+        // Recebida que só o PABX atendeu — não é atendimento de operador.
+        [JsonIgnore]
+        public bool EhAtendimentoAutomatico =>
+            (Tipo == TipoHistoricoLigacao.Recebida ||
+             // fora do horário que seguiu até a caixa postal 400 (o CDR vira "VoiceMail")
+             (Tipo == TipoHistoricoLigacao.CaixaPostal &&
+              string.Equals(AtendimentoAutomatico, "ForaHorario", StringComparison.OrdinalIgnoreCase))) &&
+            string.IsNullOrWhiteSpace(RamalAtendeu) &&
+            !string.IsNullOrWhiteSpace(AtendimentoAutomatico);
+
+        // Chegou fora do horário de atendimento e ouviu a mensagem automática (confirmado pelo
+        // contexto/áudio do CDR, nunca pelo relógio).
+        [JsonIgnore]
+        public bool EhForaDoHorario =>
+            EhAtendimentoAutomatico &&
+            string.Equals(AtendimentoAutomatico, "ForaHorario", StringComparison.OrdinalIgnoreCase);
+
+        // "Entrada" que é só a ponta de volta de uma ligação feita pelo próprio ramal para uma
+        // linha da empresa (ver IssabelCdrService.EhRetornoDaPropriaLigacao): não há cliente.
+        // v2.5.0 — por que uma chamada recebida terminou sem atendimento (só para Tipo = Perdida):
+        //   "ClienteDesistiu" = o cliente desligou enquanto os ramais ainda tocavam;
+        //   "AbandonoFila"    = o cliente desligou enquanto aguardava na fila;
+        //   ""                = o toque/a fila se esgotou sem ninguém atender (perdida de fato).
+        // Os três geram aviso de retorno; cada um tem seu indicador.
+        // Ver IssabelCdrService.MotivoDaPerdida. Campo opcional: históricos antigos ficam "".
+        public string MotivoPerdida { get; set; } = string.Empty;
+
+        [JsonIgnore]
+        public bool EhDesistenciaRapida =>
+            Tipo == TipoHistoricoLigacao.Perdida && string.Equals(MotivoPerdida, "ClienteDesistiu", StringComparison.OrdinalIgnoreCase);
+
+        [JsonIgnore]
+        public bool EhAbandonoFila =>
+            Tipo == TipoHistoricoLigacao.Perdida && string.Equals(MotivoPerdida, "AbandonoFila", StringComparison.OrdinalIgnoreCase);
+
+        [JsonIgnore]
+        public bool EhEventoTecnico =>
+            EhAtendimentoAutomatico &&
+            string.Equals(AtendimentoAutomatico, "RetornoProprio", StringComparison.OrdinalIgnoreCase);
+
+        // Recebida de fato atendida por um operador (exclui URA/anúncio/fora do horário).
+        [JsonIgnore]
+        public bool EhRecebidaPorOperador =>
+            Tipo == TipoHistoricoLigacao.Recebida && !EhAtendimentoAutomatico;
+
         // ── Computed display ──────────────────────────────────────────────────────
 
         public string DataHoraFormatada => DataHora.ToString("dd/MM/yyyy HH:mm");
@@ -212,7 +268,8 @@ namespace WavenVoIP.Models
         [JsonIgnore]
         public Brush CorCanal => CanalIdentificacaoService.BrushCanal(OrigemSaidaVisual);
 
-        public string Icone => Tipo switch
+        // "\uE708" = lua (QuietHours) da fonte de ícones do Windows; ver IconeEhSimboloDoSistema.
+        public string Icone => EhForaDoHorario ? "\uE708" : EhEventoTecnico ? "⟲" : Tipo switch
         {
             TipoHistoricoLigacao.Realizada => "↗",
             TipoHistoricoLigacao.Recebida => "↙",
@@ -225,11 +282,16 @@ namespace WavenVoIP.Models
             _ => "•"
         };
 
-        public string TipoTexto => Tipo switch
+        // O ícone é um glifo da "Segoe MDL2 Assets" (a lista troca a fonte só nesse caso).
+        [JsonIgnore]
+        public bool IconeEhSimboloDoSistema => EhForaDoHorario;
+
+        // v2.5.0 — "Fora do horário" é só rótulo/filtro: o Tipo persistido continua Recebida.
+        public string TipoTexto => EhForaDoHorario ? "Fora do horário" : EhEventoTecnico ? "Evento técnico" : Tipo switch
         {
             TipoHistoricoLigacao.Realizada => "Realizada",
             TipoHistoricoLigacao.Recebida => "Recebida",
-            TipoHistoricoLigacao.Perdida => "Perdida",
+            TipoHistoricoLigacao.Perdida => EhDesistenciaRapida ? "Cliente desistiu" : EhAbandonoFila ? "Abandono na fila" : "Perdida",
             // Renomeado de "Não atendida" (v2.3.5): esse status é para chamada RECEBIDA que
             // tocou neste ramal mas foi atendida por outro — texto antigo colidia com o novo
             // TipoHistoricoLigacao.NaoAtendida (chamada REALIZADA sem resposta).
@@ -249,11 +311,15 @@ namespace WavenVoIP.Models
         public string TipoTextoDetalhado => Tipo switch
         {
             TipoHistoricoLigacao.Cancelada => "Cancelada pelo operador",
+            TipoHistoricoLigacao.Perdida when EhDesistenciaRapida => "Cliente desligou enquanto os ramais ainda tocavam",
+            TipoHistoricoLigacao.Perdida when EhAbandonoFila => "Cliente desligou enquanto aguardava na fila",
+            TipoHistoricoLigacao.Perdida => "Tocou até o fim e ninguém atendeu",
             _ => TipoTexto
         };
 
         [JsonIgnore]
-        public Brush CorTipo => Tipo switch
+        public Brush CorTipo => EhForaDoHorario ? new SolidColorBrush(Color.FromRgb(109, 40, 217))
+            : EhEventoTecnico ? new SolidColorBrush(Color.FromRgb(100, 116, 139)) : Tipo switch
         {
             TipoHistoricoLigacao.Realizada => new SolidColorBrush(Color.FromRgb(22, 163, 74)),
             TipoHistoricoLigacao.Recebida => new SolidColorBrush(Color.FromRgb(37, 99, 235)),
@@ -269,7 +335,8 @@ namespace WavenVoIP.Models
         };
 
         [JsonIgnore]
-        public Brush CorTipoFundo => Tipo switch
+        public Brush CorTipoFundo => EhForaDoHorario ? new SolidColorBrush(Color.FromRgb(245, 243, 255))
+            : EhEventoTecnico ? new SolidColorBrush(Color.FromRgb(241, 245, 249)) : Tipo switch
         {
             TipoHistoricoLigacao.Realizada => new SolidColorBrush(Color.FromRgb(240, 253, 244)),
             TipoHistoricoLigacao.Recebida => new SolidColorBrush(Color.FromRgb(239, 246, 255)),
@@ -281,6 +348,33 @@ namespace WavenVoIP.Models
             TipoHistoricoLigacao.Cancelada => new SolidColorBrush(Color.FromRgb(241, 245, 249)),
             _ => new SolidColorBrush(Color.FromRgb(241, 245, 249))
         };
+
+        // v2.5.0 — destaque das "Não atendidas" (Perdida, Cliente desistiu, Abandono na fila) na
+        // lista do Histórico: selo e ícone em vermelho cheio com texto branco, nome em vermelho e
+        // faixa vermelha à esquerda da linha. Os demais tipos usam as cores suaves de sempre.
+        private static readonly Brush _vermelhoNaoAtendida = Congelar(new SolidColorBrush(Color.FromRgb(220, 38, 38)));
+        private static readonly Brush _vermelhoNomeNaoAtendida = Congelar(new SolidColorBrush(Color.FromRgb(185, 28, 28)));
+        private static readonly Brush _fundoLinhaNaoAtendida = Congelar(new SolidColorBrush(Color.FromRgb(255, 245, 245)));
+        private static readonly Brush _textoNomePadrao = Congelar(new SolidColorBrush(Color.FromRgb(16, 24, 40)));
+        private static Brush Congelar(Brush b) { b.Freeze(); return b; }
+
+        [JsonIgnore]
+        public bool EhNaoAtendidaEntrada => NaoAtendidasPolicy.EhNaoAtendida(this);
+
+        [JsonIgnore]
+        public Brush CorSeloTexto => EhNaoAtendidaEntrada ? Brushes.White : CorTipo;
+
+        [JsonIgnore]
+        public Brush CorSeloFundo => EhNaoAtendidaEntrada ? _vermelhoNaoAtendida : CorTipoFundo;
+
+        [JsonIgnore]
+        public Brush CorNome => EhNaoAtendidaEntrada ? _vermelhoNomeNaoAtendida : _textoNomePadrao;
+
+        [JsonIgnore]
+        public Brush CorFaixa => EhNaoAtendidaEntrada ? _vermelhoNaoAtendida : Brushes.Transparent;
+
+        [JsonIgnore]
+        public Brush CorFundoLinha => EhNaoAtendidaEntrada ? _fundoLinhaNaoAtendida : Brushes.Transparent;
 
         [JsonIgnore]
         public string RamalExibido
@@ -294,10 +388,22 @@ namespace WavenVoIP.Models
                     return string.Empty;
                 }
                 if (Tipo == TipoHistoricoLigacao.CaixaPostal)
-                    return string.Empty; // TipoTexto already says "Caixa postal"
+                    return EhForaDoHorario
+                        ? "Mensagem automática + caixa postal"
+                        : string.Empty; // TipoTexto already says "Caixa postal"
                 // Recebida / Perdida / NaoAtendidaNesseRamal: show who answered (or dest ramal)
                 if (!string.IsNullOrWhiteSpace(RamalAtendeu))
                     return NomeOuRamal(RamalAtendeu);
+                // v2.5.0 — só o PABX atendeu (URA/anúncio): diz isso em vez de deixar o campo
+                // vazio ou cair no RamalDestino, que aqui não é ninguém que tenha atendido.
+                if (Tipo == TipoHistoricoLigacao.Recebida && !string.IsNullOrWhiteSpace(AtendimentoAutomatico))
+                {
+                    if (EhForaDoHorario) return "Mensagem automática";
+                    if (EhEventoTecnico) return "Retorno da própria ligação (sem cliente)";
+                    return string.Equals(AtendimentoAutomatico, "Anuncio", StringComparison.OrdinalIgnoreCase)
+                        ? "Mensagem automática (sem atendente)"
+                        : "URA (sem atendente)";
+                }
                 // Queue-abandoned call: RamalDestino is only the last ring attempt target,
                 // not proof the agent missed or rejected the call — hide to avoid false attribution.
                 if (Tipo == TipoHistoricoLigacao.Perdida &&

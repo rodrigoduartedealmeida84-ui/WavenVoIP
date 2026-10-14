@@ -101,6 +101,15 @@ namespace WavenVoIP
             // prefixo de rota (ex: "18007021200" = rota '1' + "8007021200" tipo 0800).
             if (n.Length == 11 && (n[0] == '1' || n[0] == '2' || n[0] == '3') && n[2] == '0')
                 return true;
+            // v2.5.0 — 11 dígitos começando com 1/2/3 que NÃO podem ser um celular: todo número
+            // brasileiro de 11 dígitos é DDD + 9 + 8 dígitos, então se o 3º dígito não é '9' o
+            // primeiro é o prefixo de rota na frente de um número de 10 dígitos (fixo, ou celular
+            // antigo sem o 9). Caso real: "13832010900" = rota 1 + (38) 3201-0900 — sem isto o
+            // registro local da chamada nunca casava com o do CDR ("3832010900") e a mesma
+            // ligação aparecia duas vezes no Histórico. Exige DDD existente no número restante.
+            if (n.Length == 11 && (n[0] == '1' || n[0] == '2' || n[0] == '3') && n[2] != '9' &&
+                Services.PhoneNumberNormalizer.DddExiste(n.Substring(1, 2)))
+                return true;
             return false;
         }
 

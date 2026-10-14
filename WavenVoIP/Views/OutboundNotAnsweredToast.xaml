@@ -33,9 +33,9 @@
     <Border x:Name="toastRoot" Margin="8,6,8,6"
             Background="White" CornerRadius="14"
             BorderBrush="#FDE68A" BorderThickness="1.5">
-        <Border.Effect>
+        <Grid><Border Margin="0" CornerRadius="14" Background="White" IsHitTestVisible="False"><Border.Effect>
             <DropShadowEffect BlurRadius="20" ShadowDepth="4" Opacity="0.18" Color="#000000"/>
-        </Border.Effect>
+        </Border.Effect></Border>
 
         <Grid Margin="12,10">
             <Grid.ColumnDefinitions>
@@ -82,5 +82,5 @@
                 </Button.Template>
             </Button>
         </Grid>
-    </Border>
+    </Grid></Border>
 </Window>
