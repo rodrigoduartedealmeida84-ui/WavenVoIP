@@ -4,15 +4,21 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "2.5.0";
+        public const string Versao  = "2.5.1";
         public const string NomeApp = "WavenVoIP";
 
-        public static readonly DateTime DataBuild = new DateTime(2026, 10, 13);
+        public static readonly DateTime DataBuild = new DateTime(2026, 10, 17);
 
         public static string VersaoCompleta => $"{NomeApp} v{Versao}";
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v2.5.1 — Tom de chamada, aviso de fila e desligamento confiavel (17/10/2026)\n" +
+            "• [FIX CRITICO] Desligar: depois de uma ligacao realizada nao atendida (cancelada/ocupado), desligar a recebida seguinte nao encerrava a chamada no PABX e o cliente continuava na linha. Agora o BYE sai pela propria chamada, a resposta do PABX e conferida e, se o canal do seu ramal continuar ativo, ele e encerrado com seguranca (so o seu canal, conferindo canal e LinkedID)\n" +
+            "• [FIX] Ligacoes realizadas: o atendente ouve o tom de chamando enquanto o destino toca (180 Ringing); com early media (183) toca o audio real do PABX/operadora, sem tom duplicado; para na hora ao atender, desligar ou falhar\n" +
+            "• [FIX] Aviso de cliente na fila: sem som e sem cobrir a janela de chamada (tocando ou em andamento); Puxar Ligacao e fechamento automatico mantidos\n" +
+            "• [FIX] Aviso de cliente na fila: ligacao que ja esta tocando no seu ramal nao gera aviso; um aviso por ligacao (LinkedID), sem duplicar quando o PABX troca o canal\n" +
+            "\n" +
             "v2.5.0 — Puxar Ligacao, conferencia nova, aviso de fila, contatos e desempenho (14/10/2026)\n" +
             "• [NEW] Nao atendidas como mensagens nao lidas: o numero no botao conta so as que voce ainda nao viu; abrir a area zera o contador sem apagar nada; novas chamadas voltam a contar (uma por ligacao)\n" +
             "• [NEW] Historico: ao voltar pela aba, mostra sempre todas as ligacoes (busca, filtros e Nao atendidas limpos)\n" +

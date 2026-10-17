@@ -398,6 +398,193 @@ if (args.Length >= 3 && args[0] == "--recuperacao")
     return falhas;
 }
 
+// ── 0. v2.5.1 — tom de chamando (180 / 183 early media) ─────────────────────────────
+if (typeof(SipService).GetMethod("TratarProgressoSaida", BindingFlags.NonPublic | BindingFlags.Instance) is { } mProg)
+{
+    const BindingFlags PrivI = BindingFlags.NonPublic | BindingFlags.Instance;
+    SipService NovoSip()
+    {
+        var s = (SipService)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof(SipService));
+        typeof(SipService).GetField("_ringback", PrivI)!.SetValue(s, new RingbackTone());
+        typeof(SipService).GetField("_ringbackOutIdx", PrivI)!.SetValue(s, -1);
+        return s;
+    }
+    void Discando(SipService s)
+    {
+        foreach (var (n, v) in new (string, object)[] { ("_earlyMediaAnunciada", false), ("_earlyMediaAudivel", false), ("_earlyMediaPacotesAudiveis", 0), ("_ringbackDiscando", true) })
+            typeof(SipService).GetField(n, PrivI)!.SetValue(s, v);
+    }
+    bool Tom(SipService s) => ((RingbackTone)typeof(SipService).GetField("_ringback", PrivI)!.GetValue(s)!).Ativo;
+    void Prog(SipService s, SIPSorcery.SIP.SIPResponseStatusCodesEnum st, bool sdp)
+    {
+        var r = new SIPSorcery.SIP.SIPResponse(st, null, System.Text.Encoding.UTF8, System.Text.Encoding.UTF8);
+        if (sdp) r.Body = "v=0\r\no=- 1 1 IN IP4 10.0.0.1\r\ns=-\r\nc=IN IP4 10.0.0.1\r\nt=0 0\r\nm=audio 10000 RTP/AVP 0\r\n";
+        mProg.Invoke(s, new object?[] { r });
+    }
+    var mRtp = typeof(SipService).GetMethod("ObservarEarlyMedia", PrivI)!;
+    byte[] Pcmu(double amp) => Enumerable.Range(0, 160).Select(i => NAudio.Codecs.MuLawEncoder.LinearToMuLawSample((short)(amp * 32767 * Math.Sin(2 * Math.PI * 425 * i / 8000.0)))).ToArray();
+    void Rtp(SipService s, double amp, int n) { for (int i = 0; i < n; i++) mRtp.Invoke(s, new object?[] { 0, Pcmu(amp) }); }
+    void Parar(SipService s, string m) => typeof(SipService).GetMethod("PararRingback", PrivI)!.Invoke(s, new object[] { m });
+    var Ring = SIPSorcery.SIP.SIPResponseStatusCodesEnum.Ringing;
+    var Prg = SIPSorcery.SIP.SIPResponseStatusCodesEnum.SessionProgress;
+
+    var a = NovoSip(); Discando(a);
+    Prog(a, Ring, false);
+    Check("ringback: 180 Ringing sem SDP liga o tom local", Tom(a));
+    Prog(a, Ring, false);
+    Check("ringback: 180 repetido nao cria segundo tom", Tom(a));
+    Parar(a, "atendida");
+    Check("ringback: atender para o tom na hora", !Tom(a));
+    Prog(a, Ring, false);
+    Check("ringback: 180 atrasado depois de atendida nao religa", !Tom(a));
+
+    var b = NovoSip(); Discando(b);
+    Prog(b, Prg, true);
+    Check("ringback: 183 com SDP nao liga o tom de imediato (espera o audio do PABX)", !Tom(b));
+    Rtp(b, 0.3, 6);
+    Prog(b, Ring, false);
+    await Task.Delay(1800);
+    Check("ringback: early media audivel -> sem tom local (sem duplicar)", !Tom(b));
+    Parar(b, "fim");
+
+    var c = NovoSip(); Discando(c);
+    Prog(c, Prg, true);
+    Rtp(c, 0.0005, 20);   // early media muda / ruido de conforto
+    await Task.Delay(1800);
+    Check("ringback: 183 com early media muda -> tom local apos 1,5 s", Tom(c));
+    Rtp(c, 0.3, 6);
+    Check("ringback: early media fica audivel -> tom local sai", !Tom(c));
+    Prog(c, Ring, false);
+    Check("ringback: 180 depois de early media audivel nao religa", !Tom(c));
+    Parar(c, "fim");
+
+    var d = NovoSip(); Discando(d);
+    Prog(d, Prg, false);
+    Check("ringback: 183 sem SDP liga o tom local", Tom(d));
+    Parar(d, "falhou");
+    Check("ringback: falha/desligar para o tom", !Tom(d));
+
+    var e = NovoSip();
+    Prog(e, Ring, false);
+    Check("ringback: sem discagem em andamento nunca toca", !Tom(e));
+}
+
+// ── 0b. v2.5.1 — desligar recebida depois de realizada cancelada (reprodução SIP real) ───
+if (typeof(SipService).GetMethod("DesligarDialogoAtual", BindingFlags.NonPublic | BindingFlags.Instance) is { } mDesligar)
+{
+    const BindingFlags PI = BindingFlags.NonPublic | BindingFlags.Instance;
+    SIPSorcery.Net.RTPSession Midia()
+    {
+        var s = new SIPSorcery.Net.RTPSession(false, false, false);
+        s.addTrack(new SIPSorcery.Net.MediaStreamTrack(SIPSorcery.Net.SDPMediaTypesEnum.audio, false,
+            new List<SIPSorcery.Net.SDPAudioVideoMediaFormat> { new(SIPSorceryMedia.Abstractions.SDPWellKnownMediaFormatsEnum.PCMU) }));
+        return s;
+    }
+    var portaBase = 15060;
+    async Task<(bool pabxRecebeuBye, string detalhe)> Cenario(bool codigoNovo, string previa = "cancelada", bool finalRecebida = true)
+    {
+        var portaPabx = (portaBase += 4); var portaApp = portaPabx + 1;
+        var tPabx = new SIPSorcery.SIP.SIPTransport(); tPabx.AddSIPChannel(new SIPSorcery.SIP.SIPUDPChannel(new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, portaPabx)));
+        var tApp = new SIPSorcery.SIP.SIPTransport(); tApp.AddSIPChannel(new SIPSorcery.SIP.SIPUDPChannel(new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, portaApp)));
+        var pabx = new SIPSorcery.SIP.App.SIPUserAgent(tPabx, null);
+        var app = new SIPSorcery.SIP.App.SIPUserAgent(tApp, null);
+        try
+        {
+            // 1) PABX: a ligação realizada fica tocando (180) e nunca é atendida
+            var okRealizada = false;
+            var pabxDesligado = new TaskCompletionSource<bool>();
+            SIPSorcery.SIP.App.SIPUserAgent? pabxAtendeu = null;
+            var invitesNoPabx = 0;
+            pabx.OnIncomingCall += async (ua, req) =>
+            {
+                var u = ua.AcceptCall(req);
+                if (previa == "cancelada" && ++invitesNoPabx == 1) { u.Progress(SIPSorcery.SIP.SIPResponseStatusCodesEnum.Ringing, null, null, null, null); return; }
+                // atende: um agente por chamada atendida (como o PABX)
+                var ag = new SIPSorcery.SIP.App.SIPUserAgent(tPabx, null);
+                ag.OnCallHungup += _ => pabxDesligado.TrySetResult(true);
+                pabxAtendeu = ag;
+                await ag.Answer(u, Midia());
+            };
+            if (previa == "cancelada")
+            {
+                var tRealizada = app.Call($"sip:266984671226@127.0.0.1:{portaPabx}", null, null, Midia());
+                await Task.Delay(700);
+                app.Cancel();                                     // operador desiste enquanto toca
+                okRealizada = await tRealizada;
+            }
+            else if (previa == "atendida")
+            {
+                okRealizada = await app.Call($"sip:266984671226@127.0.0.1:{portaPabx}", null, null, Midia());
+                await Task.Delay(300);
+                app.Hangup();                                     // realizada atendida e desligada aqui
+                await Task.Delay(300);
+                pabxDesligado = new TaskCompletionSource<bool>();
+                pabxAtendeu = null;
+            }
+            await Task.Delay(300);
+            var uacVelho = typeof(SIPSorcery.SIP.App.SIPUserAgent).GetField("m_uac", PI)!.GetValue(app) != null;
+
+            // 2) PABX liga para o ramal; o app atende
+            app.OnIncomingCall += async (ua, req) => { var u = ua.AcceptCall(req); await ua.Answer(u, Midia()); };
+            var pabxSaida = new SIPSorcery.SIP.App.SIPUserAgent(tPabx, null);
+            pabxSaida.OnCallHungup += _ => pabxDesligado.TrySetResult(true);
+            bool atendida;
+            if (finalRecebida) atendida = await pabxSaida.Call($"sip:100@127.0.0.1:{portaApp}", null, null, Midia());
+            else atendida = await app.Call($"sip:166984671226@127.0.0.1:{portaPabx}", null, null, Midia());
+            await Task.Delay(300);
+            if (!atendida || !app.IsCallActive) return (false, $"setup falhou atendida={atendida} ativa={app.IsCallActive}");
+
+            // 3) operador clica Desligar
+            if (codigoNovo)
+            {
+                var s = (SipService)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof(SipService));
+                typeof(SipService).GetField("_userAgent", PI)!.SetValue(s, app);
+                typeof(SipService).GetField("_sipTransport", PI)!.SetValue(s, tApp);
+                typeof(SipService).GetField("_numeroRemotoAtual", PI)!.SetValue(s, "556684671226");
+                mDesligar.Invoke(s, new object[] { "teste" });
+            }
+            else
+            {
+                app.Cancel();                                     // caminho da 2.5.0: Cancel() e depois Hangup()
+                if (app.IsCallActive) app.Hangup();
+            }
+            var venceu = await Task.WhenAny(pabxDesligado.Task, Task.Delay(3000));
+            var recebeu = venceu == pabxDesligado.Task;
+            try { pabxSaida.Hangup(); } catch { }
+            return (recebeu, $"realizadaOk={okRealizada} uacObsoleto={uacVelho}");
+        }
+        finally { await Task.Delay(200); tPabx.Shutdown(); tApp.Shutdown(); }
+    }
+    var antigo = await Cenario(codigoNovo: false);
+    Check("desligar: REPRODUZ o bug da 2.5.0 (realizada cancelada -> recebida desligada nao manda BYE ao PABX)", !antigo.pabxRecebeuBye, antigo.detalhe);
+    var novo = await Cenario(codigoNovo: true);
+    Check("desligar: 2.5.1 manda o BYE da recebida e o PABX encerra a chamada", novo.pabxRecebeuBye, novo.detalhe);
+    foreach (var (prev, rec) in new[] { ("nenhuma", true), ("atendida", true), ("cancelada", false), ("atendida", false), ("nenhuma", false) })
+    {
+        var r = await Cenario(codigoNovo: true, previa: prev, finalRecebida: rec);
+        Check($"desligar 2.5.1: {(rec ? "recebida" : "realizada")} atendida e desligada (antes: realizada {prev}) -> PABX encerra", r.pabxRecebeuBye, r.detalhe);
+    }
+
+    // escolha do canal para a recuperação (nunca cliente, outro ramal ou ligação nova)
+    var mSel2 = typeof(SipService).GetMethod("SelecionarCanalRemanescente", BindingFlags.NonPublic | BindingFlags.Static)!;
+    (bool fonte, CanalAtivo? alvo, bool amb) Sel2(string num, double desde, double conversa, params CanalAtivo[] c) =>
+        ((bool, CanalAtivo?, bool))mSel2.Invoke(null, new object[] { c.ToList(), "100", num, desde, conversa })!;
+    CanalAtivo K(string ch, string lid, string con, int dur, string app = "AppDial", string bridge = "B1") => new(ch, lid, "U", bridge, "100", "", con, "from-internal", "", app, "", dur);
+    var cli = K("SIP/BRDID-0000f01", "LX", "100", 40, "Queue");
+    var meu = K("SIP/100-0000f02", "LX", "556684671226", 40);
+    var r1 = Sel2("6684671226", 2.5, 30, cli, meu);
+    Check("recuperacao: acha so o canal do MEU ramal da ligacao desligada", r1.fonte && r1.alvo?.Channel == "SIP/100-0000f02" && !r1.amb);
+    var novaMinha = K("SIP/100-0000f03", "LY", "556684671226", 2);
+    Check("recuperacao: ligacao NOVA deste ramal (canal mais novo que o desligar) nunca e escolhida", Sel2("6684671226", 2.5, 30, novaMinha).alvo == null && !Sel2("6684671226", 2.5, 30, novaMinha).amb);
+    Check("recuperacao: canal de OUTRO ramal ou do cliente nunca e escolhido", Sel2("6684671226", 2.5, 30, cli, K("SIP/104-0000f04", "LX", "556684671226", 40)).alvo == null);
+    var r4 = Sel2("6684671226", 2.5, 30, K("SIP/100-0000f05", "LZ", "5511999990000", 40));
+    Check("recuperacao: canal antigo meu com outro numero -> ambiguo (nao derruba, so avisa)", r4.alvo == null && r4.amb);
+    var conf = K("SIP/100-0000f06", "LC", "556684671226", 60, "ConfBridge", "BC");
+    var r5 = Sel2("6684671226", 2.5, 50, conf, K("SIP/104-0000f07", "LC", "556684671226", 60, "ConfBridge", "BC"), K("SIP/BRDID-0000f08", "LC", "100", 60, "ConfBridge", "BC"));
+    Check("recuperacao: conferencia -> so o meu canal sai, cliente e outro atendente ficam", r5.alvo?.Channel == "SIP/100-0000f06");
+    Check("recuperacao: ramal interno compara numero exato", Sel2("104", 2.5, 10, K("SIP/100-0000f09", "LI", "104", 20)).alvo != null && Sel2("104", 2.5, 10, K("SIP/100-0000f0a", "LJ", "1040", 20)).amb);
+}
+
 // ── 1. Seleção de canais para a sala de conferência ─────────────────────────────────
 var mSel = typeof(SipService).GetMethod("SelecionarCanaisParaSala", Priv);
 if (mSel == null)
@@ -603,6 +790,46 @@ else
         Check("aviso fila: passou pela fila e foi atendido na leitura seguinte -> nenhum aviso",
             pol4.Avaliar(new[] { passou }, out _).Count == 0 && pol4.Avaliar(new[] { Em(StatusChamadaAtiva.EmAtendimento, lid: "LQ8", atend: "103") }, out _).Count == 0);
 
+        {
+            // v2.5.1 — tocando no meu ramal / LinkedID único
+            ChamadaAtivaInfo F(string lid, string canal = "SIP/BRDID-0000d01", string num = "5566998877665", params string[] tocando) =>
+                new ChamadaAtivaInfo { CanalCliente = canal, Linkedid = lid, Numero = num, Status = StatusChamadaAtiva.NaFila, Fila = "700", RamaisTocando = tocando };
+            var pt = new WavenVoIP.Services.AvisoFilaPolicy();
+            pt.DefinirMeuRamal("100", "");
+            var tocAqui = F("LT1", tocando: new[] { "100", "103" });
+            pt.Avaliar(new[] { tocAqui }, out _);
+            Check("2.5.1 aviso: fila tocando no MEU ramal (PABX) -> sem popup", pt.Avaliar(new[] { tocAqui }, out _).Count == 0 && pt.Avaliar(new[] { tocAqui }, out _).Count == 0);
+            var parouDeTocar = F("LT1", tocando: new[] { "103" });
+            Check("2.5.1 aviso: mesma espera depois de parar de tocar aqui -> continua sem popup", pt.Avaliar(new[] { parouDeTocar }, out _).Count == 0 && pt.Avaliar(new[] { parouDeTocar }, out _).Count == 0);
+            var outro = F("LT2", canal: "SIP/BRDID-0000d02", num: "5566911112222", tocando: new[] { "103" });
+            pt.Avaliar(new[] { parouDeTocar, outro }, out _);
+            Check("2.5.1 aviso: outra ligacao tocando so em OUTRO ramal -> popup normal", pt.Avaliar(new[] { parouDeTocar, outro }, out _).Select(x => x.Linkedid).SequenceEqual(new[] { "LT2" }));
+
+            var pn = new WavenVoIP.Services.AvisoFilaPolicy();
+            pn.DefinirMeuRamal("100", "66998877665");   // INVITE chegou antes da leitura do PABX
+            var semCanalAqui = F("LT3");
+            pn.Avaliar(new[] { semCanalAqui }, out _);
+            Check("2.5.1 aviso: numero do INVITE tocando aqui (sem 55/DDD igual) -> sem popup", pn.Avaliar(new[] { semCanalAqui }, out _).Count == 0);
+
+            var pj = new WavenVoIP.Services.AvisoFilaPolicy();
+            var vis1 = F("LT4"); pj.Avaliar(new[] { vis1 }, out _); pj.Avaliar(new[] { vis1 }, out _);
+            var canaisFora = pj.SuprimirTocandoAqui("66998877665");
+            Check("2.5.1 aviso: comecou a tocar aqui com popup aberto -> sai na hora", canaisFora.SequenceEqual(new[] { vis1.CanalCliente }));
+            pj.DefinirMeuRamal("100", "");
+            pj.Avaliar(new[] { vis1 }, out _, out var sj);
+            Check("2.5.1 aviso: fechamento registra motivo tocando_no_meu_ramal", sj.Count == 1 && sj[0].motivo == "tocando_no_meu_ramal", sj.Count > 0 ? sj[0].motivo : "-");
+
+            var pd = new WavenVoIP.Services.AvisoFilaPolicy();
+            var c1 = F("LT5", canal: "SIP/BRDID-0000d05"); var c2 = F("LT5", canal: "SIP/Wavoip-0000d06");
+            Check("2.5.1 aviso: dois canais do mesmo LinkedID nao confirmam a espera na 1a leitura", pd.Avaliar(new[] { c1, c2 }, out _).Count == 0);
+            var v = pd.Avaliar(new[] { c1, c2 }, out var nv);
+            Check("2.5.1 aviso: mesmo LinkedID -> uma linha e uma notificacao", v.Count == 1 && nv.Count == 1);
+            var c3 = F("LT5", canal: "SIP/BRDID-0000d07");   // PABX trocou o nome do canal
+            var v2 = pd.Avaliar(new[] { c3 }, out var nv2);
+            Check("2.5.1 aviso: canal renomeado na mesma ligacao -> sem notificacao nova", v2.Count == 1 && nv2.Count == 0);
+            Check("2.5.1 aviso: comparacao de numero ignora 55 e prefixo", WavenVoIP.Services.AvisoFilaPolicy.MesmoNumero("5566998877665", "266998877665") && !WavenVoIP.Services.AvisoFilaPolicy.MesmoNumero("5566998877665", "5566998877000"));
+        }
+
         var pol5 = new WavenVoIP.Services.AvisoFilaPolicy();
         var a1 = Em(StatusChamadaAtiva.NaFila, lid: "LQ9", canal: "SIP/BRDID-0000c09"); var a2 = Em(StatusChamadaAtiva.NaFila, lid: "LQ10", canal: "SIP/BRDID-0000c10");
         pol5.Avaliar(new[] { a1, a2 }, out _);
@@ -638,6 +865,7 @@ else
         Check("ponta a ponta: na URA, nenhuma leitura gera popup", f1.popup == 0 && f2.popup == 0);
         var f3 = Foto(naFila); var f4 = Foto(naFila, agTocaL1, agTocaL2, agTocaR);
         Check("ponta a ponta: entrou na fila 700 -> popup na 2a leitura, mesmo com o agente tocando", f3.popup == 0 && f4.popup == 1 && f4.novas == 1, $"{f3.popup}/{f4.popup}/{f4.novas}");
+        { var mm = Montar("100", new[] { naFila, agTocaL1, agTocaL2, agTocaR }); Check("2.5.1 ponta a ponta: ramal do agente tocando vem dos canais do PABX (sem ponte)", mm.Count == 1 && mm[0].RamaisTocando.SequenceEqual(new[] { "103" }), string.Join(",", mm.SelectMany(x => x.RamaisTocando))); var mAt = Montar("100", new[] { atTronco, atL1, atL2, atR }); Check("2.5.1 ponta a ponta: agente em conversa nao conta como tocando", mAt.All(x => x.RamaisTocando.Count == 0)); }
         var f5 = Foto(naFila, agTocaL1, agTocaL2, agTocaR);
         Check("ponta a ponta: seguiu na fila -> mesma linha, sem aviso novo", f5.popup == 1 && f5.novas == 0);
         var f6 = Foto(atTronco, atL1, atL2, atR);

@@ -172,9 +172,8 @@ namespace WavenVoIP.Views
             catch { }
 
             DefinirMudo(false);
-            if (string.Equals(txtStatus.Text, "Ligando...", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(txtStatus.Text, "Chamando...", StringComparison.OrdinalIgnoreCase))
-                TocarTomDeChamando();
+            // v2.5.1 — o tom de chamando agora é do SipService (RingbackTone), guiado pelos sinais
+            // SIP 180/183 e tocado no dispositivo da chamada. Esta janela não toca mais nada.
         }
 
         private void CallWindow_StateChanged(object? sender, EventArgs e) { }

@@ -122,6 +122,13 @@ namespace WavenVoIP
         // GetType().GetField(...) a cada cancelamento.
         private static readonly FieldInfo? _campoUac = typeof(SIPUserAgent).GetField("m_uac", BindingFlags.NonPublic | BindingFlags.Instance);
         private static readonly FieldInfo? _campoCancelTransaction = typeof(SIPClientUserAgent).GetField("m_cancelTransaction", BindingFlags.NonPublic | BindingFlags.Instance);
+        // v2.5.1 — desligamento confiável (ver LimparUacObsoleto / DesligarDialogoAtual)
+        private static readonly FieldInfo? _campoCallDescriptor = typeof(SIPUserAgent).GetField("m_callDescriptor", BindingFlags.NonPublic | BindingFlags.Instance);
+        private static readonly FieldInfo? _campoUas = typeof(SIPUserAgent).GetField("m_uas", BindingFlags.NonPublic | BindingFlags.Instance);
+        private static readonly FieldInfo? _campoDialogo = typeof(SIPUserAgent).GetField("m_sipDialogue", BindingFlags.NonPublic | BindingFlags.Instance);
+        private static readonly FieldInfo? _campoByeUas = typeof(SIPServerUserAgent).GetField("m_byeTransaction", BindingFlags.NonPublic | BindingFlags.Instance);
+        private static readonly FieldInfo? _campoByeDialogo = typeof(SIPDialogue).GetField("m_byeTransaction", BindingFlags.NonPublic | BindingFlags.Instance);
+        private static readonly FieldInfo? _campoByeUac = typeof(SIPClientUserAgent).GetField("m_byeTransaction", BindingFlags.NonPublic | BindingFlags.Instance);
 
         // v2.4.1 — fix de vazamento de handle nativo de audio: WindowsAudioEndPoint
         // (SIPSorceryMedia.Windows 8.0.14) nao expoe Dispose publico e seu CloseAudio() so
@@ -193,6 +200,75 @@ namespace WavenVoIP
         // para medir o tempo de toque até BusyHere/Decline (heurística de Recusada vs NaoAtendida).
         // Resetado no início de cada Ligar().
         private DateTime? _ultimoRingingRecebidoEm;
+
+        // v2.5.1 — tom de chamando das ligações realizadas. 180 Ringing (sem áudio do PABX) → tom
+        // local. 183 Session Progress com SDP (early media) → o áudio real do PABX/operadora já
+        // chega pelo RTP: o tom local só entra se esse áudio ficar mudo, e sai assim que ele ficar
+        // audível (nunca os dois juntos). Para ao atender, falhar, desligar ou encerrar.
+        private readonly RingbackTone _ringback = new();
+        private volatile bool _ringbackDiscando;          // INVITE enviado, sem resposta final
+        private volatile bool _earlyMediaAnunciada;        // 183 com SDP recebido nesta tentativa
+        private volatile bool _earlyMediaAudivel;          // RTP com áudio de verdade antes do 200 OK
+        private int _earlyMediaPacotesAudiveis;
+        private int _ringbackOutIdx = -1;                  // mesmo dispositivo de saída da chamada
+        private DateTime _earlyMediaAnunciadaEm = DateTime.MinValue;
+        public event Action? OutboundRinging;              // 1º 180/183 da tentativa (status "Chamando...")
+
+        private void PararRingback(string motivo)
+        {
+            _ringbackDiscando = false;
+            _ringback.Parar(motivo);
+        }
+
+        private void TratarProgressoSaida(SIPResponse? resp)
+        {
+            var status = resp?.Status;
+            var temSdp = !string.IsNullOrWhiteSpace(resp?.Body);
+            LogHelper.Sip($"OUTBOUND_PROGRESS | status={(int?)resp?.StatusCode} {status} sdp={temSdp} discando={_ringbackDiscando} earlyAudivel={_earlyMediaAudivel}");
+            if (!_ringbackDiscando) return;
+
+            if (status == SIPResponseStatusCodesEnum.SessionProgress && temSdp)
+            {
+                if (!_earlyMediaAnunciada)
+                {
+                    _earlyMediaAnunciada = true;
+                    _earlyMediaAnunciadaEm = DateTime.Now;
+                    LogHelper.Sip("OUTBOUND_EARLY_MEDIA | 183 com SDP — aguardando audio do PABX antes do tom local");
+                    // sem áudio audível em 1,5 s (early media muda) → tom local
+                    _ = Task.Delay(1500).ContinueWith(_ =>
+                    {
+                        if (_ringbackDiscando && !_earlyMediaAudivel)
+                            _ringback.Iniciar(_ringbackOutIdx, "183_early_media_sem_audio");
+                    });
+                }
+                return;
+            }
+
+            // 180 Ringing (ou 18x sem SDP): tom local, a menos que o PABX já esteja mandando áudio
+            if (_earlyMediaAudivel) return;
+            if (_earlyMediaAnunciada && DateTime.Now - _earlyMediaAnunciadaEm < TimeSpan.FromMilliseconds(1500)) return;
+            _ringback.Iniciar(_ringbackOutIdx, $"{(int?)resp?.StatusCode ?? 180}_ringing");
+        }
+
+        // Chamado a cada pacote RTP de áudio: durante a discagem, detecta early media audível.
+        private void ObservarEarlyMedia(int payloadType, byte[]? payload)
+        {
+            if (!_ringbackDiscando || _earlyMediaAudivel || payload == null || payload.Length == 0) return;
+            if (payloadType != 0 && payloadType != 8) return;   // G.711
+            double soma = 0;
+            for (int i = 0; i < payload.Length; i++)
+            {
+                double v = payloadType == 8 ? NAudio.Codecs.ALawDecoder.ALawToLinearSample(payload[i])
+                                            : NAudio.Codecs.MuLawDecoder.MuLawToLinearSample(payload[i]);
+                soma += v * v;
+            }
+            var db = 20.0 * Math.Log10(Math.Max(Math.Sqrt(soma / payload.Length) / 32768.0, 1e-7));
+            if (db < -42) return;   // silêncio / ruído de conforto não conta
+            if (Interlocked.Increment(ref _earlyMediaPacotesAudiveis) < 5) return;   // ~100 ms de áudio
+            _earlyMediaAudivel = true;
+            LogHelper.Sip($"OUTBOUND_EARLY_MEDIA_AUDIVEL | nivel={db:F0}dBFS — tom local desligado, tocando audio do PABX");
+            _ringback.Parar("early_media_audivel");
+        }
 
         // Investigação real (08/08/2026, duas chamadas de teste na mesma rota/operadora):
         //   Teste 1 — cliente recusou no aparelho: Ringing → BusyHere em ~11s.
@@ -365,7 +441,7 @@ namespace WavenVoIP
 
             _userAgent = new SIPUserAgent(_sipTransport, null);
             _userAgent.OnIncomingCall += OnIncomingCall;
-            _userAgent.ClientCallRinging += (_, __) =>
+            _userAgent.ClientCallRinging += (_, resp) =>
             {
                 // Só registra o PRIMEIRO Ringing da tentativa — retransmissões de 180 não devem
                 // reiniciar a contagem do tempo de toque.
@@ -373,11 +449,15 @@ namespace WavenVoIP
                 {
                     _ultimoRingingRecebidoEm = DateTime.Now;
                     LogHelper.Sip("OUTBOUND_RINGING_STARTED | 180 Ringing recebido do servidor SIP");
+                    try { OutboundRinging?.Invoke(); } catch { }
                 }
                 LogHelper.Sip("CALL_RINGING | 180 Ringing recebido do servidor SIP");
+                try { TratarProgressoSaida(resp); } catch { }
             };
+            _userAgent.ClientCallAnswered += (_, __) => PararRingback("atendida");
             _userAgent.ClientCallFailed += (uac, errorMessage, sipResponse) =>
             {
+                PararRingback("falhou");
                 LastOutboundFailureStatus = sipResponse?.Status;
                 LastOutboundFailureReason = errorMessage;
                 LastOutboundRingDurationSeconds = _ultimoRingingRecebidoEm.HasValue
@@ -389,6 +469,7 @@ namespace WavenVoIP
             };
             _userAgent.OnCallHungup += _ =>
             {
+                PararRingback("remoto_desligou");
                 _emEspera = false;
                 PararRtpKeepalive();
                 LimparChamadaRecebidaPendente(false);
@@ -888,7 +969,13 @@ namespace WavenVoIP
 
                 LogHelper.Sip($"CALL_INVITE_SENT | destino={destination} elapsed_ms={_swDiscagem.ElapsedMilliseconds}");
                 LogHelper.Sip($"OUTBOUND_CLICK_TO_INVITE_TIMING | attemptId={attemptId} ms={_swDiscagem.ElapsedMilliseconds}");
-                bool ok = await _userAgent.Call(destination, _config.Login, _config.Senha, _mediaSession);
+                _earlyMediaAnunciada = false;
+                _earlyMediaAudivel = false;
+                _earlyMediaPacotesAudiveis = 0;
+                _ringbackDiscando = true;
+                bool ok;
+                try { ok = await _userAgent.Call(destination, _config.Login, _config.Senha, _mediaSession); }
+                finally { PararRingback("resposta_final"); }
 
                 lock (_outboundCancelLock) { _inviteEmEnvio = false; }
 
@@ -920,6 +1007,8 @@ namespace WavenVoIP
 
                 if (ok)
                 {
+                    _numeroRemotoAtual = numeroNorm;
+                    _inicioChamadaAtual = DateTime.Now;
                     StatusChanged?.Invoke($"Chamada enviada para {numeroFinal}");
                     RegistrarSinalSip($"CALL_CONNECTED | destino={destination}");
                     LogHelper.Sip($"CALL_CONNECTED | destino={destination}");
@@ -984,6 +1073,9 @@ namespace WavenVoIP
             LogHelper.Sip($"INCOMING_CALL_ACCEPTED | Call-ID={callIdAtendida}");
             RegistrarSinalSip($"INCOMING_CALL_ACCEPTED | Call-ID={callIdAtendida}");
 
+            // v2.5.1 — m_uac de ligação realizada não atendida desviaria o BYE desta recebida
+            LimparUacObsoleto("antes_de_atender");
+            var numeroRecebida = _pendingIncomingRequest.Header?.From?.FromURI?.User ?? string.Empty;
             var uas = _userAgent.AcceptCall(_pendingIncomingRequest);
             if (uas == null)
             {
@@ -998,6 +1090,8 @@ namespace WavenVoIP
 
             if (ok)
             {
+                _numeroRemotoAtual = numeroRecebida;
+                _inicioChamadaAtual = DateTime.Now;
                 StatusChanged?.Invoke("Chamada atendida.");
                 LimparChamadaRecebidaPendente(false);
                 LogHelper.Sip("CALL_CONNECTED | chamada recebida atendida");
@@ -1538,8 +1632,279 @@ namespace WavenVoIP
             return false;
         }
 
+        // ── v2.5.1 — desligamento confiável ─────────────────────────────────────────────────
+        // CAUSA (casos reais 23/06, 31/07 e 17/10 — cliente seguiu na linha até ele mesmo desligar):
+        // o SIPSorcery não limpa o m_uac de uma ligação REALIZADA que terminou sem virar chamada
+        // (cancelada enquanto tocava, ocupado, recusada). Na recebida seguinte, Cancel() e Hangup()
+        // do SIPUserAgent veem esse m_uac e mandam o BYE para a tentativa antiga (já morta); o
+        // m_uas da recebida nunca é desligado e o PABX mantém o cliente conectado.
+        private string _numeroRemotoAtual = string.Empty;
+        private DateTime _inicioChamadaAtual = DateTime.MinValue;
+        public event Action<string>? EncerramentoNaoConfirmado;   // número/descrição da ligação
+
+        internal bool LimparUacObsoleto(string motivo)
+        {
+            try
+            {
+                if (_userAgent == null || _campoUac?.GetValue(_userAgent) is not SIPClientUserAgent uac) return false;
+                if (_chamadaSaindoEmAndamento) return false;                       // tentativa em curso: não é obsoleto
+                var dialogoAtual = _campoDialogo?.GetValue(_userAgent) as SIPDialogue;
+                if (dialogoAtual != null && ReferenceEquals(dialogoAtual, uac.SIPDialogue)) return false;   // é a chamada atual
+                _campoUac!.SetValue(_userAgent, null);
+                _campoCallDescriptor?.SetValue(_userAgent, null);
+                LogHelper.Sip($"SIP_UAC_OBSOLETO_LIMPO | motivo={motivo} callIdAntigo={MascararTextoSip(uac.CallDescriptor?.CallId ?? string.Empty)}");
+                RegistrarSinalSip($"SIP_UAC_OBSOLETO_LIMPO | motivo={motivo}");
+                return true;
+            }
+            catch (Exception ex) { LogHelper.Sip($"SIP_UAC_OBSOLETO_ERRO | {ex.Message}", LogLevel.WARN); return false; }
+        }
+
+        private sealed class EncerramentoEmCurso
+        {
+            public bool Recebida;
+            public string CallId = string.Empty;
+            public string NumeroRemoto = string.Empty;
+            public DateTime Inicio;
+            public DateTime PedidoEm = DateTime.Now;
+            public SIPDialogue? Dialogo;
+            public SIPNonInviteTransaction? Bye;
+            public volatile int RespostaBye;          // 0 = sem resposta ainda
+            // o 200 OK costuma chegar antes de o evento ser assinado: lê o que a transação já guardou
+            public int RespostaFinal() =>
+                RespostaBye != 0 ? RespostaBye : (Bye?.TransactionFinalResponse?.StatusCode ?? 0);
+        }
+
+        // Desliga a chamada ESTABELECIDA pelo diálogo dela mesma e acompanha o fim real no PABX.
+        // Retorna false quando não havia chamada estabelecida (quem chama segue o caminho do CANCEL).
+        private bool DesligarDialogoAtual(string origem)
+        {
+            if (_userAgent?.IsCallActive != true) return false;
+            var dialogo = _campoDialogo?.GetValue(_userAgent) as SIPDialogue;
+            var uas = _campoUas?.GetValue(_userAgent) as SIPServerUserAgent;
+            var recebida = uas != null && dialogo != null && ReferenceEquals(uas.SIPDialogue, dialogo);
+            var enc = new EncerramentoEmCurso
+            {
+                Recebida = recebida, Dialogo = dialogo, CallId = dialogo?.CallId ?? string.Empty,
+                NumeroRemoto = _numeroRemotoAtual.Length > 0 ? _numeroRemotoAtual : new string(LastDialedDestination.Split('@')[0].Where(char.IsDigit).ToArray()),
+                Inicio = _inicioChamadaAtual == DateTime.MinValue ? DateTime.Now : _inicioChamadaAtual
+            };
+
+            if (recebida) LimparUacObsoleto("desligar_recebida");
+            var uacAtual = recebida ? null : _campoUac?.GetValue(_userAgent) as SIPClientUserAgent;   // Hangup() zera o m_uac
+            try { _userAgent.Hangup(); } catch (Exception ex) { LogHelper.Sip($"CALL_BYE_HANGUP_ERRO | {ex.Message}", LogLevel.WARN); }
+            // rede de segurança: se ainda assim o UAS da recebida não foi desligado, BYE direto nele
+            if (recebida && !uas!.IsHungup)
+            {
+                LogHelper.Sip("CALL_BYE_UAS_DIRETO | Hangup() do UserAgent nao desligou o UAS da recebida", LogLevel.WARN);
+                try { uas.Hangup(false); } catch { }
+            }
+
+            var bye = (recebida ? _campoByeUas?.GetValue(uas)
+                       : (uacAtual != null ? _campoByeUac?.GetValue(uacAtual) : null) ?? (dialogo == null ? null : _campoByeDialogo?.GetValue(dialogo))) as SIPNonInviteTransaction;
+            enc.Bye = bye;
+            if (bye != null)
+            {
+                bye.NonInviteTransactionFinalResponseReceived += (_, _, _, resp) =>
+                {
+                    enc.RespostaBye = resp?.StatusCode ?? -1;
+                    LogHelper.Sip($"CALL_BYE_RESPONSE | status={resp?.StatusCode} {resp?.ReasonPhrase} callId={MascararTextoSip(enc.CallId)}");
+                    RegistrarSinalSip($"CALL_BYE_RESPONSE | status={resp?.StatusCode} callId={enc.CallId}");
+                    return Task.FromResult(System.Net.Sockets.SocketError.Success);
+                };
+                bye.NonInviteTransactionFailed += (_, reason) =>
+                {
+                    enc.RespostaBye = -1;
+                    LogHelper.Sip($"CALL_BYE_SEM_RESPOSTA | motivo={reason} callId={MascararTextoSip(enc.CallId)}", LogLevel.WARN);
+                };
+            }
+            LogHelper.Sip($"CALL_BYE_SENT | origem={origem} tipo={(recebida ? "recebida" : "realizada")} callId={MascararTextoSip(enc.CallId)} transacao={(bye != null ? "ok" : "nao_localizada")}");
+            RegistrarSinalSip($"CALL_BYE_SENT | origem={origem} tipo={(recebida ? "recebida" : "realizada")} callId={enc.CallId} transacao={(bye != null ? "ok" : "nao_localizada")}");
+            _numeroRemotoAtual = string.Empty;
+            _inicioChamadaAtual = DateTime.MinValue;
+            _ = Task.Run(() => ConfirmarEncerramentoAsync(enc));
+            return true;
+        }
+
+        // Confere o fim real: 1) 200 OK ao BYE; 2) canal deste ramal sumiu do PABX (Waven API/AMI).
+        // Se a ligação continuar: reenvia o BYE e, persistindo, derruba SOMENTE o canal deste ramal
+        // daquela ligação (mesmo canal + mesmo LinkedID, conferidos de novo antes de agir) — nunca o
+        // canal do cliente nem de outros participantes (conferência/transferência continuam).
+        private async Task ConfirmarEncerramentoAsync(EncerramentoEmCurso enc)
+        {
+            try
+            {
+                await Task.Delay(2500).ConfigureAwait(false);
+                var sipOk = enc.RespostaFinal() is >= 200 and < 300;
+                var (fonteOk, alvo, ambiguo) = await LocalizarCanalRemanescenteAsync(enc).ConfigureAwait(false);
+                if (!fonteOk)
+                {
+                    LogHelper.Sip($"CALL_END_CONFIRM | sip={enc.RespostaFinal()} pabx=sem_leitura callId={MascararTextoSip(enc.CallId)}", sipOk ? LogLevel.INFO : LogLevel.WARN);
+                    if (!sipOk) ReenviarBye(enc, "sem_resposta_e_sem_leitura_pabx");
+                    return;
+                }
+                if (alvo == null && !ambiguo)
+                {
+                    LogHelper.Sip($"CALL_END_CONFIRMED | sip={enc.RespostaFinal()} pabx=canal_encerrado callId={MascararTextoSip(enc.CallId)}");
+                    RegistrarSinalSip($"CALL_END_CONFIRMED | sip={enc.RespostaFinal()} pabx=canal_encerrado callId={enc.CallId}");
+                    return;
+                }
+
+                LogHelper.Sip($"CALL_END_STUCK_PABX | canal={alvo?.Channel ?? "ambiguo"} linkedid={alvo?.Linkedid} sip={enc.RespostaFinal()} callId={MascararTextoSip(enc.CallId)}", LogLevel.WARN);
+                RegistrarSinalSip($"CALL_END_STUCK_PABX | canal={alvo?.Channel ?? "ambiguo"} linkedid={alvo?.Linkedid} sip={enc.RespostaFinal()} callId={enc.CallId}");
+                ReenviarBye(enc, "canal_ainda_no_pabx");
+                await Task.Delay(2000).ConfigureAwait(false);
+
+                var (fonte2, alvo2, ambiguo2) = await LocalizarCanalRemanescenteAsync(enc).ConfigureAwait(false);
+                if (fonte2 && alvo2 == null && !ambiguo2) { LogHelper.Sip("CALL_END_RECOVERED | metodo=SIP_BYE_REENVIADO"); return; }
+                if (!fonte2 || ambiguo2 || alvo2 == null || alvo == null ||
+                    !string.Equals(alvo2.Channel, alvo.Channel, StringComparison.OrdinalIgnoreCase) ||
+                    !string.Equals(alvo2.Linkedid, alvo.Linkedid, StringComparison.OrdinalIgnoreCase))
+                {
+                    // sem certeza de qual canal é: não derruba nada, só avisa
+                    LogHelper.Sip($"CALL_END_NAO_CONFIRMADO | motivo=canal_incerto fonte={fonte2} ambiguo={ambiguo2}", LogLevel.WARN);
+                    try { EncerramentoNaoConfirmado?.Invoke(enc.NumeroRemoto); } catch { }
+                    return;
+                }
+
+                var (derrubou, via) = await DerrubarCanalProprioAsync(alvo2, enc.NumeroRemoto,
+                    (int)Math.Floor((DateTime.Now - enc.PedidoEm).TotalSeconds)).ConfigureAwait(false);
+                await Task.Delay(1500).ConfigureAwait(false);
+                var (fonte3, alvo3, _) = await LocalizarCanalRemanescenteAsync(enc).ConfigureAwait(false);
+                if (derrubou && fonte3 && alvo3 == null)
+                {
+                    LogHelper.Sip($"CALL_END_RECOVERED | metodo={via} canal={alvo2.Channel} linkedid={alvo2.Linkedid}");
+                    RegistrarSinalSip($"CALL_END_RECOVERED | metodo={via} canal={alvo2.Channel} linkedid={alvo2.Linkedid}");
+                    return;
+                }
+                LogHelper.Sip($"CALL_END_NAO_CONFIRMADO | metodo={via} derrubou={derrubou} canal={alvo2.Channel}", LogLevel.ERROR);
+                RegistrarSinalSip($"CALL_END_NAO_CONFIRMADO | metodo={via} derrubou={derrubou} canal={alvo2.Channel}");
+                try { EncerramentoNaoConfirmado?.Invoke(enc.NumeroRemoto); } catch { }
+            }
+            catch (Exception ex) { LogHelper.Sip($"CALL_END_CONFIRM_ERRO | {ex.Message}", LogLevel.WARN); }
+        }
+
+        private void ReenviarBye(EncerramentoEmCurso enc, string motivo)
+        {
+            try
+            {
+                if (enc.Dialogo == null || _sipTransport == null) return;
+                enc.Dialogo.Hangup(_sipTransport, null);
+                LogHelper.Sip($"CALL_BYE_REENVIADO | motivo={motivo} callId={MascararTextoSip(enc.CallId)}", LogLevel.WARN);
+                RegistrarSinalSip($"CALL_BYE_REENVIADO | motivo={motivo} callId={enc.CallId}");
+            }
+            catch (Exception ex) { LogHelper.Sip($"CALL_BYE_REENVIO_ERRO | {ex.Message}", LogLevel.WARN); }
+        }
+
+        // Canal deste ramal que ainda pertence à ligação encerrada: já existia antes do pedido de
+        // desligar (idade) e fala com o mesmo número. Uma ligação nova deste ramal é mais nova que
+        // isso e nunca é escolhida. "ambiguo" = canal antigo deste ramal sem como provar que é dela.
+        private async Task<(bool fonteOk, CanalAtivo? alvo, bool ambiguo)> LocalizarCanalRemanescenteAsync(EncerramentoEmCurso enc)
+        {
+            var canais = await LerCanaisPabxAsync().ConfigureAwait(false);
+            if (canais == null) return (false, null, false);
+            var meuRamal = (string.IsNullOrWhiteSpace(_config?.Ramal) ? _config?.Login : _config?.Ramal) ?? string.Empty;
+            return SelecionarCanalRemanescente(canais, meuRamal, enc.NumeroRemoto, (DateTime.Now - enc.PedidoEm).TotalSeconds,
+                (enc.PedidoEm - enc.Inicio).TotalSeconds);
+        }
+
+        internal static (bool fonteOk, CanalAtivo? alvo, bool ambiguo) SelecionarCanalRemanescente(
+            IReadOnlyList<CanalAtivo> canais, string meuRamal, string numeroRemoto, double segDesdeDesligar, double segDeConversa)
+        {
+            if (string.IsNullOrWhiteSpace(meuRamal)) return (false, null, false);
+            // o canal já existia quando o operador desligou (com folga para arredondamento do PABX)
+            var idadeMinima = segDesdeDesligar + Math.Max(0, segDeConversa) - 1.5;
+            var antigos = canais.Where(c => EhCanalDeRamal(c.Channel) &&
+                                            string.Equals(RamalDoCanal(c.Channel), meuRamal, StringComparison.OrdinalIgnoreCase) &&
+                                            c.DuracaoSeg >= idadeMinima && c.DuracaoSeg >= segDesdeDesligar + 0.5).ToList();
+            if (antigos.Count == 0) return (true, null, false);
+            var digitos = new string((numeroRemoto ?? string.Empty).Where(char.IsDigit).ToArray());
+            bool Fala(CanalAtivo c)
+            {
+                foreach (var campo in new[] { c.ConnectedLineNum, c.CallerIDNum })
+                {
+                    var d = new string((campo ?? string.Empty).Where(char.IsDigit).ToArray());
+                    if (d.Length == 0 || digitos.Length == 0) continue;
+                    if (digitos.Length >= 8 && d.Length >= 8 ? d[^8..] == digitos[^8..] : d == digitos) return true;
+                }
+                return false;
+            }
+            var dela = antigos.Where(Fala).ToList();
+            if (dela.Count == 1 && !string.IsNullOrWhiteSpace(dela[0].Linkedid)) return (true, dela[0], false);
+            return (true, null, true);
+        }
+
+        private async Task<List<CanalAtivo>?> LerCanaisPabxAsync()
+        {
+            if (_config?.UsarWavenApi == true)
+            {
+                // HTTP 200 com lista vazia é leitura válida: o PABX não tem nenhum canal agora
+                var (canaisApi, _, _) = await WavenApiService.GetAmiCallsAsync().ConfigureAwait(false);
+                if (canaisApi != null) return canaisApi;
+            }
+            if (DateTime.Now < _amiDiretoIndisponivelAte) return null;
+            await _amiPuxarGate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                _amiPuxar ??= await AbrirAmiAsync().ConfigureAwait(false);
+                return (await ObterCanaisAmiAsync(_amiPuxar.Session).ConfigureAwait(false)).Select(ParaCanalAtivo).ToList();
+            }
+            catch
+            {
+                try { _amiPuxar?.Dispose(); } catch { }
+                _amiPuxar = null;
+                _amiDiretoIndisponivelAte = DateTime.Now.AddMinutes(5);
+                return null;
+            }
+            finally { _amiPuxarGate.Release(); }
+        }
+
+        // Derruba só o canal DESTE ramal (o servidor confere de novo canal + LinkedID antes).
+        private async Task<(bool ok, string via)> DerrubarCanalProprioAsync(CanalAtivo canal, string numeroRemoto, int idadeMinSeg)
+        {
+            var meuRamal = (string.IsNullOrWhiteSpace(_config?.Ramal) ? _config?.Login : _config?.Ramal) ?? string.Empty;
+            if (!EhCanalDeRamal(canal.Channel) || !string.Equals(RamalDoCanal(canal.Channel), meuRamal, StringComparison.OrdinalIgnoreCase))
+                return (false, "recusado_canal_de_outro_ramal");
+            if (_config?.UsarWavenApi == true)
+            {
+                var (ok, msg, http) = await WavenApiService.PostAmiHangupOwnAsync(meuRamal, canal.Channel, canal.Linkedid, numeroRemoto, idadeMinSeg).ConfigureAwait(false);
+                LogHelper.Sip($"CALL_END_RECOVERY_API | http={http} ok={ok} msg={msg}");
+                if (ok == true) return (true, "WAVEN_API");
+                if (ok == false) return (false, "WAVEN_API_RECUSOU");
+            }
+            if (DateTime.Now < _amiDiretoIndisponivelAte) return (false, "sem_api_e_sem_ami");
+            await _amiPuxarGate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                _amiPuxar ??= await AbrirAmiAsync().ConfigureAwait(false);
+                var agora = (await ObterCanaisAmiAsync(_amiPuxar.Session).ConfigureAwait(false)).Select(ParaCanalAtivo).ToList();
+                var mesmo = agora.FirstOrDefault(c => string.Equals(c.Channel, canal.Channel, StringComparison.OrdinalIgnoreCase));
+                if (mesmo == null) return (true, "AMI_JA_ENCERRADO");
+                if (!string.Equals(mesmo.Linkedid, canal.Linkedid, StringComparison.OrdinalIgnoreCase)) return (false, "AMI_LINKEDID_MUDOU");
+                await _amiPuxar.Session.SendAsync("Hangup", new Dictionary<string, string> { ["Channel"] = canal.Channel, ["Cause"] = "16" }).ConfigureAwait(false);
+                var resp = await _amiPuxar.Session.ReadBlockAsync(3000).ConfigureAwait(false);
+                LogHelper.Sip($"CALL_END_RECOVERY_AMI | canal={canal.Channel} resp={ResumoAmi(resp)}");
+                return (true, "AMI_DIRETO");
+            }
+            catch (Exception ex)
+            {
+                try { _amiPuxar?.Dispose(); } catch { }
+                _amiPuxar = null;
+                _amiDiretoIndisponivelAte = DateTime.Now.AddMinutes(5);
+                return (false, "AMI_ERRO " + ex.Message);
+            }
+            finally { _amiPuxarGate.Release(); }
+        }
+
         private void EncerrarSinalizacaoAtiva()
         {
+            // v2.5.1 — chamada estabelecida (recebida ou realizada): BYE pelo diálogo dela + confirmação.
+            // O caminho abaixo (Cancel) fica só para chamada realizada que ainda não foi atendida.
+            try { if (DesligarDialogoAtual("desligar")) return; }
+            catch (Exception ex) { LogHelper.Sip($"CALL_BYE_ERRO | {ex.Message}", LogLevel.WARN); }
+            // sem chamada estabelecida e sem discagem (ex.: o cliente desligou no mesmo instante):
+            // o Cancel() abaixo não pode agir sobre uma tentativa de saída antiga
+            if (!_chamadaSaindoEmAndamento) LimparUacObsoleto("desligar_sem_chamada_ativa");
+
             try
             {
                 bool jaEstavaAtiva = _userAgent?.IsCallActive == true;
@@ -1693,7 +2058,7 @@ namespace WavenVoIP
             bool ok = EnviarSequenciaDtmf("*2");
             if (!ok)
             {
-                try { _userAgent?.Hangup(); ok = true; } catch { ok = false; }
+                try { ok = DesligarDialogoAtual("concluir_transferencia_assistida"); } catch { ok = false; }
             }
             StatusChanged?.Invoke(ok ? "Transferência assistida concluída." : "Não foi possível concluir automaticamente.");
             return ok;
@@ -2470,7 +2835,12 @@ namespace WavenVoIP
                     CanalCliente = c.Channel, Linkedid = c.Linkedid, Uniqueid = c.Uniqueid,
                     Numero = numero, Nome = (c.CallerIDName ?? string.Empty).Trim(),
                     Tronco = RotuloDoTronco(c.Channel), Status = status, RamalAtendente = atendente,
-                    Fila = fila, DuracaoSeg = c.DuracaoSeg
+                    Fila = fila, DuracaoSeg = c.DuracaoSeg,
+                    RamaisTocando = string.IsNullOrWhiteSpace(c.Linkedid) ? Array.Empty<string>() : canais
+                        .Where(o => string.Equals(o.Linkedid, c.Linkedid, StringComparison.OrdinalIgnoreCase) &&
+                                    EhCanalDeRamal(o.Channel) && string.IsNullOrWhiteSpace(o.BridgeId))
+                        .Select(o => RamalDoCanal(o.Channel)).Where(r => r.Length > 0)
+                        .Distinct(StringComparer.OrdinalIgnoreCase).ToList()
                 });
             }
             return resultado
@@ -3033,6 +3403,7 @@ namespace WavenVoIP
 
         public void Desligar()
         {
+            PararRingback("desligado_local");
             var swDesligar = System.Diagnostics.Stopwatch.StartNew();
             var eraEmChamada = IsInCall;
             var eraDiscando = _chamadaSaindoEmAndamento;
@@ -3096,6 +3467,7 @@ namespace WavenVoIP
 
         private void LimparEstadoChamada(string mensagem)
         {
+            PararRingback("estado_limpo");
             try
             {
                 LimparChamadaRecebidaPendente(false);
@@ -3292,6 +3664,7 @@ namespace WavenVoIP
             {
                 RegistrarSinalSip($"AUDIO_DEVICE_SWITCH | erro ao criar endpoint outIdx={outIdx} inIdx={inIdx}: {ex.Message} — fallback default");
                 LogHelper.Sip($"AUDIO_DEVICE_SWITCH | fallback dispositivo padrao | erro={ex.Message}", LogLevel.WARN);
+                outIdx = -1;
                 audio = new WindowsAudioEndPoint(new AudioEncoder(), -1, -1);
                 _audioEndpoint = audio;
                 LogHelper.Sip("AUDIO_OUTPUT_RECREATED | usando dispositivos padrao do sistema");
@@ -3324,6 +3697,18 @@ namespace WavenVoIP
                 AcceptRtpFromAny = true
             };
 
+            // v2.5.1 — tom de chamando no mesmo dispositivo da chamada + detecção de early media
+            _ringbackOutIdx = outIdx;
+            sessao.OnRtpPacketReceived += (_, tipo, pacote) =>
+            {
+                try
+                {
+                    if (tipo == SDPMediaTypesEnum.audio && _ringbackDiscando)
+                        ObservarEarlyMedia(pacote.Header.PayloadType, pacote.Payload);
+                }
+                catch { }
+            };
+
             // v2.5.0 — o nivelamento do microfone precisa saber quando o outro lado está falando
             // para não amplificar o retorno do alto-falante (eco). Só lê o nível do pacote; o
             // áudio recebido segue intocado para o alto-falante.
@@ -3354,6 +3739,7 @@ namespace WavenVoIP
             catch { }
             try { _monitorChamadaRecebidaTimer?.Dispose(); } catch { }
             try { _rtpKeepaliveTimer?.Dispose(); _rtpKeepaliveTimer = null; } catch { }
+            try { _ringback.Dispose(); } catch { }
             try { _registerUserAgent?.Stop(); } catch { }
             try { _sipTransport?.Dispose(); } catch { }
         }

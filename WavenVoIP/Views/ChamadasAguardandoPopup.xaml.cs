@@ -23,7 +23,7 @@ namespace WavenVoIP.Views
         private static Brush Congelar(byte r, byte g, byte b) { var br = new SolidColorBrush(Color.FromRgb(r, g, b)); br.Freeze(); return br; }
 
         private readonly ObservableCollection<PuxarLigacaoWindow.Linha> _linhas = new();
-        private bool _posicionado;
+
 
         public event Action<ChamadaAtivaInfo>? PuxarSolicitado;
         public event Action<IReadOnlyList<string>>? Dispensado;   // canais dispensados
@@ -43,6 +43,15 @@ namespace WavenVoIP.Views
         public static bool DeveAvisar(ChamadaAtivaInfo c) => AvisoFilaPolicy.EstaAguardandoNaFila(c);
 
         public int Quantidade => _linhas.Count;
+
+        // v2.5.1 — linhas que deixaram de valer fora da leitura normal (ex.: tocando no meu ramal)
+        public void RemoverCanais(IEnumerable<string> canais)
+        {
+            foreach (var c in canais)
+                foreach (var l in _linhas.Where(l => string.Equals(l.Chave, c, StringComparison.OrdinalIgnoreCase)).ToList())
+                    _linhas.Remove(l);
+            txtTitulo.Text = _linhas.Count == 1 ? "1 cliente aguardando na fila" : $"{_linhas.Count} clientes aguardando na fila";
+        }
 
         public void Atualizar(IReadOnlyList<ChamadaAtivaInfo> chamadas)
         {
@@ -82,6 +91,7 @@ namespace WavenVoIP.Views
                 if (t < TimeSpan.Zero) t = TimeSpan.Zero;
                 l.Duracao = $"há {(int)t.TotalMinutes:D2}:{t.Seconds:D2}";
             }
+            try { Posicionar(); } catch { }
         }
 
         public void MostrarMensagem(string texto)
@@ -90,14 +100,51 @@ namespace WavenVoIP.Views
             txtStatus.Visibility = string.IsNullOrWhiteSpace(texto) ? Visibility.Collapsed : Visibility.Visible;
         }
 
+        // v2.5.1 — o aviso é só visual (nunca toca som) e nunca cobre a janela de uma chamada
+        // tocando ou em andamento: fica no canto inferior direito, sobe acima delas e, sem espaço,
+        // vai para o lado esquerdo. Reavaliado a cada segundo (AtualizarTempos).
         private void Posicionar()
         {
-            // canto inferior direito da área de trabalho; depois que o operador arrasta, fica onde ele deixou
-            if (_posicionado && IsLoaded && _arrastado) return;
+            if (ActualWidth <= 0 || ActualHeight <= 0) return;
             var area = SystemParameters.WorkArea;
-            Left = area.Right - ActualWidth - 8;
-            Top = area.Bottom - ActualHeight - 8;
-            _posicionado = true;
+            var chamadas = JanelasDeChamada();
+            // depois que o operador arrasta, fica onde ele deixou — desde que não cubra uma chamada
+            if (_arrastado && !chamadas.Any(c => c.IntersectsWith(new Rect(Left, Top, ActualWidth, ActualHeight)))) return;
+
+            double left = area.Right - ActualWidth - 8;
+            double top = area.Bottom - ActualHeight - 8;
+            for (int i = 0; i < 4; i++)
+            {
+                var r = new Rect(left, top, ActualWidth, ActualHeight);
+                var cruzou = chamadas.Where(c => c.IntersectsWith(r)).ToList();
+                if (cruzou.Count == 0) break;
+                top = cruzou.Min(c => c.Top) - ActualHeight - 6;
+            }
+            if (top < area.Top + 8 && chamadas.Count > 0)
+            {
+                top = area.Bottom - ActualHeight - 8;
+                left = Math.Max(area.Left + 8, chamadas.Min(c => c.Left) - ActualWidth - 8);
+            }
+            top = Math.Max(area.Top + 8, top);
+            if (Math.Abs(Left - left) > 0.5) Left = left;
+            if (Math.Abs(Top - top) > 0.5) Top = top;
+        }
+
+        private List<Rect> JanelasDeChamada()
+        {
+            var lista = new List<Rect>();
+            try
+            {
+                foreach (Window w in Application.Current.Windows)
+                {
+                    if (ReferenceEquals(w, this) || !w.IsVisible || w.WindowState == WindowState.Minimized) continue;
+                    if (w is not (CallWindow or IncomingCallWindow)) continue;
+                    if (w.ActualWidth <= 0 || w.ActualHeight <= 0) continue;
+                    lista.Add(new Rect(w.Left - 4, w.Top - 4, w.ActualWidth + 8, w.ActualHeight + 8));
+                }
+            }
+            catch { }
+            return lista;
         }
 
         private bool _arrastado;

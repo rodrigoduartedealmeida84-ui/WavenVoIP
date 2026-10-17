@@ -157,6 +157,19 @@ namespace WavenVoIP.Views
                     _ = SincronizarConfigEmpresaAsync(silencioso: true);
             };
 
+            // v2.5.1 — o PABX não confirmou o fim da ligação desligada aqui (nem após a recuperação)
+            _sipService.EncerramentoNaoConfirmado += numero => NaUi(() =>
+            {
+                RegistrarUiDiagnostico($"CALL_END_NAO_CONFIRMADO_AVISO numero={MascararNumero(numero)}");
+                MostrarAvisoDiscreto("Ligação pode continuar ativa", $"O PABX não confirmou o fim da ligação com {PhoneNumberNormalizer.NormalizeForDisplay(numero)}. Se o cliente ainda estiver na linha, use Puxar Ligação ou encerre pelo Issabel.");
+            });
+
+            // v2.5.1 — destino tocando (180/183): a tela da chamada mostra "Chamando..."
+            _sipService.OutboundRinging += () => NaUi(() =>
+            {
+                try { if (_ligacaoEmAndamento && _activeCallWindow != null && _sipService.IsDialing && !_sipService.IsInCall) _activeCallWindow.DefinirStatus("Chamando..."); } catch { }
+            });
+
             _sipService.IncomingCallReceived += caller =>
                 Dispatcher.BeginInvoke(new Action(() => AbrirPopupChamadaRecebida(caller, ehNovoCiclo: false)));
 
@@ -272,6 +285,7 @@ namespace WavenVoIP.Views
                 }
 
                 _ultimaOrigemEntradaPendente = _sipService.LastIncomingOrigin;
+                SuprimirAvisoDaChamadaTocando(caller);
                 var displayCaller = ResolverDisplayChamada(caller);
                 var tela = new IncomingCallWindow(displayCaller);
                 _incomingPopup = tela;
@@ -4193,6 +4207,25 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
         // atendida ou encerrada. Cada chamada (canal do cliente) avisa uma vez só; dispensada,
         // não volta. A chamada que este próprio ramal atende nunca entra na lista.
         private System.Windows.Threading.DispatcherTimer? _timerAvisoAguardando;
+        private string _numeroTocandoNoRamal = string.Empty;   // v2.5.1 — chamada tocando neste ramal agora
+        private readonly HashSet<string> _avisoFilaSuprimidoLogado = new(StringComparer.OrdinalIgnoreCase);
+
+        // v2.5.1 — a ligação da fila começou a tocar neste ramal: o aviso dela sai do popup na hora
+        // (o operador já vê a chamada recebida) e não volta enquanto durar essa espera.
+        private void SuprimirAvisoDaChamadaTocando(string caller)
+        {
+            try
+            {
+                var m = System.Text.RegularExpressions.Regex.Match(caller ?? string.Empty, @"\(([^()]*)\)\s*$");
+                _numeroTocandoNoRamal = m.Success ? m.Groups[1].Value : caller ?? string.Empty;
+                var canais = _avisoFila.SuprimirTocandoAqui(_numeroTocandoNoRamal);
+                if (canais.Count == 0) return;
+                RegistrarUiDiagnostico($"AVISO_FILA_FECHADO motivo=tocando_no_meu_ramal numero={MascararNumero(_numeroTocandoNoRamal)} linhas={canais.Count}");
+                _popupAguardando?.RemoverCanais(canais);
+                if (_popupAguardando != null && _popupAguardando.Quantidade == 0) FecharPopupAguardando();
+            }
+            catch { }
+        }
         private ChamadasAguardandoPopup? _popupAguardando;
         private readonly Services.AvisoFilaPolicy _avisoFila = new();
         private bool _lendoAvisoAguardando;
@@ -4253,9 +4286,14 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
                 // só cliente parado na fila (ver AvisoFilaPolicy); URA, mensagens, fora do horário
                 // e grupo tocando ficam apenas na janela "Puxar Ligação"
                 _avisoFila.DefinirFilas(cfg.AvisoClienteAguardandoFilas);
+                _avisoFila.DefinirMeuRamal(cfg.Ramal, _incomingPopup != null ? _numeroTocandoNoRamal : string.Empty);
                 var aguardando = _avisoFila.Avaliar(ativas, out var novasNaFila, out var saidasDaFila);
                 foreach (var a in novasNaFila)
                     RegistrarUiDiagnostico($"AVISO_FILA_EXIBIDO fila={a.Fila} tronco={a.Tronco} numero={MascararNumero(a.Numero)} espera_s={a.DuracaoSeg} linkedid={a.Linkedid}");
+                foreach (var a in ativas.Where(x => _avisoFila.FilaComAviso(x) && _avisoFila.TocaNoMeuRamal(x)).GroupBy(Services.AvisoFilaPolicy.Chave).Select(g => g.First()))
+                    if (_avisoFilaSuprimidoLogado.Add(Services.AvisoFilaPolicy.Chave(a)))
+                        RegistrarUiDiagnostico($"AVISO_FILA_SUPRIMIDO motivo=tocando_no_meu_ramal fila={a.Fila} numero={MascararNumero(a.Numero)} linkedid={a.Linkedid}");
+                if (_avisoFilaSuprimidoLogado.Count > 200) _avisoFilaSuprimidoLogado.Clear();
                 foreach (var (a, motivo) in saidasDaFila)
                     RegistrarUiDiagnostico($"AVISO_FILA_FECHADO motivo={motivo} fila={a.Fila} numero={MascararNumero(a.Numero)} linkedid={a.Linkedid}");
 

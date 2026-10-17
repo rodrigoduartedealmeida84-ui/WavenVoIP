@@ -11,9 +11,9 @@
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <!-- Assembly identity & version info (visible no Explorer / Properties) -->
     <AssemblyTitle>WavenVoIP</AssemblyTitle>
-    <Version>2.5.0</Version>
-    <AssemblyVersion>2.5.0.0</AssemblyVersion>
-    <FileVersion>2.5.0.0</FileVersion>
+    <Version>2.5.1</Version>
+    <AssemblyVersion>2.5.1.0</AssemblyVersion>
+    <FileVersion>2.5.1.0</FileVersion>
     <!-- v2.5.0: codigo pre-compilado no publish; sem isso a primeira abertura depois de uma
          atualizacao compilava tudo na hora (JIT) e a tela ficava travada por varios segundos. -->
     <PublishReadyToRun>true</PublishReadyToRun>

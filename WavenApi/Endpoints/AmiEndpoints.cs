@@ -32,6 +32,7 @@ public static partial class AmiEndpoints
         g.MapPost("/test",           TestAmi);
         MapChamadasEndpoints(g);
         MapConferenciaEndpoints(g);              // v2.5.0: /conference/permission e /conference/remove
+        MapEncerrarEndpoints(g);                 // v2.5.1: /hangup-own (recuperação de desligamento)
     }
 
     // ── GET /api/ami/extensions ───────────────────────────────────────────────

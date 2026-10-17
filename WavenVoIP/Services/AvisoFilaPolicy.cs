@@ -29,6 +29,47 @@ namespace WavenVoIP.Services
         private readonly Dictionary<string, ChamadaAtivaInfo> _noPopup = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, string> _chavePorCanal = new(StringComparer.OrdinalIgnoreCase);
         private HashSet<string> _filas = ParaConjunto(FilasPadrao);
+        // v2.5.1 — espera que tocou no MEU ramal: não vira popup (o operador já está vendo a
+        // ligação na tela de chamada recebida). Vale até a espera acabar, como uma dispensa.
+        private readonly HashSet<string> _tocaramAqui = new(StringComparer.OrdinalIgnoreCase);
+        private string _meuRamal = string.Empty;
+        private string _numeroTocandoAqui = string.Empty;
+
+        // Chamado a cada leitura: ramal deste posto e o número da chamada que toca nele agora
+        // (vazio quando nada toca). O número vem do INVITE — chega antes da leitura do PABX.
+        public void DefinirMeuRamal(string? ramal, string? numeroTocandoAqui)
+        {
+            _meuRamal = (ramal ?? string.Empty).Trim();
+            _numeroTocandoAqui = SoDigitos(numeroTocandoAqui);
+        }
+
+        public bool TocaNoMeuRamal(ChamadaAtivaInfo c) =>
+            (_meuRamal.Length > 0 && c.RamaisTocando.Any(r => string.Equals(r, _meuRamal, StringComparison.OrdinalIgnoreCase))) ||
+            MesmoNumero(c.Numero, _numeroTocandoAqui);
+
+        // Mesmo cliente: compara os 8 últimos dígitos (ignora 0, 55, DDD e prefixo de rota).
+        public static bool MesmoNumero(string? a, string? b)
+        {
+            var x = SoDigitos(a); var y = SoDigitos(b);
+            if (x.Length < 8 || y.Length < 8) return false;
+            return x[^8..] == y[^8..];
+        }
+
+        private static string SoDigitos(string? t) => new((t ?? string.Empty).Where(char.IsDigit).ToArray());
+
+        // A chamada começou a tocar no meu ramal: tira do popup na hora, sem esperar a leitura do PABX.
+        public List<string> SuprimirTocandoAqui(string? numero)
+        {
+            _numeroTocandoAqui = SoDigitos(numero);
+            var canais = new List<string>();
+            foreach (var (k, c) in _noPopup.ToList())
+            {
+                if (!MesmoNumero(c.Numero, _numeroTocandoAqui)) continue;
+                _dispensados.Add(k); _tocaramAqui.Add(k);
+                canais.Add(c.CanalCliente);
+            }
+            return canais;
+        }
 
         // "700,701" → filas que geram aviso. Vazio/inválido = padrão.
         public void DefinirFilas(string? filas)
@@ -46,9 +87,10 @@ namespace WavenVoIP.Services
 
         public bool FilaComAviso(ChamadaAtivaInfo c) => EstaAguardandoNaFila(c) && _filas.Contains((c.Fila ?? string.Empty).Trim());
 
-        // A mesma ligação mantém o linkedid mesmo quando o PABX troca o estado do canal.
+        // A mesma ligação mantém o linkedid mesmo quando o PABX troca o estado ou o nome do canal:
+        // v2.5.1 — a chave é só o linkedid (um aviso por ligação, nunca duplicado).
         public static string Chave(ChamadaAtivaInfo c) =>
-            string.IsNullOrWhiteSpace(c.Linkedid) ? c.CanalCliente : c.Linkedid + "|" + c.CanalCliente;
+            string.IsNullOrWhiteSpace(c.Linkedid) ? c.CanalCliente : c.Linkedid;
 
         public List<ChamadaAtivaInfo> Avaliar(IReadOnlyList<ChamadaAtivaInfo> ativas, out List<ChamadaAtivaInfo> novas) =>
             Avaliar(ativas, out novas, out _);
@@ -66,10 +108,12 @@ namespace WavenVoIP.Services
             // ligação que acabou: esquece tudo dela (o nome do canal pode ser reaproveitado depois)
             foreach (var k in _leiturasNaFila.Keys.Where(k => !porChave.ContainsKey(k)).ToList()) _leiturasNaFila.Remove(k);
             _dispensados.RemoveWhere(k => !porChave.ContainsKey(k));
+            _tocaramAqui.RemoveWhere(k => !porChave.ContainsKey(k));
 
             _chavePorCanal.Clear();
             var mostrar = new List<ChamadaAtivaInfo>();
             var chavesMostradas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var processadas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var c in ativas)
             {
                 var k = Chave(c);
@@ -77,10 +121,15 @@ namespace WavenVoIP.Services
                 if (!FilaComAviso(c))
                 {
                     // saiu da fila (atendida, URA, outra fila…): a espera acabou; se voltar, é outra
+                    // (só o canal principal decide: outro canal da mesma ligação não zera a espera)
+                    if (ativas.Any(o => Chave(o) == k && FilaComAviso(o))) continue;
                     _leiturasNaFila.Remove(k);
                     _dispensados.Remove(k);
+                    _tocaramAqui.Remove(k);
                     continue;
                 }
+                if (!processadas.Add(k)) continue;                      // outro canal da mesma ligação: uma linha só
+                if (TocaNoMeuRamal(c)) { _dispensados.Add(k); _tocaramAqui.Add(k); }
                 if (_dispensados.Contains(k)) continue;
 
                 _leiturasNaFila.TryGetValue(k, out var n);
@@ -96,6 +145,7 @@ namespace WavenVoIP.Services
             {
                 string motivo;
                 if (!porChave.TryGetValue(k, out var agora)) motivo = "encerrada";
+                else if (_tocaramAqui.Contains(k)) motivo = "tocando_no_meu_ramal";
                 else if (_dispensados.Contains(k)) motivo = "dispensada";
                 else if (agora.Status == StatusChamadaAtiva.EmAtendimento) motivo = "atendida ramal=" + agora.RamalAtendente;
                 else motivo = "saiu_da_fila status=" + agora.Status;

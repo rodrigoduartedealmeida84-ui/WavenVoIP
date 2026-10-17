@@ -514,6 +514,34 @@ namespace WavenVoIP.Services
             catch (Exception ex) { return (false, ex.Message); }
         }
 
+        /// v2.5.1 — recuperação de desligamento: derruba SOMENTE o canal do próprio ramal
+        /// (/api/ami/hangup-own; o servidor confere ramal, canal e LinkedID). ok=null → API sem a função.
+        public static async Task<(bool? ok, string mensagem, int httpStatus)> PostAmiHangupOwnAsync(string ramal, string canal, string linkedid, string numero, int idadeMinSeg)
+        {
+            var (url, token) = ObterConfig();
+            if (string.IsNullOrWhiteSpace(url)) return (null, "URL da Waven API não configurada", 0);
+            try
+            {
+                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(8));
+                using var req = CriarRequest(HttpMethod.Post, $"{url}/api/ami/hangup-own", token, new { ramal, canal, linkedid, numero, idadeMinSeg });
+                using var resp = await _http.SendAsync(req, cts.Token).ConfigureAwait(false);
+                int code = (int)resp.StatusCode;
+                var json = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
+                Log($"API_AMI_HANGUP_OWN_RESPONSE | httpStatus={code}");
+                if (code == 404 || code == 405) return (null, "A Waven API ainda não tem a função de encerrar o canal do ramal.", code);
+                try
+                {
+                    using var doc = JsonDocument.Parse(json);
+                    var r = doc.RootElement;
+                    if (r.TryGetProperty("ok", out var okEl) && r.TryGetProperty("mensagem", out var msgEl))
+                        return (okEl.GetBoolean(), msgEl.GetString() ?? string.Empty, code);
+                }
+                catch { }
+                return (false, $"Resposta inesperada da API (HTTP {code}).", code);
+            }
+            catch (Exception ex) { return (null, ex.Message, 0); }
+        }
+
         /// Pede à API para assumir uma chamada no ramal informado (/api/ami/pickup).
         public static async Task<(bool? ok, string mensagem, int httpStatus)> PostAmiPickupAsync(
             string canalCliente, string linkedid, string ramal, string nome, string numero, string sala = "800")

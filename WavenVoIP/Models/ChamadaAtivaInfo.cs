@@ -38,6 +38,8 @@ namespace WavenVoIP.Models
         public string Fila { get; init; } = string.Empty;
         public int DuracaoSeg { get; init; }
         public DateTime LidoEm { get; init; } = DateTime.Now;
+        // v2.5.1 — ramais com canal desta ligação tocando agora (sem ponte), ex.: agentes da fila
+        public System.Collections.Generic.IReadOnlyList<string> RamaisTocando { get; init; } = Array.Empty<string>();
 
         public string StatusTexto => Status switch
         {
