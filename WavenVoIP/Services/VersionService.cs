@@ -4,16 +4,25 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "2.5.1";
+        public const string Versao  = "2.5.3";
         public const string NomeApp = "WavenVoIP";
 
-        public static readonly DateTime DataBuild = new DateTime(2026, 10, 17);
+        public static readonly DateTime DataBuild = new DateTime(2026, 10, 21);
 
         public static string VersaoCompleta => $"{NomeApp} v{Versao}";
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
-            "v2.5.1 — Tom de chamada, aviso de fila e desligamento confiavel (17/10/2026)\n" +
+            "v2.5.3 — Gravacoes protegidas pela Waven API (21/10/2026)\n" +
+            "• [SEGURANCA] Ouvir e baixar gravacao: o arquivo passa a vir da Waven API por um link temporario (5 minutos), assinado e preso ao seu ramal, com registro de quem ouviu. Assim o PABX pode deixar de servir as gravacoes direto pela internet\n" +
+            "• [SEGURANCA] Ramal sem permissao para uma gravacao recebe o aviso em vez do audio\n" +
+            "• [COMPATIBILIDADE] Se a Waven API ainda nao tiver a funcao ou estiver fora do ar, o Historico usa o endereco antigo, como antes\n" +
+            "\n" +
+            "v2.5.2 — Eventos tecnicos do PABX fora das nao atendidas (20/10/2026)\n" +
+            "• [FIX] Historico: comandos disparados direto no PABX sem nenhum telefone envolvido (ex.: tentativas de invasao pela /pbxapi do Issabel) apareciam como 'Chamada do sistema' perdida, com popup e contador de nao atendidas. Agora sao reconhecidos pelo CDR (so canais internos Local/, sem numero de origem, sem conversa e sem gravacao) e ignorados: nao entram no historico, nao avisam e nao contam\n" +
+            "• [FIX] Historico: registros desse tipo gravados por versoes anteriores sao retirados automaticamente no primeiro sync, so quando o CDR comprova que sao tecnicos. Ligacoes reais (inclusive de numero privado) continuam como antes\n" +
+            "\n" +
+            "v2.5.1 —Tom de chamada, aviso de fila e desligamento confiavel (17/10/2026)\n" +
             "• [FIX CRITICO] Desligar: depois de uma ligacao realizada nao atendida (cancelada/ocupado), desligar a recebida seguinte nao encerrava a chamada no PABX e o cliente continuava na linha. Agora o BYE sai pela propria chamada, a resposta do PABX e conferida e, se o canal do seu ramal continuar ativo, ele e encerrado com seguranca (so o seu canal, conferindo canal e LinkedID)\n" +
             "• [FIX] Ligacoes realizadas: o atendente ouve o tom de chamando enquanto o destino toca (180 Ringing); com early media (183) toca o audio real do PABX/operadora, sem tom duplicado; para na hora ao atender, desligar ou falhar\n" +
             "• [FIX] Aviso de cliente na fila: sem som e sem cobrir a janela de chamada (tocando ou em andamento); Puxar Ligacao e fechamento automatico mantidos\n" +

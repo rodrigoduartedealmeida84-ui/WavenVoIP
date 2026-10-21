@@ -356,6 +356,7 @@ namespace WavenVoIP.Services
                 // v2.5.0 — discagens diretas de ramal, para reconhecer o "retorno da própria
                 // ligação" (ver EhRetornoDaPropriaLigacao).
                 var saidasDiretas = ListarSaidasDiretas(grupos);
+                var eventosTecnicos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
                 foreach (var grupo in grupos)
                 {
@@ -372,6 +373,21 @@ namespace WavenVoIP.Services
                             $"[uid={r.UniqueId} src={MascararNumeroLog(r.Src)} dst={MascararNumeroLog(r.Dst)} " +
                             $"ch={r.Channel} dstch={r.DstChannel} disp={r.Disposition} dcontext={r.DContext} " +
                             $"lastapp={r.LastApp} lastdata={r.LastData}]")));
+
+                    // v2.5.1 — Originate feito direto no PABX (ex.: /pbxapi/manager/originate do
+                    // Issabel) sem nenhum telefone envolvido: não é ligação de cliente, não entra no
+                    // histórico e não gera perdida/popup/contador. Ver EhEventoTecnicoDoPabx.
+                    if (EhEventoTecnicoDoPabx(grupo))
+                    {
+                        foreach (var r in grupo)
+                        {
+                            if (!string.IsNullOrWhiteSpace(r.LinkedId)) eventosTecnicos.Add(r.LinkedId);
+                            if (!string.IsNullOrWhiteSpace(r.UniqueId)) eventosTecnicos.Add(r.UniqueId);
+                        }
+                        LogDetalhado($"CDR_TECHNICAL_EVENT_SKIP linkedids={linkedIds} canal={grupo[0].Channel} " +
+                            $"dst={grupo[0].Dst} dcontext={grupo[0].DContext} lastapp={grupo[0].LastApp} disp={grupo[0].Disposition}");
+                        continue;
+                    }
 
                     // ── Diagnostic verbose log ─────────────────────────────────────
                     if (ehAlvo)
@@ -971,6 +987,9 @@ namespace WavenVoIP.Services
                 Log($"CDR_SYNC_DONE chamadas={resultado.Count} gravacoes={totalGravacoes}");
                 Log($"HISTORY_REFRESH_OK total={resultado.Count}");
                 Log($"CDR_SYNC_TIMING estagio=TOTAL ms={swTotal.ElapsedMilliseconds}");
+                if (eventosTecnicos.Count > 0 && eventosTecnicos.Count != UltimosEventosTecnicos.Count)
+                    Log($"CDR_TECHNICAL_EVENTS_IGNORED ids={eventosTecnicos.Count}");
+                UltimosEventosTecnicos = eventosTecnicos;
                 lock (_cacheSyncLock)
                 {
                     _cacheSync = new List<HistoricoLigacaoItem>(resultado);
@@ -1541,6 +1560,33 @@ namespace WavenVoIP.Services
                 (r.Src ?? string.Empty).Contains(n, StringComparison.OrdinalIgnoreCase) ||
                 (r.Dst ?? string.Empty).Contains(n, StringComparison.OrdinalIgnoreCase));
         }
+
+        // ── Evento técnico do PABX (v2.5.1) ────────────────────────────────────────
+        // Caso real (20/10/2026): requisições externas em /pbxapi/manager/originate do Issabel
+        // geraram CDRs "Local/1234@from-internal-custom-…;1/;2", src vazio, AppDial2 "(Outgoing
+        // Line)", FAILED — e viravam "Chamada do sistema" perdida. Em 16/10 o mesmo caminho gerou
+        // "Local/s@default" com System/Playback ANSWERED. Ligação de cliente sempre tem um canal
+        // real (SIP/PJSIP/DAHDI/IAX) do tronco ou do ramal; aqui TODOS os canais são Local/, não há
+        // número de origem, nem conversa (billsec) nem gravação.
+        internal static bool EhEventoTecnicoDoPabx(IReadOnlyCollection<CdrChamada> grupo)
+        {
+            if (grupo == null || grupo.Count == 0) return false;
+            foreach (var r in grupo)
+            {
+                var ch = (r.Channel ?? string.Empty).Trim();
+                var dstCh = (r.DstChannel ?? string.Empty).Trim();
+                if (!ch.StartsWith("Local/", StringComparison.OrdinalIgnoreCase)) return false;
+                if (dstCh.Length > 0 && !dstCh.StartsWith("Local/", StringComparison.OrdinalIgnoreCase)) return false;
+                if ((r.Src ?? string.Empty).Any(char.IsDigit)) return false;
+                if (r.BillSec > 0) return false;
+                if (!string.IsNullOrWhiteSpace(r.RecordingFile)) return false;
+            }
+            return true;
+        }
+
+        // LinkedIds/UniqueIds dos eventos técnicos do último sync — usados para retirar do
+        // histórico local os registros que versões anteriores já tinham gravado como perdida.
+        public static IReadOnlyCollection<string> UltimosEventosTecnicos { get; private set; } = Array.Empty<string>();
 
         // ── URA / IVR / non-human route detection ─────────────────────────────────
 

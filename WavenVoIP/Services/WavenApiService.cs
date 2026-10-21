@@ -471,6 +471,42 @@ namespace WavenVoIP.Services
             return lista;
         }
 
+        /// v2.5.3 — link temporário assinado para ouvir/baixar uma gravação (/api/cdr/recording-link).
+        /// status 200 = url absoluta pronta; 403 = ramal sem permissão (erro traz o motivo);
+        /// qualquer outro (0 = sem API/sem rede, 404 = API antiga sem a função) = usar o caminho antigo.
+        public static async Task<(int status, string url, string erro)> GetLinkGravacaoAsync(string arquivo, DateTime? dia, string ramal,
+            string? apiUrlTeste = null)
+        {
+            var (url, token) = ObterConfig();
+            if (!string.IsNullOrWhiteSpace(apiUrlTeste)) url = apiUrlTeste.TrimEnd('/');   // só o V250Tests usa
+            if (string.IsNullOrWhiteSpace(url) || string.IsNullOrWhiteSpace(token)) return (0, "", "Waven API não configurada");
+            try
+            {
+                var data = dia.HasValue ? $"&date={dia.Value:yyyy-MM-dd}" : "";
+                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(8));
+                using var req = CriarRequest(HttpMethod.Get,
+                    $"{url}/api/cdr/recording-link?file={Uri.EscapeDataString(arquivo)}{data}&ramal={Uri.EscapeDataString(ramal)}", token);
+                using var resp = await _http.SendAsync(req, cts.Token).ConfigureAwait(false);
+                var corpo = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
+                var status = (int)resp.StatusCode;
+                string link = "", erro = "";
+                try
+                {
+                    using var doc = JsonDocument.Parse(corpo);
+                    if (doc.RootElement.TryGetProperty("url", out var u)) link = u.GetString() ?? "";
+                    if (doc.RootElement.TryGetProperty("error", out var e)) erro = e.GetString() ?? "";
+                }
+                catch (JsonException) { }
+                if (status == 200)
+                {
+                    if (!link.StartsWith("/api/rec/", StringComparison.Ordinal)) return (0, "", "resposta inesperada da API");
+                    return (200, url + link, "");
+                }
+                return (status, "", erro);
+            }
+            catch (Exception ex) { return (0, "", ex.Message); }
+        }
+
         /// v2.5.0 — este ramal pode usar "Remover atendente"? (false também quando a API ainda não tem a função)
         public static async Task<bool> PodeRemoverAtendenteAsync(string ramal)
         {

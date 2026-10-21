@@ -449,6 +449,11 @@ namespace WavenVoIP
         public bool MigracaoAplicada142   { get; set; } = false;
         public bool MigracaoWaba144Aplicada { get; set; } = false;
 
+        // v2.5.3 — ligado na primeira vez que a Waven API responde ao pedido de link de gravação
+        // (200/403/não encontrada). A partir daí o Histórico nunca mais usa o endereço público
+        // /gravacoes do PABX, mesmo com a API fora do ar.
+        public bool GravacaoSomenteViaApi { get; set; } = false;
+
         // ── Status Online/Offline v2.1.1 ───────────────────────────────────────
         // Controlado localmente pelo WavenVoIP — não depende de discagem no Issabel.
         public bool IsOfflinePersistido { get; set; } = false;

@@ -181,6 +181,28 @@ namespace WavenVoIP.Services
                 PhoneNumberNormalizer.NormalizeBrazilPhone(DialPlanService.RemoverPrefixoDeRota(numB ?? string.Empty)),
                 StringComparison.OrdinalIgnoreCase);
 
+        // v2.5.1 — retira registros de CDR que o sync atual provou serem eventos técnicos do PABX
+        // (IssabelCdrService.EhEventoTecnicoDoPabx), gravados como perdida por versões anteriores.
+        // Só casa por LinkedId/UniqueId vindos do CDR e só registros sem número de telefone —
+        // uma ligação real nunca é removida por aqui.
+        public static int RemoverEventosTecnicos(IReadOnlyCollection<string> ids)
+        {
+            if (ids == null || ids.Count == 0) return 0;
+            var set = new HashSet<string>(ids, StringComparer.OrdinalIgnoreCase);
+            return ExecutarAtomico<int>(existentes =>
+            {
+                var remover = existentes.Where(i =>
+                        i.FonteCdr &&
+                        !(i.Numero ?? string.Empty).Any(char.IsDigit) &&
+                        ((!string.IsNullOrWhiteSpace(i.LinkedId) && set.Contains(i.LinkedId)) ||
+                         (!string.IsNullOrWhiteSpace(i.UniqueId) && set.Contains(i.UniqueId))))
+                    .ToList();
+                foreach (var i in remover)
+                    Log($"HISTORY_TECHNICAL_EVENT_REMOVED uid={i.UniqueId} linkedid={i.LinkedId} tipo={i.Tipo} dataHora={i.DataHora:yyyy-MM-dd HH:mm:ss}");
+                return (remover.Count == 0 ? existentes : existentes.Except(remover).ToList(), remover.Count);
+            });
+        }
+
         // Merges CDR-sourced items into local history, updating existing records and adding new ones.
         // Existing CDR items (matched by UniqueId) are REPLACED with fresh data to fix concatenated
         // numbers, bad URLs and stale ramal info from previous syncs.

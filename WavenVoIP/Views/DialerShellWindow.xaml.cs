@@ -1861,6 +1861,7 @@ namespace WavenVoIP.Views
                 var (novos, itensAtualizados, assinaturaCdr) = await Task.Run(async () =>
                 {
                     var n = HistoricoStorageService.MesclarCdr(itens);
+                    HistoricoStorageService.RemoverEventosTecnicos(IssabelCdrService.UltimosEventosTecnicos);
                     // Aplica a MESMA limpeza local (unificação/deduplicação/supressão de Perdida) em
                     // todo refresh, manual ou automático, sem validar URLs de gravação (sem HTTP).
                     await IssabelCdrService.ReprocessarHistoricoCdrLocalAsync(false);
@@ -2135,10 +2136,82 @@ namespace WavenVoIP.Views
 
             RegistrarUiDiagnostico($"RECORDING_DOWNLOAD_STARTED url={url}");
             if (btn != null) { btn.IsEnabled = false; btn.ToolTip = "Baixando..."; }
-            var data = await _recordingHttpClient.GetByteArrayAsync(url);
+            var (urlDownload, negado, motivo) = await ResolverLinkSeguroGravacaoAsync(url);
+            if (negado) throw new UnauthorizedAccessException(motivo);
+            var data = await _recordingHttpClient.GetByteArrayAsync(urlDownload);
             File.WriteAllBytes(cacheFile, data);
             RegistrarUiDiagnostico($"RECORDING_DOWNLOAD_DONE local={cacheFile} bytes={data.Length}");
             return cacheFile;
+        }
+
+        // v2.5.3 — gravação pela Waven API com link temporário assinado (o PABX deixa de servir
+        // /gravacoes para fora quando todos os PCs estiverem nesta versão). Enquanto a API ainda não
+        // tem a função, cai no endereço direto de antes; depois que ela respondeu uma vez
+        // (GravacaoSomenteViaApi), nunca mais usa o endereço público.
+        private async Task<(string url, bool negado, string motivo)> ResolverLinkSeguroGravacaoAsync(string alvo)
+        {
+            if (!ExtrairArquivoEDataDaUrlGravacao(alvo, out var arquivo, out var dia)) return (alvo, false, "");
+            var config = SipConfig.CarregarSalva() ?? new SipConfig();
+            var ramal = (string.IsNullOrWhiteSpace(config.Ramal) ? config.Login : config.Ramal)?.Trim() ?? "";
+
+            var (status, url, erro) = (0, "", "Waven API desativada nas configurações");
+            if (config.UsarWavenApi && ramal.Length > 0)
+                (status, url, erro) = await WavenApiService.GetLinkGravacaoAsync(arquivo, dia, ramal);
+
+            var decisao = DecidirLinkGravacao(status, erro, config.GravacaoSomenteViaApi);
+            if (decisao.marcarSomenteApi && !config.GravacaoSomenteViaApi)
+            {
+                try { config.GravacaoSomenteViaApi = true; config.Salvar(); RegistrarUiDiagnostico("RECORDING_LINK_API_ATIVA (endereco publico desativado)"); }
+                catch (Exception ex) { RegistrarUiDiagnostico($"RECORDING_LINK_FLAG_SAVE_FAIL {ex.Message}"); }
+            }
+            switch (decisao.acao)
+            {
+                case AcaoLinkGravacao.UsarLink:
+                    RegistrarUiDiagnostico($"RECORDING_LINK_OK arquivo={arquivo}");
+                    return (url, false, "");
+                case AcaoLinkGravacao.UsarEnderecoAntigo:
+                    RegistrarUiDiagnostico($"RECORDING_LINK_FALLBACK arquivo={arquivo} status={status} erro={erro}");
+                    return (alvo, false, "");
+                default:
+                    RegistrarUiDiagnostico($"RECORDING_LINK_BLOCKED arquivo={arquivo} status={status} erro={erro}");
+                    return ("", true, decisao.mensagem);
+            }
+        }
+
+        internal enum AcaoLinkGravacao { UsarLink, UsarEnderecoAntigo, Recusar }
+
+        // Regra pura (testada no V250Tests). A API nova responde 404 "Gravacao nao encontrada" para
+        // arquivo ausente; a API antiga responde 404 "Recurso nao encontrado" (rota inexistente).
+        internal static (AcaoLinkGravacao acao, bool marcarSomenteApi, string mensagem) DecidirLinkGravacao(int status, string erro, bool somenteViaApi)
+        {
+            erro ??= "";
+            var apiNovaRespondeu = status == 200 || status == 403 || status == 410 ||
+                                   (status == 404 && erro.StartsWith("Gravacao nao encontrada", StringComparison.OrdinalIgnoreCase));
+            if (status == 200) return (AcaoLinkGravacao.UsarLink, true, "");
+            if (status == 403)
+                return (AcaoLinkGravacao.Recusar, true, string.IsNullOrWhiteSpace(erro) ? "Seu ramal não tem permissão para esta gravação." : erro);
+            if (apiNovaRespondeu)
+                return (AcaoLinkGravacao.Recusar, true, "Gravação não encontrada no PABX.");
+            if (somenteViaApi)
+                return (AcaoLinkGravacao.Recusar, false, "Não foi possível obter a gravação pela Waven API agora. Tente novamente em instantes.");
+            return (AcaoLinkGravacao.UsarEnderecoAntigo, false, "");
+        }
+
+        // ".../AAAA/MM/DD/arquivo.wav" → arquivo + dia; só o nome quando a URL não tem a pasta do dia.
+        internal static bool ExtrairArquivoEDataDaUrlGravacao(string url, out string arquivo, out DateTime? dia)
+        {
+            arquivo = ""; dia = null;
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
+                (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)) return false;
+            var seg = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries).Select(Uri.UnescapeDataString).ToArray();
+            if (seg.Length == 0) return false;
+            arquivo = seg[^1];
+            if (arquivo.Length == 0 || !arquivo.Contains('.')) return false;
+            if (seg.Length >= 4 &&
+                DateTime.TryParseExact($"{seg[^4]}-{seg[^3]}-{seg[^2]}", "yyyy-MM-dd",
+                    System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var d))
+                dia = d;
+            return true;
         }
 
         private async void BtnOuvirGravacao_Click(object sender, RoutedEventArgs e)
@@ -2234,7 +2307,7 @@ namespace WavenVoIP.Views
             }
         }
 
-        private void BtnBaixarGravacao_Click(object sender, RoutedEventArgs e)
+        private async void BtnBaixarGravacao_Click(object sender, RoutedEventArgs e)
         {
             if (!(sender is FrameworkElement fe && fe.Tag is Models.HistoricoLigacaoItem item)) return;
 
@@ -2244,6 +2317,13 @@ namespace WavenVoIP.Views
             RegistrarUiDiagnostico($"RECORDING_DOWNLOAD_STARTED arquivo={Path.GetFileName(alvo)}");
             try
             {
+                var (url, negado, motivo) = await ResolverLinkSeguroGravacaoAsync(alvo);
+                if (negado)
+                {
+                    MessageBox.Show(motivo, "Waven VoIP", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+                alvo = url;
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(alvo) { UseShellExecute = true });
             }
             catch (Exception ex)

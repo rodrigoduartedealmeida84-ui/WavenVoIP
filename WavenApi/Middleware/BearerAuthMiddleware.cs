@@ -24,6 +24,14 @@ public class BearerAuthMiddleware(RequestDelegate next, IOptions<WavenApiOptions
             return;
         }
 
+        // v2.5.3 — link temporário de gravação: a autorização é a assinatura HMAC do próprio
+        // link (conferida em CdrEndpoints.GetRecordingByLink), emitido só para quem tem o Bearer.
+        if (context.Request.Path.StartsWithSegments(Endpoints.CdrEndpoints.RotaLinkGravacao))
+        {
+            await next(context);
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(_token))
         {
             logger.LogError("AUTH_CONFIG_ERROR | BearerToken não configurado em appsettings.Production.json");

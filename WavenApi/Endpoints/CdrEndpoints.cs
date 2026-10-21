@@ -4,7 +4,7 @@ using WavenApi.Models;
 
 namespace WavenApi.Endpoints;
 
-public static class CdrEndpoints
+public static partial class CdrEndpoints
 {
     public static void MapCdrEndpoints(this WebApplication app)
     {
@@ -13,6 +13,10 @@ public static class CdrEndpoints
         g.MapGet("/test",        TestConnection);
         g.MapGet("/recordings",  GetRecording);
         g.MapGet("/recording-parts", GetRecordingParts);
+        g.MapGet("/recording-link",  GetRecordingLink);
+
+        // Sem Bearer (liberado no BearerAuthMiddleware): a autorização é a assinatura do link.
+        app.MapGet(RotaLinkGravacao + "/{token}", GetRecordingByLink);
     }
 
     // ── GET /api/cdr/calls?ramal=100&dias=7[&desde=yyyy-MM-dd HH:mm:ss] ──────
@@ -244,23 +248,7 @@ public static class CdrEndpoints
             return Results.BadRequest(new { error = "Nome de arquivo invalido" });
 
         var basePath = opts.Value.RecordingsPath.TrimEnd('/', '\\');
-
-        // Tenta localizar o arquivo: com subdiretorio de data ou direto
-        string? found = null;
-
-        if (!string.IsNullOrWhiteSpace(date) &&
-            DateTime.TryParse(date, out var dt))
-        {
-            var withDate = Path.Combine(basePath,
-                dt.Year.ToString(), dt.Month.ToString("D2"), dt.Day.ToString("D2"), safeFile);
-            if (File.Exists(withDate)) found = withDate;
-        }
-
-        if (found == null)
-        {
-            var direct = Path.Combine(basePath, safeFile);
-            if (File.Exists(direct)) found = direct;
-        }
+        var found = LocalizarGravacao(basePath, safeFile, date);
 
         if (found == null)
         {
@@ -278,6 +266,20 @@ public static class CdrEndpoints
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    // Localiza o arquivo: com subdiretorio de data (AAAA/MM/DD) ou direto na pasta base.
+    private static string? LocalizarGravacao(string basePath, string safeFile, string? date)
+    {
+        if (!string.IsNullOrWhiteSpace(date) && DateTime.TryParse(date, out var dt))
+        {
+            var withDate = Path.Combine(basePath,
+                dt.Year.ToString(), dt.Month.ToString("D2"), dt.Day.ToString("D2"), safeFile);
+            if (File.Exists(withDate)) return withDate;
+        }
+
+        var direct = Path.Combine(basePath, safeFile);
+        return File.Exists(direct) ? direct : null;
+    }
 
     private static string BuildConnectionString(WavenApiOptions.MySqlOptions m) =>
         $"Server={m.Host};Port={m.Port};Database={m.Database};" +

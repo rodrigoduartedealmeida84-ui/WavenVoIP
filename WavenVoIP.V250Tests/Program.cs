@@ -34,6 +34,25 @@ if (args.Length >= 4 && args[0] == "--api-contato")
     return okC ? 0 : 1;
 }
 
+// Uso: V250Tests --api-link-gravacao <arquivo> <yyyy-MM-dd> <ramal> [urlApiTeste] [salvarEm]
+// Pede o link temporário de gravação pela MESMA chamada do Histórico (token real deste posto; a URL
+// pode apontar para uma API de teste) e, com salvarEm, baixa o áudio pelo link como o player faz.
+// Mostra só o status, sem imprimir o link.
+if (args.Length >= 4 && args[0] == "--api-link-gravacao")
+{
+    var (st, link, erro) = WavenVoIP.Services.WavenApiService.GetLinkGravacaoAsync(args[1], DateTime.Parse(args[2]), args[3],
+        args.Length >= 5 ? args[4] : null).GetAwaiter().GetResult();
+    Console.WriteLine($"status={st} link={(link.Length > 0 ? "recebido" : "-")} erro={erro}");
+    if (st == 200 && args.Length >= 6)
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+        var bytes = http.GetByteArrayAsync(link).GetAwaiter().GetResult();
+        File.WriteAllBytes(args[5], bytes);
+        Console.WriteLine($"baixado bytes={bytes.Length} sha256={Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant()}");
+    }
+    return st == 200 ? 0 : st;
+}
+
 if (args.Length >= 2 && args[0] == "--fonte")
 {
     var thf = new Thread(() =>
@@ -1072,6 +1091,44 @@ else
             Parte("http://pabx/gravacoes/monitor/2026/10/13/force-1-100-x-1.2.wav", "force-1-100-y-1.2-parte2.wav", d13, "2026-10-13") == "http://pabx/gravacoes/monitor/2026/10/13/force-1-100-y-1.2-parte2.wav");
         Check("gravacao: parte iniciada depois da meia-noite usa a pasta do dia seguinte",
             Parte("http://pabx/gravacoes/monitor/2026/10/13/a.wav", "b-parte2.wav", d13, "2026-10-14") == "http://pabx/gravacoes/monitor/2026/10/14/b-parte2.wav");
+
+        // v2.5.3 — arquivo e dia tirados do endereco antigo para pedir o link assinado a API
+        var mExt = typeof(SipService).Assembly.GetType("WavenVoIP.Views.DialerShellWindow")!.GetMethod("ExtrairArquivoEDataDaUrlGravacao", Priv)!;
+        (bool ok, string arq, DateTime? dia) Ext(string u) { var a = new object?[] { u, null, null }; var r = (bool)mExt.Invoke(null, a)!; return (r, (string)a[1]!, (DateTime?)a[2]); }
+        var e1 = Ext("http://pabx.almeidagas.com/gravacoes/monitor/2026/10/20/force-556684263277-556684671226-20261020-211639-1792541799.31768.wav");
+        Check("link gravacao: URL real do historico -> arquivo e dia da pasta",
+            e1.ok && e1.arq == "force-556684263277-556684671226-20261020-211639-1792541799.31768.wav" && e1.dia == new DateTime(2026, 10, 20));
+        var e2 = Ext("http://pabx/gravacoes/monitor/2026/10/14/b-1792000000.5-parte2.wav");
+        Check("link gravacao: parte da gravacao (pasta do dia seguinte)", e2.ok && e2.arq == "b-1792000000.5-parte2.wav" && e2.dia == new DateTime(2026, 10, 14));
+        var e3 = Ext("https://outro/rec/arquivo.wav");
+        Check("link gravacao: URL sem pasta do dia -> so o arquivo", e3.ok && e3.arq == "arquivo.wav" && e3.dia == null);
+        Check("link gravacao: caminho local/UNC nao usa a API", !Ext(@"\\servidor\gravacoes\a.wav").ok && !Ext(@"C:\gravacoes\a.wav").ok);
+        Check("link gravacao: URL sem arquivo nao usa a API", !Ext("http://pabx/gravacoes/monitor/").ok);
+
+        // v2.5.3 — Auto Update: quem esta na 2.5.1 (oficial) ou na 2.5.2 (teste local) recebe a 2.5.3; nada faz downgrade
+        var mMaior = typeof(SipService).Assembly.GetType("WavenVoIP.Services.UpdateService")!.GetMethod("IsRemotaMaior", Priv)!;
+        bool Maior(string r, string l) => (bool)mMaior.Invoke(null, new object[] { r, l })!;
+        Check("auto update: 2.5.1 -> 2.5.3", Maior("2.5.3", "2.5.1"));
+        Check("auto update: 2.5.2 -> 2.5.3", Maior("2.5.3", "2.5.2"));
+        Check("auto update: 2.4.7 -> 2.5.3", Maior("2.5.3", "2.4.7"));
+        Check("auto update: 2.5.3 nao reinstala a si mesma", !Maior("2.5.3", "2.5.3"));
+        Check("auto update: version.json de rollback (2.5.1) nao rebaixa quem esta na 2.5.3", !Maior("2.5.1", "2.5.3"));
+
+        // v2.5.3 — quando usar o link, quando cair no endereco antigo e quando recusar
+        var mDec = typeof(SipService).Assembly.GetType("WavenVoIP.Views.DialerShellWindow")!.GetMethod("DecidirLinkGravacao", Priv)!;
+        (string acao, bool marca) Dec(int st, string erro, bool soApi)
+        {
+            var t = (System.Runtime.CompilerServices.ITuple)mDec.Invoke(null, new object[] { st, erro, soApi })!;
+            return (t[0]!.ToString()!, (bool)t[1]!);
+        }
+        Check("link gravacao: API nova emitiu o link -> usa o link e desliga o endereco publico", Dec(200, "", false) == ("UsarLink", true));
+        Check("link gravacao: ramal sem permissao -> recusa, nunca cai no endereco publico", Dec(403, "Este ramal nao tem acesso as gravacoes", false) == ("Recusar", true));
+        Check("link gravacao: API nova sem o arquivo -> recusa (nao tenta o endereco publico)", Dec(404, "Gravacao nao encontrada", false) == ("Recusar", true));
+        Check("link gravacao: API antiga (rota inexistente, 404 sem corpo) -> endereco antigo", Dec(404, "", false) == ("UsarEnderecoAntigo", false));
+        Check("link gravacao: API fora do ar antes da troca -> endereco antigo", Dec(0, "timeout", false) == ("UsarEnderecoAntigo", false));
+        Check("link gravacao: API fora do ar DEPOIS da troca -> recusa, sem endereco publico", Dec(0, "timeout", true) == ("Recusar", false));
+        Check("link gravacao: erro 5xx depois da troca -> recusa", Dec(502, "", true) == ("Recusar", false));
+        Check("link gravacao: API antiga depois da troca (rollback da API) -> recusa", Dec(404, "", true) == ("Recusar", false));
     }
 
     // fim da conversa em conferencia (cliente desligou) e canais de servico da sala
@@ -1527,6 +1584,25 @@ else
     Check("aviso: segunda perdida do mesmo numero em 40 s nao abre outro popup", MissedCallPolicy.PopupRecenteParaNumero("5566999990000", avisos, t0.AddSeconds(40)));
     Check("aviso: perdida do mesmo numero 10 min depois avisa de novo", !MissedCallPolicy.PopupRecenteParaNumero("5566999990000", avisos, t0.AddMinutes(10)));
     Check("aviso: perdida de outro numero avisa normalmente", !MissedCallPolicy.PopupRecenteParaNumero("5566988887777", avisos, t0.AddSeconds(40)));
+}
+
+// ── 2e. Evento técnico do PABX (Originate via /pbxapi, 20/10/2026) ─────────────────
+{
+    var mTec = typeof(IssabelCdrService).GetMethod("EhEventoTecnicoDoPabx", Priv)!;
+    bool Tec(params CdrChamada[] g) => (bool)mTec.Invoke(null, new object[] { g.ToList() })!;
+    CdrChamada C(string ch, string dstCh = "", string src = "", string disp = "FAILED", int bill = 0, string app = "", string rec = "", string ctx = "from-internal-custom", string dst = "1234")
+        => new() { Channel = ch, DstChannel = dstCh, Src = src, Dst = dst, Disposition = disp, BillSec = bill, LastApp = app, RecordingFile = rec, DContext = ctx, LinkedId = "1792539965.31636", UniqueId = "1792539965.31636" };
+
+    Check("tecnico: caso real 20/10 (Local/1234@from-internal-custom ;1 AppDial2 + ;2, FAILED)",
+        Tec(C("Local/1234@from-internal-custom-00003b68;2"), C("Local/1234@from-internal-custom-00003b68;1", app: "AppDial2")));
+    Check("tecnico: caso real 16/10 (Local/s@default System/Playback ANSWERED, billsec 0)",
+        Tec(C("Local/s@default-0000215f;1", disp: "ANSWERED", app: "System", ctx: "default", dst: "s"), C("Local/s@default-0000215f;2", disp: "ANSWERED", app: "Playback", ctx: "default", dst: "s")));
+    Check("tecnico: cliente pelo tronco nunca e tecnico", !Tec(C("SIP/Wavoip-000001e5", "SIP/100-000001e7", src: "556684671226", disp: "NO ANSWER", ctx: "ext-group", dst: "600")));
+    Check("tecnico: cliente sem numero (privado) pelo tronco continua perdida", !Tec(C("SIP/Wavoip-000001e5", "SIP/100-000001e7", src: "", disp: "NO ANSWER", ctx: "ext-group", dst: "600")));
+    Check("tecnico: perna de fila com numero do cliente nao e tecnica", !Tec(C("Local/109@from-queue-1;2", "SIP/109-2", src: "556699990416", disp: "NO ANSWER", ctx: "from-queue", dst: "109")));
+    Check("tecnico: Originate do app (Local/ramal + SIP/ramal) nao e tecnico", !Tec(C("Local/100@from-internal-1;2", "SIP/100-3", ctx: "from-internal", dst: "100")));
+    Check("tecnico: Local com conversa ou gravacao nao e tecnico", !Tec(C("Local/1234@x-1;1", bill: 5)) && !Tec(C("Local/1234@x-1;1", rec: "a.wav")));
+    Check("tecnico: grupo com uma linha real junto nao e tecnico", !Tec(C("Local/1234@x-1;1"), C("SIP/Wavoip-9", src: "556684671226", ctx: "from-trunk")));
 }
 
 // ── 3. Sync completo sobre CDR real salvo (servidor local) ──────────────────────────

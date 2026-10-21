@@ -15,6 +15,26 @@ public class WavenApiOptions
     // Caminho local dos arquivos de gravacao do Asterisk
     public string RecordingsPath { get; set; } = "/var/spool/asterisk/monitor";
 
+    // v2.5.3 — gravacoes por link temporario assinado (GET /api/cdr/recording-link -> GET /api/rec/{token})
+    public GravacoesOptions Gravacoes { get; set; } = new();
+
+    public class GravacoesOptions
+    {
+        // Chave HMAC dos links (Base64, >= 32 bytes). Vazia = chave aleatoria a cada inicio do servico:
+        // links em aberto deixam de valer num reinicio e o app simplesmente pede outro.
+        public string ChaveLink { get; set; } = string.Empty;
+        public int ValidadeLinkSegundos { get; set; } = 300;
+
+        // Ramais que nao podem ouvir/baixar gravacoes pelo app.
+        public string[] RamaisSemAcesso { get; set; } = Array.Empty<string>();
+
+        // true = cada ramal so recebe link de ligacoes em que aparece no CDR (mesmo linkedid);
+        // os ramais de RamaisQueOuvemTodas continuam ouvindo qualquer gravacao. Desligado por
+        // padrao para nao negar gravacao que hoje aparece no Historico — ligar depois de validar.
+        public bool SomenteParticipantes { get; set; } = false;
+        public string[] RamaisQueOuvemTodas { get; set; } = new[] { "100" };
+    }
+
     // Diagnostico remoto (telemetria) — ver WavenApi/Endpoints/DiagnosticsEndpoints.cs
     public DiagnosticsOptions Diagnostics { get; set; } = new();
 
