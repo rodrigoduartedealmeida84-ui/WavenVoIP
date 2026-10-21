@@ -2311,6 +2311,12 @@ namespace WavenVoIP.Views
         {
             if (!(sender is FrameworkElement fe && fe.Tag is Models.HistoricoLigacaoItem item)) return;
 
+            await BaixarGravacaoNoNavegadorAsync(item);
+        }
+
+        // Botão Baixar e item "Baixar gravação" do menu do Histórico: sempre pelo link seguro.
+        private async Task BaixarGravacaoNoNavegadorAsync(Models.HistoricoLigacaoItem item)
+        {
             var alvo = ResolverUrlGravacaoParaPlay(item);
             if (string.IsNullOrWhiteSpace(alvo)) return;
 
@@ -2501,12 +2507,7 @@ namespace WavenVoIP.Views
                     catch (Exception ex) { Dispatcher.Invoke(() => TratarErroSemTravamento(ex, "Não foi possível abrir a gravação.")); }
                 });
             });
-            Add("⬇  Baixar gravação", item.TemGravacao, () =>
-            {
-                var alvo = ResolverUrlGravacaoParaPlay(item);
-                if (!string.IsNullOrWhiteSpace(alvo))
-                    try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(alvo) { UseShellExecute = true }); } catch { }
-            });
+            Add("⬇  Baixar gravação", item.TemGravacao, () => { _ = BaixarGravacaoNoNavegadorAsync(item); });
             AddSep();
             Add("📋  Copiar número", true, () =>
             {

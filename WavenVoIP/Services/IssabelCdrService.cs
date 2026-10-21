@@ -159,7 +159,11 @@ namespace WavenVoIP.Services
 
             // Validate recording URLs in parallel and remove those that return 404
             int urlsRemovidas = 0;
-            if (validarUrls)
+            if (validarUrls && GravacoesPelaWavenApi(SipConfig.CarregarSalva()))
+            {
+                Log("REPROCESS_HEAD_SKIPPED motivo=gravacoes_pela_waven_api");
+            }
+            else if (validarUrls)
             {
                 var comUrl = itens
                     .Where(i => !string.IsNullOrWhiteSpace(i.GravacaoUrl) &&
@@ -975,11 +979,21 @@ namespace WavenVoIP.Services
                 Log($"CDR_SYNC_TIMING estagio=reconciliacao ms={swEstagio.ElapsedMilliseconds} chamadas={resultado.Count}");
                 swEstagio.Restart();
 
-                // Validate CDR-derived recording URLs in parallel (removes 404 entries)
-                await ValidarUrlsCdrAsync(resultado);
+                // v2.5.4 — com a Waven API as gravações saem por link assinado; o app não toca mais
+                // em /gravacoes do PABX (que será fechado para fora). Arquivo ausente aparece no clique
+                // ("Gravação não encontrada no PABX").
+                if (GravacoesPelaWavenApi(config))
+                {
+                    Log("RECORDING_HEAD_SKIPPED motivo=gravacoes_pela_waven_api");
+                }
+                else
+                {
+                    // Validate CDR-derived recording URLs in parallel (removes 404 entries)
+                    await ValidarUrlsCdrAsync(resultado);
 
-                // HTTP directory listing fallback for calls still missing a recording URL
-                await PreencherGravacoesPorDirListingAsync(resultado, config);
+                    // HTTP directory listing fallback for calls still missing a recording URL
+                    await PreencherGravacoesPorDirListingAsync(resultado, config);
+                }
 
                 Log($"CDR_SYNC_TIMING estagio=gravacoes ms={swEstagio.ElapsedMilliseconds}");
 
@@ -2456,6 +2470,12 @@ namespace WavenVoIP.Services
             var confirmadas = comUrl.Count(i => !string.IsNullOrWhiteSpace(i.GravacaoUrl));
             Log($"RECORDING_CDR_HEAD_VALIDATE_DONE confirmadas={confirmadas}/{comUrl.Count}");
         }
+
+        // Regra pura (testada no V250Tests): Waven API ligada e configurada = gravações só pelo link da API.
+        internal static bool GravacoesPelaWavenApi(SipConfig? config) =>
+            config != null && config.UsarWavenApi &&
+            !string.IsNullOrWhiteSpace(config.WavenApiUrl) &&
+            !string.IsNullOrWhiteSpace(config.WavenApiToken);
 
         private static async Task<bool> ValidarUrlHttpHeadAsync(string url)
         {

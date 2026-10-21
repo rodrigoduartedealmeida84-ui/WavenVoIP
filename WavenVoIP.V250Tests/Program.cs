@@ -1129,6 +1129,18 @@ else
         Check("link gravacao: API fora do ar DEPOIS da troca -> recusa, sem endereco publico", Dec(0, "timeout", true) == ("Recusar", false));
         Check("link gravacao: erro 5xx depois da troca -> recusa", Dec(502, "", true) == ("Recusar", false));
         Check("link gravacao: API antiga depois da troca (rollback da API) -> recusa", Dec(404, "", true) == ("Recusar", false));
+
+        // v2.5.4 — com a Waven API configurada o sync nao faz HEAD nem listagem em /gravacoes do PABX
+        var mApi = typeof(SipService).Assembly.GetType("WavenVoIP.Services.IssabelCdrService")!.GetMethod("GravacoesPelaWavenApi", Priv)!;
+        bool PelaApi(SipConfig? c) => (bool)mApi.Invoke(null, new object?[] { c })!;
+        Check("gravacoes v2.5.4: API ligada e configurada -> sem HEAD/listagem em /gravacoes",
+            PelaApi(new SipConfig { UsarWavenApi = true, WavenApiUrl = "https://api.almeidagas.com", WavenApiToken = "x" }));
+        Check("gravacoes v2.5.4: API desligada -> valida pelo endereco antigo como antes",
+            !PelaApi(new SipConfig { UsarWavenApi = false, WavenApiUrl = "https://api.almeidagas.com", WavenApiToken = "x" }));
+        Check("gravacoes v2.5.4: API sem URL ou sem token -> endereco antigo",
+            !PelaApi(new SipConfig { UsarWavenApi = true, WavenApiUrl = "", WavenApiToken = "x" }) &&
+            !PelaApi(new SipConfig { UsarWavenApi = true, WavenApiUrl = "https://api.almeidagas.com", WavenApiToken = "" }) && !PelaApi(null));
+        Check("auto update: 2.5.3 -> 2.5.4", Maior("2.5.4", "2.5.3"));
     }
 
     // fim da conversa em conferencia (cliente desligou) e canais de servico da sala

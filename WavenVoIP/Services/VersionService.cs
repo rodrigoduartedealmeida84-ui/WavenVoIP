@@ -4,7 +4,7 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "2.5.3";
+        public const string Versao  = "2.5.4";
         public const string NomeApp = "WavenVoIP";
 
         public static readonly DateTime DataBuild = new DateTime(2026, 10, 21);
@@ -13,6 +13,10 @@ namespace WavenVoIP.Services
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v2.5.4 — Gravacoes so pela Waven API (21/10/2026)\n" +
+            "• [SEGURANCA] Baixar gravacao pelo menu do Historico tambem usa o link temporario da Waven API (antes abria o endereco direto do PABX)\n" +
+            "• [SEGURANCA] Com a Waven API configurada o Historico nao consulta mais a pasta de gravacoes do PABX a cada sincronizacao; gravacao ausente aparece no clique\n" +
+            "\n" +
             "v2.5.3 — Gravacoes protegidas pela Waven API (21/10/2026)\n" +
             "• [SEGURANCA] Ouvir e baixar gravacao: o arquivo passa a vir da Waven API por um link temporario (5 minutos), assinado e preso ao seu ramal, com registro de quem ouviu. Assim o PABX pode deixar de servir as gravacoes direto pela internet\n" +
             "• [SEGURANCA] Ramal sem permissao para uma gravacao recebe o aviso em vez do audio\n" +
