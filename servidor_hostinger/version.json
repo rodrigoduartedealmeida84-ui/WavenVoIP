@@ -1,7 +1,7 @@
 {
-    "versao": "2.5.1",
-    "zip": "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.5.1/WavenVoIP.zip",
-    "sha256": "980cae152b739833ebc5f1155e65e4c9153cbe13a2768dbad44ed65c54e6c2fe",
-    "data": "2026-10-17",
-    "notas": "WavenVoIP v2.5.1 - Correcao critica no desligamento, tom de chamando e aviso de fila. Desligar: depois de uma ligacao realizada nao atendida, desligar a recebida seguinte nao encerrava a chamada no PABX e o cliente continuava na linha; agora o fim da chamada sai pela propria ligacao, a resposta do PABX e conferida e, se o canal do seu ramal continuar ativo, ele e encerrado com seguranca. Ligacoes realizadas: tom de chamando enquanto o destino toca, com o audio do PABX/operadora quando houver, sem tom duplicado. Aviso de cliente na fila (700/701): sem som, nao cobre a janela da chamada, nao aparece para a ligacao que ja esta tocando no seu ramal e nao duplica."
+    "versao": "2.5.3",
+    "zip": "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.5.3/WavenVoIP.zip",
+    "sha256": "1fa364970bb438adcc5797abcc9798713d3028dab92595965a78612c90a82180",
+    "data": "2026-10-21",
+    "notas": "WavenVoIP v2.5.3 - Gravacoes protegidas e eventos tecnicos do PABX fora das nao atendidas. Ouvir e baixar gravacao passa a usar um link temporario da Waven API, preso ao seu ramal (o PABX deixa de servir as gravacoes pela internet). Comandos disparados direto no PABX sem nenhum telefone envolvido (como tentativas de invasao) deixam de aparecer como 'Chamada do sistema' perdida, com aviso e contador; registros desse tipo ja gravados sao retirados. Ligacoes reais continuam como antes."
 }
