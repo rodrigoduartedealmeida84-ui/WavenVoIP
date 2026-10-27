@@ -4,15 +4,21 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "2.5.4";
+        public const string Versao  = "2.6.0";
         public const string NomeApp = "WavenVoIP";
 
-        public static readonly DateTime DataBuild = new DateTime(2026, 10, 21);
+        public static readonly DateTime DataBuild = new DateTime(2026, 10, 27);
 
         public static string VersaoCompleta => $"{NomeApp} v{Versao}";
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v2.6.0 — Interface responsiva para notebook e monitor grande (27/10/2026)\n" +
+            "• [NEW] A janela se adapta ao tamanho da tela e a escala do Windows (100%, 125%, 150%): em notebook de 13 a 15,6 polegadas tudo cabe sem botoes cortados; em monitor de 24 polegadas ou maior o conteudo fica maior e proporcional\n" +
+            "• [NEW] Janela estreita: abas mostram so os icones (nome ao passar o mouse), o teclado do discador encolhe para o Ligar e o Puxar Ligacao ficarem a vista, filtros do Historico e do Dashboard se reorganizam\n" +
+            "• [NEW] Monitor largo: teclado e favoritos ficam juntos e centralizados; Configuracoes e a janela de chamada tambem se ajustam a tela\n" +
+            "• Ligacoes, historico, gravacoes, favoritos, AMI e Waven API continuam como na 2.5.4\n" +
+            "\n" +
             "v2.5.4 — Gravacoes so pela Waven API (21/10/2026)\n" +
             "• [SEGURANCA] Baixar gravacao pelo menu do Historico tambem usa o link temporario da Waven API (antes abria o endereco direto do PABX)\n" +
             "• [SEGURANCA] Com a Waven API configurada o Historico nao consulta mais a pasta de gravacoes do PABX a cada sincronizacao; gravacao ausente aparece no clique\n" +

@@ -5,7 +5,7 @@
         xmlns:svc="clr-namespace:WavenVoIP.Services"
         Title="{x:Static svc:VersionService.VersaoCompleta}"
         Icon="/Assets/wavenvoip.ico"
-        Height="680" Width="1050" MinHeight="640" MinWidth="1000"
+        Height="680" Width="1050" MinHeight="520" MinWidth="760"
         WindowStartupLocation="CenterScreen"
         ResizeMode="CanResize">
     <Window.Resources>
@@ -131,7 +131,11 @@
              pequeno (mais nítida que a Display em 13 px); ícones da fonte Fluent do Windows (vetor
              com hinting), com MDL2 como reserva no Windows 10. FontFamily explícita porque o estilo
              implícito de TextBlock do App.xaml fixa a Display. -->
+        <!-- v2.6.0 — cabeçalho compacto em janelas estreitas: só os ícones (com dica), ajustado no código -->
+        <Visibility x:Key="NavLabelVisibility">Visible</Visibility>
+        <Thickness x:Key="NavIconMargin">0,0,8,0</Thickness>
         <Style x:Key="NavLabel" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="Visibility" Value="{DynamicResource NavLabelVisibility}"/>
             <Setter Property="FontFamily" Value="Segoe UI Variable Text, Segoe UI"/>
             <Setter Property="FontSize" Value="13"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
@@ -140,7 +144,7 @@
         <Style x:Key="NavIcon" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
             <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets"/>
             <Setter Property="FontSize" Value="15"/>
-            <Setter Property="Margin" Value="0,0,8,0"/>
+            <Setter Property="Margin" Value="{DynamicResource NavIconMargin}"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
         </Style>
 
@@ -507,7 +511,7 @@
                     <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,11,20,11">
                         <Image Source="/Assets/Brand/waven_mark.png" Width="40" Height="40" Stretch="Uniform"
                                RenderOptions.BitmapScalingMode="HighQuality" VerticalAlignment="Center"/>
-                        <StackPanel VerticalAlignment="Center" Margin="10,0,0,0">
+                        <StackPanel x:Name="pnlMarcaTexto" VerticalAlignment="Center" Margin="10,0,0,0">
                             <TextBlock Text="Waven" FontSize="20" FontWeight="Bold" Foreground="#1E1B4B" LineHeight="22"
                                        LineStackingStrategy="BlockLineHeight"/>
                             <TextBlock Text="VoIP" FontFamily="Segoe UI Variable Text, Segoe UI" FontSize="11" FontWeight="SemiBold" Margin="1,1,0,0">
@@ -525,13 +529,13 @@
                     <Border Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center"
                             Background="#F5F4F9" BorderBrush="#ECEAF3" BorderThickness="1" CornerRadius="15" Padding="4">
                     <StackPanel Orientation="Horizontal">
-                        <Button x:Name="btnNavDiscagem" Style="{StaticResource TopNavButton}" Click="NavDiscagem_Click">
+                        <Button x:Name="btnNavDiscagem" Style="{StaticResource TopNavButton}" ToolTip="Discagem" Click="NavDiscagem_Click">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="&#xE717;" Style="{StaticResource NavIcon}"/>
                                 <TextBlock Text="Discagem" Style="{StaticResource NavLabel}"/>
                             </StackPanel>
                         </Button>
-                        <Button x:Name="btnNavContatos" Style="{StaticResource TopNavButton}" Click="NavContatos_Click">
+                        <Button x:Name="btnNavContatos" Style="{StaticResource TopNavButton}" ToolTip="Contatos" Click="NavContatos_Click">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="&#xE77B;" Style="{StaticResource NavIcon}"/>
                                 <TextBlock Text="Contatos" Style="{StaticResource NavLabel}"/>
@@ -539,7 +543,7 @@
                         </Button>
                         <!-- Badge wrapper for Histórico nav button -->
                         <Grid Margin="0,0,2,0">
-                            <Button x:Name="btnNavHistorico" Style="{StaticResource TopNavButton}" Margin="0" Click="NavHistorico_Click">
+                            <Button x:Name="btnNavHistorico" Style="{StaticResource TopNavButton}" ToolTip="Histórico" Margin="0" Click="NavHistorico_Click">
                                 <StackPanel Orientation="Horizontal">
                                     <TextBlock Text="&#xE81C;" Style="{StaticResource NavIcon}"/>
                                     <TextBlock Text="Histórico" Style="{StaticResource NavLabel}"/>
@@ -554,13 +558,13 @@
                                            HorizontalAlignment="Center" VerticalAlignment="Center"/>
                             </Border>
                         </Grid>
-                        <Button x:Name="btnNavConfiguracoes" Style="{StaticResource TopNavButton}" Click="NavConfiguracoes_Click">
+                        <Button x:Name="btnNavConfiguracoes" Style="{StaticResource TopNavButton}" ToolTip="Configurações" Click="NavConfiguracoes_Click">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="&#xE713;" Style="{StaticResource NavIcon}"/>
                                 <TextBlock Text="Configurações" Style="{StaticResource NavLabel}"/>
                             </StackPanel>
                         </Button>
-                        <Button x:Name="btnNavDashboard" Style="{StaticResource TopNavButton}" Margin="0" Click="NavDashboard_Click">
+                        <Button x:Name="btnNavDashboard" Style="{StaticResource TopNavButton}" ToolTip="Dashboard" Margin="0" Click="NavDashboard_Click">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="&#xE9D2;" Style="{StaticResource NavIcon}"/>
                                 <TextBlock Text="Dashboard" Style="{StaticResource NavLabel}"/>
@@ -622,7 +626,7 @@
                                         HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-1,-1"/>
                             </Grid>
                             <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
-                                <TextBlock x:Name="txtDndNomeRamal" Text="Carregando..." FontFamily="Segoe UI Variable Text, Segoe UI"
+                                <TextBlock x:Name="txtDndNomeRamal" Text="Carregando..." FontFamily="Segoe UI Variable Text, Segoe UI" MaxWidth="220" TextTrimming="CharacterEllipsis"
                                            FontSize="13" FontWeight="SemiBold" Foreground="#0F172A"/>
                                 <TextBlock x:Name="txtDndStatusLabel" Text="Online" FontFamily="Segoe UI Variable Text, Segoe UI"
                                            FontSize="11" FontWeight="SemiBold" Foreground="#16A34A" Margin="0,1,0,0"/>
@@ -646,15 +650,21 @@
                                 <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
 
-                            <!-- Row 0: dialer (left) + favorites sidebar (right) -->
-                            <Grid Grid.Row="0">
+                            <!-- Row 0: dialer (left) + favorites sidebar (right)
+                                 v2.6.0: em tela larga (24" maximizado) o conjunto fica centralizado com largura
+                                 limitada (AjustarLayoutPorLargura), sem vão entre o teclado e os favoritos. -->
+                            <Grid x:Name="gridDiscagem" Grid.Row="0">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="340"/>
+                                    <ColumnDefinition x:Name="colFavoritos" Width="340"/>
                                 </Grid.ColumnDefinitions>
 
-                                <!-- Dialer block — centered vertically in the available space. -->
-                                <Border Grid.Column="0" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                <!-- Dialer block — centered vertically in the available space.
+                                     v2.6.0: em janela baixa o cartão encolhe até 72% (ScrollDiscador_SizeChanged);
+                                     só abaixo disso aparece rolagem, e só na vertical. -->
+                                <ScrollViewer x:Name="scrollDiscador" Grid.Column="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False"
+                                              SizeChanged="ScrollDiscador_SizeChanged">
+                                <Border x:Name="cartaoDiscador" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="10"
                                         Background="White" CornerRadius="22" BorderBrush="#E7EAF3" BorderThickness="1"
                                         Padding="30,22">
 <Grid><Border Margin="-30,-22" CornerRadius="22" Background="White" IsHitTestVisible="False"><Border.Effect><StaticResourceExtension ResourceKey="CardShadow"/></Border.Effect></Border>
@@ -800,6 +810,7 @@
                                     </Button>
                                 </StackPanel>
                                 </Grid></Border>
+                                </ScrollViewer>
 
                                 <!-- ⭐ Favorites sidebar -->
                                 <Border Grid.Column="1"
@@ -1052,7 +1063,7 @@
                                 <Border Background="White" CornerRadius="12" BorderBrush="#E2E8F0" BorderThickness="1" Padding="8">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" MinWidth="200"/>
+                                            <ColumnDefinition x:Name="colBuscaHistorico" Width="*" MinWidth="200"/>
                                             <ColumnDefinition Width="Auto"/>
                                             <ColumnDefinition Width="Auto"/>
                                             <ColumnDefinition Width="Auto"/>

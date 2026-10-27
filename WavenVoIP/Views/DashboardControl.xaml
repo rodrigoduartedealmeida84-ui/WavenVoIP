@@ -204,7 +204,8 @@
         </DockPanel>
 
         <!-- ── Filtros de período ────────────────────────────────────────── -->
-        <StackPanel x:Name="pnlFiltrosPeriodo" Grid.Row="1"
+        <!-- v2.6.0: WrapPanel — em janela estreita as datas descem para a linha de baixo em vez de cortar -->
+        <WrapPanel x:Name="pnlFiltrosPeriodo" Grid.Row="1"
                     Orientation="Horizontal" Margin="0,0,0,10">
             <Button x:Name="btnFiltroHoje"  Content="Hoje"
                     Background="#7C3AED" Foreground="White" BorderBrush="#7C3AED"
@@ -233,7 +234,7 @@
                     Background="#7C3AED" Foreground="White" BorderBrush="#7C3AED"
                     Style="{StaticResource FilterBtn}"
                     Click="BtnAplicarPeriodo_Click"/>
-        </StackPanel>
+        </WrapPanel>
 
         <!-- ── Abas ──────────────────────────────────────────────────────── -->
         <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,14">
@@ -267,7 +268,7 @@
                 <StackPanel>
 
                     <!-- CDR metric cards -->
-                    <UniformGrid Rows="1" Columns="6" Margin="0,0,0,10">
+                    <UniformGrid x:Name="gridMetricasCdr" Rows="1" Columns="6" Margin="0,0,0,10">
                         <Border Style="{StaticResource MetricCard}" Margin="0,0,10,0">
                             <StackPanel>
                                 <TextBlock Text="Recebidas" FontSize="11" Foreground="#64748B" FontWeight="SemiBold"/>

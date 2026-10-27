@@ -1141,6 +1141,11 @@ else
             !PelaApi(new SipConfig { UsarWavenApi = true, WavenApiUrl = "", WavenApiToken = "x" }) &&
             !PelaApi(new SipConfig { UsarWavenApi = true, WavenApiUrl = "https://api.almeidagas.com", WavenApiToken = "" }) && !PelaApi(null));
         Check("auto update: 2.5.3 -> 2.5.4", Maior("2.5.4", "2.5.3"));
+        // v2.6.0 — a 2.5.4 oficial atualiza; a 2.6.0 nao volta para versao anterior nem reinstala a mesma
+        Check("auto update: 2.5.4 -> 2.6.0", Maior("2.6.0", "2.5.4"));
+        Check("auto update: 2.6.0 nao faz downgrade para 2.5.4", !Maior("2.5.4", "2.6.0"));
+        Check("auto update: 2.6.0 nao reinstala 2.6.0", !Maior("2.6.0", "2.6.0"));
+        Check("auto update: 2.5.10 hipotetica nao passa a 2.6.0", !Maior("2.5.10", "2.6.0"));
     }
 
     // fim da conversa em conferencia (cliente desligou) e canais de servico da sala

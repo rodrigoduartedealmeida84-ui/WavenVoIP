@@ -28,6 +28,8 @@ namespace WavenVoIP.Views
         public SettingsWindow()
         {
             InitializeComponent();
+            // v2.6.0 — cabe na tela do notebook e amplia em monitor grande (só apresentação)
+            LayoutResponsivo.Ativar(this, new LayoutResponsivo.Opcoes());
             _config     = ConfiguracaoAudioService.Carregar();
             _whatsConfig = WhatsAppConfigService.Carregar();
             _sipConfig  = SipConfig.CarregarSalva() ?? new SipConfig();

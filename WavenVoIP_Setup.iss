@@ -3,11 +3,14 @@
 ; NUNCA toca em %APPDATA%\WavenVoIP\ (configs do usuário)
 
 #define AppName        "WavenVoIP"
-#define AppVersion     "2.5.4"
+#define AppVersion     "2.6.0"
 #define AppPublisher   "Almeida Gás"
 #define AppURL         "https://almeidagas.com/waven/"
 #define AppExeName     "WavenVoIP.exe"
-#define PublishDir     "publish"
+; ISCC /DPublishDir=<pasta> gera a partir de outra pasta de publish (ex.: build de teste separado)
+#ifndef PublishDir
+  #define PublishDir   "publish"
+#endif
 #define AppCopyright   "Copyright © 2026 Almeida Gás"
 
 [Setup]

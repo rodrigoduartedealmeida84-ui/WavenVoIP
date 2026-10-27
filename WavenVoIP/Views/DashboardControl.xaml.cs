@@ -21,11 +21,33 @@ namespace WavenVoIP.Views
         // Handler nomeado para permitir desinscriçao no Unloaded
         private void OnEstadoChangedLive() => Dispatcher.BeginInvoke(AtualizarCardsLive);
 
+        // v2.6.0 — janela estreita (notebook): cartões de métricas em 2 linhas de 3 e sem o
+        // "atualizado às", para nada ficar cortado.
+        private void AjustarLayoutPorLargura()
+        {
+            var estreito = ActualWidth > 0 && ActualWidth < 840;
+            var colunas = estreito ? 3 : 6;
+            if (gridMetricasCdr.Columns != colunas)
+            {
+                gridMetricasCdr.Columns = colunas;
+                gridMetricasCdr.Rows = estreito ? 2 : 1;
+                var i = 0;
+                foreach (var card in gridMetricasCdr.Children.OfType<FrameworkElement>())
+                {
+                    var ultimaColuna = (i % colunas) == colunas - 1;
+                    card.Margin = new Thickness(0, 0, ultimaColuna ? 0 : 10, estreito && i < colunas ? 10 : 0);
+                    i++;
+                }
+            }
+            txtAtualizadoAs.Visibility = estreito ? Visibility.Collapsed : Visibility.Visible;
+        }
+
         public DashboardControl()
         {
             InitializeComponent();
             _autoRefresh.Tick += (_, _) => AtualizarDados();
             _liveTimer.Tick   += (_, _) => AtualizarCardsLive();
+            SizeChanged += (_, _) => AjustarLayoutPorLargura();
             Loaded += (_, _) =>
             {
                 if (dpInicio != null) dpInicio.SelectedDate = DateTime.Today;

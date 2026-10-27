@@ -144,6 +144,10 @@ namespace WavenVoIP.Views
             }
             catch { }
 
+            // v2.6.0 — interface responsiva: compacta no notebook, ampliada em monitor grande
+            // (pela área útil da janela e pelo DPI). Só apresentação.
+            LayoutResponsivo.Ativar(this, new LayoutResponsivo.Opcoes { AoAplicar = AjustarLayoutPorLargura });
+
             Loaded += DialerShellWindow_Loaded;
             StateChanged += DialerShellWindow_StateChanged;
             ConfigurarBandeja();
@@ -2580,6 +2584,59 @@ namespace WavenVoIP.Views
                     }
                     catch { }
                 }
+            }
+            catch { }
+        }
+
+        // v2.6.0 — reorganiza o que não cabe pela largura lógica (já descontada a escala):
+        // marca em texto e rótulos das abas somem antes de qualquer corte; favoritos e filtros
+        // do histórico acompanham o espaço disponível.
+        private int _faixaLayout = -1;
+        private void AjustarLayoutPorLargura(double escala, System.Windows.Size areaLogica)
+        {
+            var largura = areaLogica.Width;
+
+            // aba Discagem: acima de 1320 lógicos o conjunto teclado + favoritos não cresce mais
+            // (centralizado); o resto das abas continua usando a largura toda
+            const double larguraMaxDiscagem = 1320;
+            var larguraDiscagem = Math.Min(largura, larguraMaxDiscagem);
+            if (largura > larguraMaxDiscagem) { gridDiscagem.MaxWidth = larguraMaxDiscagem; gridDiscagem.HorizontalAlignment = HorizontalAlignment.Center; }
+            else { gridDiscagem.MaxWidth = double.PositiveInfinity; gridDiscagem.HorizontalAlignment = HorizontalAlignment.Stretch; }
+
+            // favoritos ocupam ~1/3 da largura: menos vazio entre teclado e lista em telas largas
+            var favoritos = Math.Round(Math.Clamp(larguraDiscagem * 0.34, 280, 520));
+            if (Math.Abs(colFavoritos.Width.Value - favoritos) >= 4) colFavoritos.Width = new GridLength(favoritos);
+
+            var faixa = largura < 900 ? 0 : largura < 930 ? 1 : largura < 1010 ? 2 : 3;
+            if (faixa == _faixaLayout) return;
+            _faixaLayout = faixa;
+
+            Resources["NavLabelVisibility"] = faixa <= 1 ? Visibility.Collapsed : Visibility.Visible;
+            Resources["NavIconMargin"] = faixa <= 1 ? new Thickness(0) : new Thickness(0, 0, 8, 0);
+            pnlMarcaTexto.Visibility = faixa <= 2 ? Visibility.Collapsed : Visibility.Visible;
+            cmbFiltroTipoHistorico.Width = faixa == 0 ? 150 : 178;
+            cmbFiltroCanalHistorico.Width = faixa == 0 ? 140 : 168;
+            colBuscaHistorico.MinWidth = faixa == 0 ? 150 : 200;
+            RegistrarUiDiagnostico($"LAYOUT_FAIXA | faixa={faixa} escala={escala:0.00} area={areaLogica.Width:0}x{areaLogica.Height:0}");
+        }
+
+        // v2.6.0 — janela baixa (notebook a 150%, janela reduzida): o cartão do discador encolhe
+        // até 72% para o botão de ligar e o "Puxar Ligação" continuarem à vista sem rolar.
+        private double _escalaDiscador = 1.0;
+        private void ScrollDiscador_SizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            try
+            {
+                var disponivel = scrollDiscador.ActualHeight;
+                if (disponivel < 1) return;
+                cartaoDiscador.Measure(new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity));
+                var margem = cartaoDiscador.Margin.Top + cartaoDiscador.Margin.Bottom;
+                var natural = (cartaoDiscador.DesiredSize.Height - margem) / _escalaDiscador;
+                if (natural < 1) return;
+                var s = Math.Floor(Math.Clamp((disponivel - margem - 4) / natural, 0.72, 1.0) * 100) / 100;   // folga de arredondamento
+                if (Math.Abs(s - _escalaDiscador) < 0.01) return;
+                _escalaDiscador = s;
+                cartaoDiscador.LayoutTransform = s >= 1.0 ? Transform.Identity : new ScaleTransform(s, s);
             }
             catch { }
         }

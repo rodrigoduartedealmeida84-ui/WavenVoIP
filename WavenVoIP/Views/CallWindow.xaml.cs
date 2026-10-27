@@ -146,6 +146,9 @@ namespace WavenVoIP.Views
         public CallWindow(string nomeNumero, string statusInicial = "Ligando...")
         {
             InitializeComponent();
+            // v2.6.0 — em notebook com escala 125/150% a janela não cabia inteira: reduz o
+            // conteúdo só o necessário para caber (nunca amplia; altura varia com participantes)
+            Services.LayoutResponsivo.Ativar(this, new Services.LayoutResponsivo.Opcoes { Proporcional = false, AumentarTamanhoInicial = false });
 
             txtNomeNumero.Text = nomeNumero;
             txtStatus.Text = statusInicial;
