@@ -1162,8 +1162,9 @@
                                                 <Grid>
                                                     <Grid.ColumnDefinitions>
                                                         <ColumnDefinition Width="46"/>
-                                                        <ColumnDefinition Width="*" MinWidth="90"/>
-                                                        <ColumnDefinition Width="155"/>
+                                                        <!-- v2.6.0: em tela larga o espaço extra se divide entre nome e canal (antes ia todo para o nome e o canal ficava longe) -->
+                                                        <ColumnDefinition Width="2*" MinWidth="90"/>
+                                                        <ColumnDefinition Width="*" MinWidth="155" MaxWidth="420"/>
                                                         <ColumnDefinition Width="108"/>
                                                         <ColumnDefinition Width="88"/>
                                                         <ColumnDefinition Width="148"/>
