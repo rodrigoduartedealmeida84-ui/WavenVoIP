@@ -8,4 +8,15 @@
       <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
     </application>
   </compatibility>
+
+  <!-- v2.6.0 — DPI por monitor (V2): o WPF desenha texto, ícones e bordas na resolução nativa de
+       cada tela (notebook a 125/150% e monitor externo a 100%) e se reajusta ao mudar de tela.
+       Sem isto o processo ficava "System aware" na escala da tela principal e o Windows esticava
+       a janela como imagem nas outras telas, deixando as letras embaçadas. -->
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2, PerMonitor</dpiAwareness>
+    </windowsSettings>
+  </application>
 </assembly>

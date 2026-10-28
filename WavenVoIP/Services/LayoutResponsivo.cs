@@ -207,16 +207,22 @@ namespace WavenVoIP.Services
         }
 
         // ── Tamanho/posição lembrados ────────────────────────────────────────────────
-        // Em pixels de tela (GetWindowPlacement): vale entre monitores com escalas diferentes.
+        // Tamanho em DIP (o mesmo em qualquer escala) e canto superior esquerdo em pixels de tela
+        // (identifica o monitor). Com DPI por monitor, guardar o tamanho em pixels faria a janela
+        // crescer ao reabrir numa tela de outra escala. Formato 2 = este; o 1 (só nas builds de
+        // teste de 28/10, ainda "System aware") é ignorado.
 
         internal sealed class JanelaSalva
         {
-            public int Esquerda { get; set; }
-            public int Topo { get; set; }
-            public int Direita { get; set; }
-            public int Base { get; set; }
+            public int Formato { get; set; }
+            public int X { get; set; }
+            public int Y { get; set; }
+            public double LarguraDip { get; set; }
+            public double AlturaDip { get; set; }
             public bool Maximizada { get; set; }
         }
+
+        private const int FormatoAtual = 2;
 
         private static string ArquivoJanelas => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WavenVoIP", "janelas.json");
@@ -232,7 +238,8 @@ namespace WavenVoIP.Services
             return new();
         }
 
-        private static JanelaSalva? LerSalvo(string chave) => LerTodas().TryGetValue(chave, out var j) ? j : null;
+        private static JanelaSalva? LerSalvo(string chave) =>
+            LerTodas().TryGetValue(chave, out var j) && j.Formato == FormatoAtual && j.LarguraDip > 0 && j.AlturaDip > 0 ? j : null;
 
         private static void Salvar(Window janela, string chave)
         {
@@ -242,18 +249,23 @@ namespace WavenVoIP.Services
                 if (hwnd == IntPtr.Zero) return;
                 var wp = new WINDOWPLACEMENT { length = Marshal.SizeOf<WINDOWPLACEMENT>() };
                 if (!GetWindowPlacement(hwnd, ref wp)) return;
-                var r = wp.rcNormalPosition;
-                if (r.Right - r.Left < 200 || r.Bottom - r.Top < 150) return;
-                var todas = LerTodas();
+                // tamanho "normal" (sem maximizar) em DIP: RestoreBounds quando maximizada/minimizada
+                var tam = janela.WindowState == WindowState.Normal
+                    ? new Size(janela.ActualWidth, janela.ActualHeight)
+                    : janela.RestoreBounds.Size;
+                if (tam.IsEmpty || tam.Width < 200 || tam.Height < 150) return;
                 var nova = new JanelaSalva
                 {
-                    Esquerda = r.Left, Topo = r.Top, Direita = r.Right, Base = r.Bottom,
+                    Formato = FormatoAtual,
+                    X = wp.rcNormalPosition.Left, Y = wp.rcNormalPosition.Top,
+                    LarguraDip = Math.Round(tam.Width), AlturaDip = Math.Round(tam.Height),
                     // minimizada/na bandeja: guarda o estado de antes (maximizada ou não)
                     Maximizada = janela.WindowState == WindowState.Maximized ||
                                  (janela.WindowState == WindowState.Minimized && (wp.flags & WPF_RESTORETOMAXIMIZED) != 0),
                 };
-                if (todas.TryGetValue(chave, out var atual) && atual.Esquerda == nova.Esquerda && atual.Topo == nova.Topo &&
-                    atual.Direita == nova.Direita && atual.Base == nova.Base && atual.Maximizada == nova.Maximizada) return;
+                var todas = LerTodas();
+                if (todas.TryGetValue(chave, out var a) && a.Formato == nova.Formato && a.X == nova.X && a.Y == nova.Y &&
+                    a.LarguraDip == nova.LarguraDip && a.AlturaDip == nova.AlturaDip && a.Maximizada == nova.Maximizada) return;
                 todas[chave] = nova;
                 Directory.CreateDirectory(Path.GetDirectoryName(ArquivoJanelas)!);
                 var tmp = ArquivoJanelas + ".tmp";
@@ -263,30 +275,18 @@ namespace WavenVoIP.Services
             catch (Exception ex) { LogHelper.Warn($"LAYOUT_JANELA_SALVAR_ERRO | {ex.Message}"); }
         }
 
-        /// Recoloca a janela onde o usuário deixou — só se o retângulo ainda cair num monitor
-        /// ligado (monitor externo desconectado: abre no padrão, centralizada).
+        /// Recoloca a janela onde o usuário deixou — só se o canto ainda cair num monitor ligado
+        /// (monitor externo desconectado: abre no padrão, centralizada). Só move (sem redimensionar
+        /// em pixels): se a tela tiver outra escala, o WPF reajusta mantendo o tamanho em DIP.
         private static bool Restaurar(Window janela, JanelaSalva s)
         {
             var hwnd = new WindowInteropHelper(janela).Handle;
             if (hwnd == IntPtr.Zero) return false;
-            var r = new RECT { Left = s.Esquerda, Top = s.Topo, Right = s.Direita, Bottom = s.Base };
-            var monitor = MonitorFromRect(ref r, MONITOR_DEFAULTTONULL);
-            var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
-            if (monitor == IntPtr.Zero || !GetMonitorInfo(monitor, ref info)) return false;
-
-            // cabe na área útil daquele monitor (resolução pode ter mudado desde então)
-            var u = info.rcWork;
-            var larg = Math.Min(r.Right - r.Left, u.Right - u.Left);
-            var alt = Math.Min(r.Bottom - r.Top, u.Bottom - u.Top);
-            var x = Math.Clamp(r.Left, u.Left, u.Right - larg);
-            var y = Math.Clamp(r.Top, u.Top, u.Bottom - alt);
-            var wp = new WINDOWPLACEMENT
-            {
-                length = Marshal.SizeOf<WINDOWPLACEMENT>(),
-                showCmd = SW_HIDE,   // só posiciona: quem mostra (ou deixa na bandeja) é o app
-                rcNormalPosition = new RECT { Left = x, Top = y, Right = x + larg, Bottom = y + alt },
-            };
-            if (!SetWindowPlacement(hwnd, ref wp)) return false;
+            var canto = new POINT { X = s.X + 40, Y = s.Y + 20 };   // dentro da barra de título
+            if (MonitorFromPoint(canto, MONITOR_DEFAULTTONULL) == IntPtr.Zero) return false;
+            janela.Width = Math.Max(s.LarguraDip, janela.MinWidth);
+            janela.Height = Math.Max(s.AlturaDip, janela.MinHeight);
+            if (!SetWindowPos(hwnd, IntPtr.Zero, s.X, s.Y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)) return false;
             if (s.Maximizada) janela.WindowState = WindowState.Maximized;
             return true;
         }
@@ -358,7 +358,7 @@ namespace WavenVoIP.Services
         private const uint MONITOR_DEFAULTTONULL = 0;
         private const uint MONITOR_DEFAULTTONEAREST = 2;
         private const uint EDD_GET_DEVICE_INTERFACE_NAME = 1;
-        private const int SW_HIDE = 0;
+        private const uint SWP_NOSIZE = 0x1, SWP_NOZORDER = 0x4, SWP_NOACTIVATE = 0x10;
         private const int WPF_RESTORETOMAXIMIZED = 2;
 
         [StructLayout(LayoutKind.Sequential)]
@@ -412,7 +412,10 @@ namespace WavenVoIP.Services
         private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
 
         [DllImport("user32.dll")]
-        private static extern IntPtr MonitorFromRect(ref RECT lprc, uint dwFlags);
+        private static extern IntPtr MonitorFromPoint(POINT pt, uint dwFlags);
+
+        [DllImport("user32.dll")]
+        private static extern bool SetWindowPos(IntPtr hWnd, IntPtr insertAfter, int x, int y, int cx, int cy, uint flags);
 
         [DllImport("user32.dll")]
         private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
@@ -425,8 +428,5 @@ namespace WavenVoIP.Services
 
         [DllImport("user32.dll")]
         private static extern bool GetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl);
-
-        [DllImport("user32.dll")]
-        private static extern bool SetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl);
     }
 }
