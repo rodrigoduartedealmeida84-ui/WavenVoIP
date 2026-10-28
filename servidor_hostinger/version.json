@@ -1,7 +1,7 @@
 {
-    "versao": "2.5.4",
-    "zip": "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.5.4/WavenVoIP.zip",
-    "sha256": "7727f65a86ff3a612062d61cf06a21639f017e90bbfa9d83b22851439289317f",
-    "data": "2026-10-21",
-    "notas": "WavenVoIP v2.5.4 - Gravacoes so pela Waven API. Baixar gravacao pelo menu do Historico passa a usar o link temporario da Waven API, e o Historico deixa de consultar a pasta de gravacoes do PABX a cada sincronizacao. Ligacoes, filas e configuracoes continuam como antes."
+    "versao": "2.6.0",
+    "zip": "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.6.0/WavenVoIP.zip",
+    "sha256": "61773ff0de1b1f3665675f2a79a3c6d2d359e6c39e272a2474b839ceff989649",
+    "data": "2026-10-28",
+    "notas": "WavenVoIP v2.6.0 - Interface responsiva. A janela se adapta a notebooks de 13 a 15,6 polegadas e a monitores de 24 polegadas ou maiores, nas escalas 100%, 125% e 150% do Windows, sem botoes cortados. Ligacoes, historico, gravacoes, favoritos e configuracoes continuam como antes."
 }
