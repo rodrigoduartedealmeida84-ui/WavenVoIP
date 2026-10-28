@@ -146,7 +146,7 @@ namespace WavenVoIP.Views
 
             // v2.6.0 — interface responsiva: compacta no notebook, ampliada em monitor grande
             // (pela área útil da janela e pelo DPI). Só apresentação.
-            LayoutResponsivo.Ativar(this, new LayoutResponsivo.Opcoes { AoAplicar = AjustarLayoutPorLargura });
+            LayoutResponsivo.Ativar(this, new LayoutResponsivo.Opcoes { LembrarComo = "shell", AoAplicar = AjustarLayoutPorLargura });
 
             Loaded += DialerShellWindow_Loaded;
             StateChanged += DialerShellWindow_StateChanged;
@@ -2571,7 +2571,8 @@ namespace WavenVoIP.Views
             try
             {
                 Show();
-                WindowState = WindowState.Normal;
+                // v2.6.0 — só desfaz o minimizar: janela que o usuário deixou maximizada volta maximizada
+                if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
                 Activate();
 
                 if (_activeCallWindow != null)

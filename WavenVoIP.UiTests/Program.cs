@@ -33,11 +33,9 @@ var th = new Thread(() =>
 {
     if (Application.Current == null) new App().InitializeComponent();
 
-    // LayoutResponsivo é internal: acessado por reflexão (mesma conta do app)
-    var tipoLayout = typeof(App).Assembly.GetType("WavenVoIP.Services.LayoutResponsivo")!;
-    var opcoesPadrao = Activator.CreateInstance(tipoLayout.GetNestedType("Opcoes", BindingFlags.NonPublic)!, nonPublic: true)!;
-    var sugeridaMi = tipoLayout.GetMethod("EscalaSugerida", BindingFlags.NonPublic | BindingFlags.Static)!;
-    double Sugerida(Rect util) => (double)sugeridaMi.Invoke(null, new object[] { util, opcoesPadrao })!;
+    // LayoutResponsivo é internal: a diagonal física do monitor (EDID, que aqui não existe) é simulada
+    var tipoLayout = typeof(App).Assembly.GetType("WavenVoIP.Services.LayoutResponsivo");   // null na 2.5.4 (comparação)
+    var campoDiagonal = tipoLayout?.GetField("DiagonalSimulada", BindingFlags.NonPublic | BindingFlags.Static);
 
     // Para timers e ícone de bandeja criados no construtor: nada pode registrar/consultar.
     void Neutralizar(Window w)
@@ -119,7 +117,7 @@ var th = new Thread(() =>
     }
 
     // Dimensiona a janela como o app faria (tamanho inicial / mínimo / maximizada) e faz o layout.
-    (FrameworkElement area, double cw, double ch, double escala) Montar(Window w, Rect util, double dpi, string estado, bool aumentar)
+    (FrameworkElement area, double cw, double ch, double escala) Montar(Window w, Rect util, double dpi, string estado)
     {
         VisualTreeHelper.SetRootDpi(w, new DpiScale(dpi, dpi));
         var minW = Math.Min(w.MinWidth, util.Width);
@@ -131,14 +129,16 @@ var th = new Thread(() =>
             if (estado == "reduzida") { ww = minW; wh = minH; }
             else
             {
-                var s = aumentar ? Sugerida(util) : 1.0;
-                ww = Math.Min(w.Width * s, util.Width); wh = Math.Min(w.Height * s, util.Height);
+                // abre no tamanho de projeto (o da 2.5.4), só limitado à área útil
+                ww = Math.Min(w.Width, util.Width); wh = Math.Min(w.Height, util.Height);
             }
             cw = ww - 16; ch = wh - 39;
         }
         // Janela nunca exibida não faz layout: o conteúdo (já envolvido pelo LayoutResponsivo) vira a
         // raiz, com os mesmos recursos (dicionário compartilhado: o que o código da janela muda em
         // Resources chega ao conteúdo) e as mesmas propriedades herdadas do estilo de Window.
+        // 2.5.4 (sem LayoutResponsivo): mesmo invólucro, sem escala — é como ela desenha
+        if (tipoLayout == null) { var c0 = (UIElement)w.Content; w.Content = null; var g0 = new Grid(); g0.Children.Add(c0); w.Content = g0; }
         var area = (FrameworkElement)w.Content;
         w.Content = null;
         area.Resources = w.Resources;
@@ -154,8 +154,15 @@ var th = new Thread(() =>
         return (area, cw, ch, escala);
     }
 
-    var resolucoes = new[] { (1366, 768), (1920, 1080), (2560, 1440), (3840, 2160) };
-    var dpis = new[] { 1.0, 1.25, 1.5 };
+    // (tipo, resolução, diagonal física em polegadas, escala do Windows)
+    var telas = new (string tipo, int rw, int rh, double diag, double dpi)[]
+    {
+        ("notebook14", 1366, 768, 14.0, 1.0), ("notebook14", 1366, 768, 14.0, 1.25),
+        ("notebook15", 1920, 1080, 15.6, 1.0), ("notebook15", 1920, 1080, 15.6, 1.25), ("notebook15", 1920, 1080, 15.6, 1.5),
+        ("monitor24", 1920, 1080, 24.0, 1.0), ("monitor24", 1920, 1080, 24.0, 1.25),
+        ("monitor27", 2560, 1440, 27.0, 1.0), ("monitor27", 2560, 1440, 27.0, 1.25), ("monitor27", 2560, 1440, 27.0, 1.5),
+        ("4k27", 3840, 2160, 27.0, 1.5),
+    };
     var estados = new[] { "normal", "reduzida", "maximizada" };
     var abas = new[] { "Discagem", "Contatos", "Historico", "Configuracoes", "Dashboard" };
 
@@ -179,12 +186,12 @@ var th = new Thread(() =>
         new() { Nome = "Jedson", Numero = "103" }, new() { Nome = "Marlley", Numero = "66984001122" },
     };
 
-    relatorio.Add("| Resolução | Escala Win | Janela | Área cliente (DIP) | Escala Waven | Área lógica | Texto 13 px → px reais | Discagem rola? | Cortes |");
-    relatorio.Add("|---|---|---|---|---|---|---|---|---|");
+    relatorio.Add("| Tela | Resolução | Escala Win | Janela | Área cliente (DIP) | Escala Waven | Área lógica | Texto 13 px → px reais | Discagem rola? | Cortes |");
+    relatorio.Add("|---|---|---|---|---|---|---|---|---|---|");
 
-    foreach (var (rw, rh) in resolucoes)
-    foreach (var dpi in dpis)
+    foreach (var (tipo, rw, rh, diag, dpi) in telas)
     {
+        campoDiagonal?.SetValue(null, (double?)diag);
         // área útil: tela inteira menos a barra de tarefas (48 DIP), em DIP
         var util = new Rect(0, 0, rw / dpi, rh / dpi - 48);
         foreach (var estado in estados)
@@ -197,7 +204,7 @@ var th = new Thread(() =>
             ((ItemsControl)w.FindName("gridHistoricoShell")).ItemsSource = historico;
             ((TextBlock)w.FindName("txtDndNomeRamal")).Text = "Rodrigo Almeida · 100";
             ((TextBlock)w.FindName("txtStatus")).Text = "Registrado com sucesso no Issabel (ramal 100)";
-            var (area, cw, ch, escala) = Montar(w, util, dpi, estado, aumentar: true);
+            var (area, cw, ch, escala) = Montar(w, util, dpi, estado);
             var tabs = (TabControl)w.FindName("MainTabs");
             var cortesTotal = 0; var rola = "";
             for (int i = 0; i < abas.Length; i++)
@@ -210,7 +217,7 @@ var th = new Thread(() =>
                     if (sel.RenderTransform is TranslateTransform tt) { tt.BeginAnimation(TranslateTransform.YProperty, null); tt.Y = 0; }
                 }
                 area.UpdateLayout();
-                var nome = $"{rw}x{rh}_{dpi * 100:0}_{estado}_{i}{abas[i]}.png";
+                var nome = $"{tipo}_{rw}x{rh}_{dpi * 100:0}_{estado}_{i}{abas[i]}.png";
                 Foto(area, cw, ch, dpi, nome);
                 var cortes = Cortes(area, cw, ch);
                 cortesTotal += cortes.Count;
@@ -223,40 +230,40 @@ var th = new Thread(() =>
                 }
             }
             var conteudo = (FrameworkElement)((Panel)area).Children[0];
-            relatorio.Add($"| {rw}×{rh} | {dpi * 100:0}% | {estado} | {cw:F0}×{ch:F0} | {escala:0.00} | {cw / escala:F0}×{ch / escala:F0} | {13 * escala * dpi:F1} | {rola} | {cortesTotal} |");
+            relatorio.Add($"| {tipo} | {rw}×{rh} | {dpi * 100:0}% | {estado} | {cw:F0}×{ch:F0} | {escala:0.00} | {cw / escala:F0}×{ch / escala:F0} | {13 * escala * dpi:F1} | {rola} | {cortesTotal} |");
 
         }
     }
 
     // Configurações e Chamada: notebook pequeno e monitor grande em cada escala
     relatorio.Add("");
-    relatorio.Add("| Janela | Resolução | Escala Win | Estado | Área cliente | Escala Waven | Cortes |");
-    relatorio.Add("|---|---|---|---|---|---|---|");
-    foreach (var (rw, rh) in resolucoes)
-    foreach (var dpi in dpis)
+    relatorio.Add("| Tela | Janela | Resolução | Escala Win | Estado | Área cliente | Escala Waven | Cortes |");
+    relatorio.Add("|---|---|---|---|---|---|---|---|");
+    foreach (var (tipo, rw, rh, diag, dpi) in telas)
     {
+        campoDiagonal?.SetValue(null, (double?)diag);
         var util = new Rect(0, 0, rw / dpi, rh / dpi - 48);
         foreach (var estado in new[] { "normal", "reduzida" })
         {
             var sw = new SettingsWindow();
             Neutralizar(sw);
-            var (a1, c1w, c1h, e1) = Montar(sw, util, dpi, estado, aumentar: true);
-            var n1 = $"{rw}x{rh}_{dpi * 100:0}_{estado}_Configuracoes-janela.png";
+            var (a1, c1w, c1h, e1) = Montar(sw, util, dpi, estado);
+            var n1 = $"{tipo}_{rw}x{rh}_{dpi * 100:0}_{estado}_Configuracoes-janela.png";
             Foto(a1, c1w, c1h, dpi, n1);
             var k1 = Cortes(a1, c1w, c1h);
             Check($"{n1}: sem cortes", k1.Count == 0, string.Join(" | ", k1.Take(5)));
-            relatorio.Add($"| Configurações | {rw}×{rh} | {dpi * 100:0}% | {estado} | {c1w:F0}×{c1h:F0} | {e1:0.00} | {k1.Count} |");
+            relatorio.Add($"| {tipo} | Configurações | {rw}×{rh} | {dpi * 100:0}% | {estado} | {c1w:F0}×{c1h:F0} | {e1:0.00} | {k1.Count} |");
 
         }
 
         var cwin = new CallWindow("Maria Aparecida de Oliveira Santos", "Chamando...");
         Neutralizar(cwin);
-        var (a2, c2w, c2h, e2) = Montar(cwin, util, dpi, "normal", aumentar: false);
-        var n2 = $"{rw}x{rh}_{dpi * 100:0}_Chamada.png";
+        var (a2, c2w, c2h, e2) = Montar(cwin, util, dpi, "normal");
+        var n2 = $"{tipo}_{rw}x{rh}_{dpi * 100:0}_Chamada.png";
         Foto(a2, c2w, c2h, dpi, n2);
         var k2 = Cortes(a2, c2w, c2h);
         Check($"{n2}: sem cortes", k2.Count == 0, string.Join(" | ", k2.Take(5)));
-        relatorio.Add($"| Chamada | {rw}×{rh} | {dpi * 100:0}% | normal | {c2w:F0}×{c2h:F0} | {e2:0.00} | {k2.Count} |");
+        relatorio.Add($"| {tipo} | Chamada | {rw}×{rh} | {dpi * 100:0}% | normal | {c2w:F0}×{c2h:F0} | {e2:0.00} | {k2.Count} |");
 
     }
 });

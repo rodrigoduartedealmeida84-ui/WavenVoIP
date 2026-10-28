@@ -7,14 +7,16 @@ namespace WavenVoIP.Services
         public const string Versao  = "2.6.0";
         public const string NomeApp = "WavenVoIP";
 
-        public static readonly DateTime DataBuild = new DateTime(2026, 10, 27);
+        public static readonly DateTime DataBuild = new DateTime(2026, 10, 28);
 
         public static string VersaoCompleta => $"{NomeApp} v{Versao}";
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
-            "v2.6.0 — Interface responsiva para notebook e monitor grande (27/10/2026)\n" +
-            "• [NEW] A janela se adapta ao tamanho da tela e a escala do Windows (100%, 125%, 150%): em notebook de 13 a 15,6 polegadas tudo cabe sem botoes cortados; em monitor de 24 polegadas ou maior o conteudo fica maior e proporcional\n" +
+            "v2.6.0 — Interface responsiva para notebook e monitor grande (28/10/2026)\n" +
+            "• [NEW] A janela abre no mesmo tamanho da 2.5.4 e lembra o tamanho, a posicao e se estava maximizada ao fechar e reabrir\n" +
+            "• [NEW] Notebook de 13 a 15,6 polegadas (100%, 125%, 150%): tudo cabe na tela sem botoes cortados, inclusive o Desligar da janela de chamada\n" +
+            "• [NEW] Monitor de 24 polegadas ou maior: ao aumentar ou maximizar a janela o conteudo cresce de forma proporcional (ate 30%); no notebook quase nao cresce\n" +
             "• [NEW] Janela estreita: abas mostram so os icones (nome ao passar o mouse), o teclado do discador encolhe para o Ligar e o Puxar Ligacao ficarem a vista, filtros do Historico e do Dashboard se reorganizam\n" +
             "• [NEW] Monitor largo: teclado e favoritos ficam juntos e centralizados; Configuracoes e a janela de chamada tambem se ajustam a tela\n" +
             "• Ligacoes, historico, gravacoes, favoritos, AMI e Waven API continuam como na 2.5.4\n" +
