@@ -4,15 +4,24 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "2.6.0";
+        public const string Versao  = "2.6.1";
         public const string NomeApp = "WavenVoIP";
 
-        public static readonly DateTime DataBuild = new DateTime(2026, 10, 28);
+        public static readonly DateTime DataBuild = new DateTime(2026, 11, 4);
 
         public static string VersaoCompleta => $"{NomeApp} v{Versao}";
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v2.6.1 — Microfone sem falha silenciosa (04/11/2026)\n" +
+            "• [FIX] Headset USB trocado de porta (o Windows passa a chamar de \"Microfone (3- ...)\") continua sendo o microfone da ligacao; antes o app passava sem avisar para o microfone padrao do Windows e o cliente podia deixar de ouvir o operador\n" +
+            "• [NEW] O microfone e guardado pelo ID do Windows + nome; o aparelho certo e usado mesmo com outro nome\n" +
+            "• [NEW] Aviso na tela principal e na ligacao quando o microfone configurado nao existe, esta desativado, no mudo do Windows, bloqueado pela privacidade, com volume baixo ou nao e o do fone da ligacao\n" +
+            "• [NEW] Durante a ligacao: medidor do microfone e aviso quando nenhum som chega ou sua voz nao e detectada (mudo e espera nunca geram aviso)\n" +
+            "• [NEW] Headset desconectado no meio da ligacao: aviso imediato; ao reconectar o audio volta sozinho; ou use o botao \"Usar microfone do computador\"\n" +
+            "• [NEW] Configuracoes: botao \"Testar microfone\" com medidor; o headset desconectado continua selecionado (nao vira \"Automatico\")\n" +
+            "• [NEW] Medicao da voz do operador por ligacao (so numeros, sem gravar conversa) e incidentes de microfone no painel de diagnostico\n" +
+            "\n" +
             "v2.6.0 — Interface responsiva para notebook e monitor grande (28/10/2026)\n" +
             "• [NEW] A janela abre no mesmo tamanho da 2.5.4 e lembra o tamanho, a posicao e se estava maximizada ao fechar e reabrir\n" +
             "• [NEW] Notebook de 13 a 15,6 polegadas (100%, 125%, 150%): tudo cabe na tela sem botoes cortados, inclusive o Desligar da janela de chamada\n" +

@@ -174,6 +174,21 @@ namespace WavenVoIP.Views
                 try { if (_ligacaoEmAndamento && _activeCallWindow != null && _sipService.IsDialing && !_sipService.IsInCall) _activeCallWindow.DefinirStatus("Chamando..."); } catch { }
             });
 
+            // v2.6.1 — aviso de microfone durante a chamada (tela da chamada + aviso flutuante no 1º grave)
+            _sipService.AlertaMicrofoneMudou += alerta => NaUi(() =>
+            {
+                try
+                {
+                    _activeCallWindow?.MostrarAlertaMicrofone(alerta);
+                    if (alerta != null)
+                    {
+                        RegistrarUiDiagnostico($"MIC_ALERTA_UI codigo={alerta.Codigo} grave={alerta.Grave}");
+                        if (alerta.Grave && _activeCallWindow == null) MostrarAvisoDiscreto(alerta.Titulo, alerta.Texto);
+                    }
+                }
+                catch { }
+            });
+
             _sipService.IncomingCallReceived += caller =>
                 Dispatcher.BeginInvoke(new Action(() => AbrirPopupChamadaRecebida(caller, ehNovoCiclo: false)));
 
@@ -392,6 +407,7 @@ namespace WavenVoIP.Views
 
                 CarregarPreferenciasNaTela();
                 CarregarDispositivosAudioNaTela();
+                try { IniciarVigiaMicrofone(); } catch { }
                 // AplicarRetencaoHistorico() removido daqui — fazia a mesma leitura/filtro/
                 // regravacao sincrona do historico.json na UI thread que CarregarComRetencao()
                 // ja faz em background dentro de AtualizarHistoricoShell() (chamado abaixo).
@@ -3055,6 +3071,7 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
 
             AtualizarNavSelecionada();
             try { AtualizarBotaoStatus(); } catch { }
+            _ = VerificarMicrofoneOciosoAsync("apos_configuracoes");   // v2.6.1
         }
         private void NavDashboard_Click(object sender, RoutedEventArgs e) { MainTabs.SelectedIndex = 4; AtualizarNavSelecionada(); AnimarAbaAtual(); dashboardControl?.AtualizarDados(); RegistrarUiDiagnostico("DASHBOARD_REFRESH"); }
 
@@ -3749,6 +3766,97 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
 
         private async void BtnLigar_Click(object sender, RoutedEventArgs e) => await IniciarLigacaoAsync(txtNumero.Text);
 
+        // ═══ v2.6.1 — vigia do microfone fora da chamada ═══════════════════════════════════════
+        // Verifica ao abrir, a cada 60 s e sempre que um dispositivo de áudio entra/sai: headset
+        // desconectado, desativado, mudo no Windows, bloqueado pela privacidade, volume baixo ou
+        // microfone diferente do fone. Mostra o aviso ANTES da próxima ligação.
+        private System.Windows.Threading.DispatcherTimer? _timerSaudeMic;
+        private string _assinaturaProblemaMic = string.Empty;
+        private string _assinaturaBannerFechado = string.Empty;
+        private bool _verificandoMic;
+
+        private void IniciarVigiaMicrofone()
+        {
+            MicrofoneService.IniciarMonitoramento();
+            MicrofoneService.DispositivosMudaram += () => NaUi(() => _ = VerificarMicrofoneOciosoAsync("dispositivos_mudaram"));
+            _timerSaudeMic = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(60) };
+            _timerSaudeMic.Tick += (_, __) => _ = VerificarMicrofoneOciosoAsync("periodico");
+            _timerSaudeMic.Start();
+            var inicial = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(6) };
+            inicial.Tick += (_, __) => { inicial.Stop(); _ = VerificarMicrofoneOciosoAsync("inicio"); };
+            inicial.Start();
+        }
+
+        private async System.Threading.Tasks.Task VerificarMicrofoneOciosoAsync(string motivo)
+        {
+            if (_verificandoMic || _sipService.IsInCall) return;   // durante a chamada quem avisa é a tela da chamada
+            _verificandoMic = true;
+            try
+            {
+                var cfg = SipConfig.CarregarSalva();
+                if (cfg == null) return;
+                var saude = await MicrofoneService.ComLimiteDeTempo<SaudeMicrofone>(() => MicrofoneService.VerificarMicrofone(
+                    cfg.AudioInputDevice, cfg.AudioInputDeviceId, cfg.CallOutputDevice, cfg.CallOutputDeviceId));
+                if (saude == null) return;
+
+                // mesmo headset em outra porta USB: grava o nome/ID novos sem incomodar o operador
+                if (saude.Resolucao.Situacao == SituacaoDispositivo.Renomeado && saude.Resolucao.Escolhido is { } novo)
+                {
+                    var antigo = cfg.AudioInputDevice;
+                    RegistrarUiDiagnostico($"MIC_RENOMEADO_OCIOSO de=\"{antigo}\" para=\"{novo.Nome}\"");
+                    _ = System.Threading.Tasks.Task.Run(() => SipConfig.AtualizarDispositivoRenomeado(false, antigo, novo.Nome, novo.Id));
+                }
+
+                if (saude.Ok)
+                {
+                    if (_assinaturaProblemaMic.Length > 0)
+                    {
+                        RegistrarUiDiagnostico($"MIC_OK_NOVAMENTE motivo={motivo} microfone=\"{saude.Resolucao.NomeEmUso}\"");
+                        LogHelper.Sip($"MIC_OK_NOVAMENTE | motivo={motivo} {saude.Resumo()}");
+                        txtStatus.Text = $"Microfone OK: {saude.Resolucao.NomeEmUso}";
+                    }
+                    _assinaturaProblemaMic = string.Empty;
+                    _assinaturaBannerFechado = string.Empty;
+                    bannerMicrofone.Visibility = Visibility.Collapsed;
+                    return;
+                }
+
+                var assinatura = string.Join(",", saude.Problemas) + "|" + saude.Resolucao.NomeEmUso;
+                var grave = saude.Grave;
+                var titulo = grave ? "Problema no microfone — o cliente pode não te ouvir" : "Atenção ao microfone";
+                var texto = saude.TextoParaOperador();
+                bannerMicrofone.Background = new SolidColorBrush(grave ? Color.FromRgb(0xFE, 0xF2, 0xF2) : Color.FromRgb(0xFF, 0xFB, 0xEB));
+                bannerMicrofone.BorderBrush = new SolidColorBrush(grave ? Color.FromRgb(0xFC, 0xA5, 0xA5) : Color.FromRgb(0xFC, 0xD3, 0x4D));
+                txtBannerMicIcone.Foreground = new SolidColorBrush(grave ? Color.FromRgb(0xDC, 0x26, 0x26) : Color.FromRgb(0xD9, 0x77, 0x06));
+                txtBannerMicTitulo.Foreground = new SolidColorBrush(grave ? Color.FromRgb(0x99, 0x1B, 0x1B) : Color.FromRgb(0x92, 0x40, 0x0E));
+                txtBannerMicTexto.Foreground = new SolidColorBrush(grave ? Color.FromRgb(0x7F, 0x1D, 0x1D) : Color.FromRgb(0x78, 0x35, 0x0F));
+                txtBannerMicTitulo.Text = titulo;
+                txtBannerMicTexto.Text = texto;
+                bannerMicrofone.Visibility = assinatura == _assinaturaBannerFechado ? Visibility.Collapsed : Visibility.Visible;
+
+                if (assinatura != _assinaturaProblemaMic)
+                {
+                    _assinaturaProblemaMic = assinatura;
+                    LogHelper.Warn($"MIC_PROBLEMA_OCIOSO | motivo={motivo} {saude.Resumo()}");
+                    RegistrarUiDiagnostico($"MIC_PROBLEMA_OCIOSO motivo={motivo} problemas={string.Join(",", saude.Problemas)}");
+                    if (grave) MostrarAvisoDiscreto(titulo, texto);
+                }
+            }
+            catch { }
+            finally { _verificandoMic = false; }
+        }
+
+        private void BtnBannerMicConfigurar_Click(object sender, RoutedEventArgs e)
+        {
+            NavConfiguracoes_Click(sender, e);
+        }
+
+        private void BtnBannerMicFechar_Click(object sender, RoutedEventArgs e)
+        {
+            _assinaturaBannerFechado = _assinaturaProblemaMic;
+            bannerMicrofone.Visibility = Visibility.Collapsed;
+        }
+
         private CallWindow CriarTelaDeChamada(string numero, string status)
         {
             var call = new CallWindow(numero, status);
@@ -3764,6 +3872,25 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
             call.OnOpenConferenceParticipantsRequested += OpenConferenceParticipantsRequested;
             call.OnWhatsAppRequested += numero => AbrirTelaWhatsApp(numero, "chamada");
             call.OnRemoverAtendenteRequested += async ramal => await RemoverAtendenteDaLigacaoAsync(call, ramal);
+
+            // v2.6.1 — aviso de microfone e medidor de nível na tela da chamada
+            call.OnUsarMicrofoneAlternativoRequested += () => _sipService.UsarMicrofoneAlternativo();
+            call.MostrarAlertaMicrofone(_sipService.AlertaMicrofoneAtual);
+            var medidor = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(150) };
+            string micMostrado = string.Empty;
+            medidor.Tick += (_, __) =>
+            {
+                try
+                {
+                    var emChamada = _sipService.IsInCall;
+                    call.AtualizarNivelMicrofone(emChamada ? _sipService.NivelMicrofoneDb : -120.0, !emChamada);
+                    var mic = _sipService.MicrofoneEmUso;
+                    if (mic != micMostrado) { micMostrado = mic; call.DefinirMicrofoneEmUso(mic); }
+                }
+                catch { }
+            };
+            medidor.Start();
+            call.Closed += (_, __) => { try { medidor.Stop(); } catch { } };
             return call;
         }
 

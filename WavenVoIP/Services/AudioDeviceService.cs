@@ -227,18 +227,20 @@ namespace WavenVoIP.Services
             catch { }
         }
 
+        // v2.6.1 — delegam ao MicrofoneService (ID exato do dispositivo; nome sem a numeração
+        // "N- " do Windows). Só devolvem índice de dispositivo realmente encontrado; -1 = padrão.
         public static int IndiceWaveInPorNome(string nome)
         {
             if (string.IsNullOrEmpty(nome)) return -1;
-            var map = ConstruirMapaWaveIn();
-            return BuscarIndiceWaveIn(nome, map);
+            var r = MicrofoneService.Resolver(nome, null, saida: false);
+            return r.Situacao is SituacaoDispositivo.Ok or SituacaoDispositivo.Renomeado ? r.IndiceWave : -1;
         }
 
         public static int IndiceWaveOutPorNome(string nome)
         {
             if (string.IsNullOrEmpty(nome)) return -1;
-            var map = ConstruirMapaWaveOut();
-            return BuscarIndiceWaveOut(nome, map);
+            var r = MicrofoneService.Resolver(nome, null, saida: true);
+            return r.Situacao is SituacaoDispositivo.Ok or SituacaoDispositivo.Renomeado ? r.IndiceWave : -1;
         }
 
         public static string? BuscarIdDispositivoPorNome(string nome, bool saida)

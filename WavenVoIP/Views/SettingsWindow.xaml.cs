@@ -30,6 +30,7 @@ namespace WavenVoIP.Views
             InitializeComponent();
             // v2.6.0 — cabe na tela do notebook e amplia em monitor grande (só apresentação)
             LayoutResponsivo.Ativar(this, new LayoutResponsivo.Opcoes());
+            Closed += (_, _) => PararTesteMicrofone();
             _config     = ConfiguracaoAudioService.Carregar();
             _whatsConfig = WhatsAppConfigService.Carregar();
             _sipConfig  = SipConfig.CarregarSalva() ?? new SipConfig();
@@ -149,15 +150,11 @@ namespace WavenVoIP.Views
             catch { }
 
             // Selecionar a partir do SipConfig (novos campos)
-            cmbMicrofone.SelectedItem = string.IsNullOrEmpty(_sipConfig.AudioInputDevice)
-                ? cmbMicrofone.Items[0]
-                : cmbMicrofone.Items.Cast<object>().FirstOrDefault(i => i?.ToString() == _sipConfig.AudioInputDevice)
-                  ?? cmbMicrofone.Items[0];
-
-            cmbAltoFalante.SelectedItem = string.IsNullOrEmpty(_sipConfig.CallOutputDevice)
-                ? cmbAltoFalante.Items[0]
-                : cmbAltoFalante.Items.Cast<object>().FirstOrDefault(i => i?.ToString() == _sipConfig.CallOutputDevice)
-                  ?? cmbAltoFalante.Items[0];
+            // v2.6.1 — o mesmo aparelho em outra porta USB ("3- …") é reconhecido; e um aparelho
+            // configurado que está desconectado continua visível e selecionado (antes a tela mostrava
+            // "Automático" e, ao salvar qualquer outra coisa, a escolha do headset era perdida).
+            SelecionarDispositivo(cmbMicrofone, _sipConfig.AudioInputDevice, _sipConfig.AudioInputDeviceId, saida: false);
+            SelecionarDispositivo(cmbAltoFalante, _sipConfig.CallOutputDevice, _sipConfig.CallOutputDeviceId, saida: true);
 
             cmbDispToque.SelectedItem = string.IsNullOrEmpty(_sipConfig.RingOutputDevice)
                 ? cmbDispToque.Items[0]
@@ -247,8 +244,10 @@ namespace WavenVoIP.Views
             var selSpeaker = cmbAltoFalante.SelectedItem?.ToString() ?? string.Empty;
             var dispToque  = cmbDispToque?.SelectedItem as RingDeviceItem;
 
-            _sipConfig.AudioInputDevice = selMic == "Automático" ? string.Empty : selMic;
-            _sipConfig.CallOutputDevice = selSpeaker == "Automático" ? string.Empty : selSpeaker;
+            PararTesteMicrofone();
+            (_sipConfig.AudioInputDevice, _sipConfig.AudioInputDeviceId) = LerDispositivoSelecionado(cmbMicrofone, _sipConfig.AudioInputDevice, _sipConfig.AudioInputDeviceId, saida: false);
+            (_sipConfig.CallOutputDevice, _sipConfig.CallOutputDeviceId) = LerDispositivoSelecionado(cmbAltoFalante, _sipConfig.CallOutputDevice, _sipConfig.CallOutputDeviceId, saida: true);
+            LogHelper.Sip($"CONFIG_AUDIO_SALVO | microfone=\"{_sipConfig.AudioInputDevice}\" id_mic={(_sipConfig.AudioInputDeviceId.Length > 0 ? "sim" : "nao")} audio=\"{_sipConfig.CallOutputDevice}\" (selecao mic=\"{selMic}\" audio=\"{selSpeaker}\")");
             _sipConfig.RingOutputDevice = (dispToque == null || string.IsNullOrEmpty(dispToque.Nome) || dispToque.Nome == "Automático")
                 ? string.Empty : dispToque.Nome;
             _sipConfig.RingVolume = sldVolumeToque != null ? (int)sldVolumeToque.Value : 80;
@@ -1135,6 +1134,171 @@ namespace WavenVoIP.Views
             {
                 btnSincronizarAgora.IsEnabled = true;
             }
+        }
+
+        // ═══ v2.6.1 — dispositivo configurado (inclusive desconectado) e teste do microfone ═══
+
+        // Item da lista para um aparelho configurado que não está conectado agora: mantém a
+        // escolha do operador (não vira "Automático" sem ele saber).
+        private sealed class DispositivoDesconectadoItem
+        {
+            public string Nome { get; }
+            public string Id { get; }
+            public DispositivoDesconectadoItem(string nome, string id) { Nome = nome; Id = id; }
+            public override string ToString() => $"⚠ {Nome} (desconectado)";
+        }
+
+        private static void SelecionarDispositivo(System.Windows.Controls.ComboBox cmb, string nome, string id, bool saida)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(nome) && string.IsNullOrEmpty(id)) { cmb.SelectedItem = cmb.Items[0]; return; }
+                var (sit, esc, _) = MicrofoneService.Escolher(nome, id, MicrofoneService.ListarEndpoints(saida));
+                if (esc != null && sit is SituacaoDispositivo.Ok or SituacaoDispositivo.Renomeado)
+                {
+                    var item = cmb.Items.Cast<object>().FirstOrDefault(i => i is string s && string.Equals(s, esc.Nome, StringComparison.OrdinalIgnoreCase));
+                    if (item != null) { cmb.SelectedItem = item; return; }
+                }
+                var desc = new DispositivoDesconectadoItem(string.IsNullOrEmpty(nome) ? "(dispositivo salvo)" : nome, id);
+                cmb.Items.Add(desc);
+                cmb.SelectedItem = desc;
+            }
+            catch { cmb.SelectedItem = cmb.Items[0]; }
+        }
+
+        private static (string nome, string id) LerDispositivoSelecionado(System.Windows.Controls.ComboBox cmb, string nomeAtual, string idAtual, bool saida)
+        {
+            var sel = cmb.SelectedItem;
+            if (sel is DispositivoDesconectadoItem d) return (nomeAtual, idAtual);          // mantém o configurado
+            var nome = sel?.ToString() ?? string.Empty;
+            if (nome.Length == 0 || nome == "Automático") return (string.Empty, string.Empty);
+            try
+            {
+                var ep = MicrofoneService.ListarEndpoints(saida).FirstOrDefault(e => e.Ativo && string.Equals(e.Nome, nome, StringComparison.OrdinalIgnoreCase));
+                return (nome, ep?.Id ?? string.Empty);
+            }
+            catch { return (nome, string.Empty); }
+        }
+
+        private NAudio.Wave.WaveInEvent? _testeMicWaveIn;
+        private System.Windows.Threading.DispatcherTimer? _testeMicTimer;
+        private const int TesteMicSegundos = 8;
+        private readonly object _testeMicLock = new();
+
+        private async void BtnTestarMicrofone_Click(object sender, RoutedEventArgs e)
+        {
+            if (_testeMicWaveIn != null) { PararTesteMicrofone(); return; }
+            try
+            {
+                var (nomeSel, idSel) = LerDispositivoSelecionado(cmbMicrofone, _sipConfig.AudioInputDevice, _sipConfig.AudioInputDeviceId, saida: false);
+                var (foneSel, idFone) = LerDispositivoSelecionado(cmbAltoFalante, _sipConfig.CallOutputDevice, _sipConfig.CallOutputDeviceId, saida: true);
+                painelTesteMic.Visibility = Visibility.Visible;
+                txtTesteMicResultado.Text = "Verificando o microfone no Windows…";
+                txtTesteMicResultado.Foreground = new SolidColorBrush(Color.FromRgb(0x33, 0x41, 0x55));
+                txtTesteMicNivel.Text = string.Empty;
+                btnTestarMicrofone.IsEnabled = false;
+
+                var saude = await MicrofoneService.ComLimiteDeTempo<SaudeMicrofone>(() => MicrofoneService.VerificarMicrofone(nomeSel, idSel, foneSel, idFone));
+                btnTestarMicrofone.IsEnabled = true;
+                if (saude == null)
+                {
+                    txtTesteMicResultado.Text = "O Windows não respondeu a tempo. Tente de novo.";
+                    return;
+                }
+                var res = saude.Resolucao;
+                if (res.Escolhido == null)
+                {
+                    MostrarResultadoTesteMic(false, saude.TextoParaOperador());
+                    return;
+                }
+                var idx = MicrofoneService.IndiceWave(res.Escolhido, saida: false);
+                var avisosWindows = saude.Ok ? string.Empty : saude.TextoParaOperador();
+
+                var maxDb = -120.0; double segVoz = 0, segTotal = 0, somaVoz = 0; long blocosVoz = 0; bool algumSinal = false;
+                var nivelAtual = -120.0;
+                var w = new NAudio.Wave.WaveInEvent { DeviceNumber = idx, WaveFormat = new NAudio.Wave.WaveFormat(8000, 16, 1), BufferMilliseconds = 50 };
+                w.DataAvailable += (_, a) =>
+                {
+                    try
+                    {
+                        var n = a.BytesRecorded / 2;
+                        if (n <= 0) return;
+                        var pcm = new short[n];
+                        Buffer.BlockCopy(a.Buffer, 0, pcm, 0, n * 2);
+                        var (db, zero) = DetectorVozMicrofone.Medir(pcm);
+                        Array.Clear(pcm);                                    // nada de áudio guardado
+                        var seg = n / 8000.0;
+                        lock (_testeMicLock)
+                        {
+                            segTotal += seg;
+                            if (!zero) algumSinal = true;
+                            if (db > maxDb) maxDb = db;
+                            if (db > -45) { segVoz += seg; somaVoz += db; blocosVoz++; }
+                            nivelAtual = db;
+                        }
+                    }
+                    catch { }
+                };
+                _testeMicWaveIn = w;
+                w.StartRecording();
+                LogHelper.Sip($"MIC_TESTE_INICIO | microfone=\"{res.NomeEmUso}\" idx={idx} {saude.Resumo()}");
+
+                var inicio = DateTime.Now;
+                btnTestarMicrofone.Content = "Parar teste";
+                _testeMicTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
+                _testeMicTimer.Tick += (_, _) =>
+                {
+                    double nv, mx; lock (_testeMicLock) { nv = nivelAtual; mx = maxDb; }
+                    var largura = Math.Max(0, ((FrameworkElement)barraTesteMic.Parent).ActualWidth);
+                    barraTesteMic.Width = largura * Math.Clamp((nv + 60.0) / 50.0, 0.0, 1.0);
+                    barraTesteMic.Background = nv > -50 ? Brushes.LimeGreen : Brushes.Silver;
+                    var resta = TesteMicSegundos - (DateTime.Now - inicio).TotalSeconds;
+                    txtTesteMicNivel.Text = $"Microfone: {res.NomeEmUso}   •   nível agora {(nv <= -119 ? "sem sinal" : nv.ToString("F0") + " dBFS")}   •   pico {(mx <= -119 ? "-" : mx.ToString("F0") + " dBFS")}   •   {Math.Max(0, resta):F0}s";
+                    txtTesteMicResultado.Text = string.IsNullOrEmpty(avisosWindows) ? "Fale agora…" : avisosWindows;
+                    if (resta <= 0)
+                    {
+                        PararTesteMicrofone();
+                        double vz, tot, med, mxf; bool sinal; lock (_testeMicLock) { vz = segVoz; tot = segTotal; med = blocosVoz > 0 ? somaVoz / blocosVoz : -120; mxf = maxDb; sinal = algumSinal; }
+                        string texto; bool ok;
+                        if (tot < 1) { ok = false; texto = "O microfone não entregou áudio. Ele pode estar desconectado ou em uso exclusivo por outro programa."; }
+                        else if (!sinal) { ok = false; texto = "Nenhum som chegou do microfone (sinal zerado). Verifique se o headset está conectado, se o microfone não está no mudo do Windows e se o Windows permite o acesso ao microfone."; }
+                        else if (mxf < -50) { ok = false; texto = "Sua voz quase não chega (sinal muito baixo). Aproxime o microfone da boca ou aumente o volume do microfone no Windows."; }
+                        else if (vz < 0.6) { ok = false; texto = "Pouca voz detectada. Fale durante o teste e repita."; }
+                        else if (med < -38) { ok = true; texto = $"Funciona, mas a voz está baixa (média {med:F0} dBFS). Aproxime o microfone ou aumente o volume no Windows."; }
+                        else { ok = true; texto = $"Microfone OK — sua voz está chegando bem (média {med:F0} dBFS)."; }
+                        if (!string.IsNullOrEmpty(avisosWindows)) { ok = false; texto = avisosWindows + " " + texto; }
+                        MostrarResultadoTesteMic(ok, texto);
+                        LogHelper.Sip(FormattableString.Invariant($"MIC_TESTE_FIM | microfone=\"{res.NomeEmUso}\" ok={ok} voz_s={vz:F1} total_s={tot:F1} media_dbfs={med:F1} pico_dbfs={mxf:F1} sinal={sinal}"));
+                    }
+                };
+                _testeMicTimer.Start();
+            }
+            catch (Exception ex)
+            {
+                PararTesteMicrofone();
+                MostrarResultadoTesteMic(false, $"Não foi possível abrir o microfone: {ex.Message}");
+            }
+        }
+
+        private void MostrarResultadoTesteMic(bool ok, string texto)
+        {
+            painelTesteMic.Visibility = Visibility.Visible;
+            txtTesteMicResultado.Text = texto;
+            txtTesteMicResultado.Foreground = new SolidColorBrush(ok ? Color.FromRgb(0x15, 0x80, 0x3D) : Color.FromRgb(0xB9, 0x1C, 0x1C));
+        }
+
+        private void PararTesteMicrofone()
+        {
+            try { _testeMicTimer?.Stop(); } catch { }
+            _testeMicTimer = null;
+            var w = _testeMicWaveIn;
+            _testeMicWaveIn = null;
+            if (w != null)
+            {
+                try { w.StopRecording(); } catch { }
+                try { w.Dispose(); } catch { }
+            }
+            try { btnTestarMicrofone.Content = "Testar microfone"; btnTestarMicrofone.IsEnabled = true; } catch { }
         }
     }
 }

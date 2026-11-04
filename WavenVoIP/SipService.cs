@@ -1012,6 +1012,7 @@ namespace WavenVoIP
                     StatusChanged?.Invoke($"Chamada enviada para {numeroFinal}");
                     RegistrarSinalSip($"CALL_CONNECTED | destino={destination}");
                     LogHelper.Sip($"CALL_CONNECTED | destino={destination}");
+                    IniciarMonitoramentoMicrofone();
                     LogHelper.Sip($"CALL_SETUP_DURATION_MS | ms={_swDiscagem.ElapsedMilliseconds}");
                     LogHelper.Sip($"CALL_RTP_TX_ACTIVE | destino={destination}");
                     LogHelper.Sip($"CALL_RTP_RX_ACTIVE | destino={destination}");
@@ -1095,6 +1096,7 @@ namespace WavenVoIP
                 StatusChanged?.Invoke("Chamada atendida.");
                 LimparChamadaRecebidaPendente(false);
                 LogHelper.Sip("CALL_CONNECTED | chamada recebida atendida");
+                IniciarMonitoramentoMicrofone();
                 LogHelper.Sip("CALL_RTP_TX_ACTIVE | chamada recebida");
                 LogHelper.Sip("CALL_RTP_RX_ACTIVE | chamada recebida");
             }
@@ -3501,7 +3503,18 @@ namespace WavenVoIP
                         catch { }
                     });
                 }
+                // v2.6.1 — medição de voz do operador (só números) e limpeza do aviso/fonte extra
+                var proxyFim = _muteableAudioSource;
+                RegistrarMedicaoMicrofone(proxyFim);
+                var fonteExtra = proxyFim?.FonteExtra;
                 _muteableAudioSource?.Detach();
+                if (fonteExtra != null)
+                {
+                    try { _ = fonteExtra.CloseAudio(); } catch { }
+                    LiberarAudioInputNativo(fonteExtra);
+                }
+                _micDesconectadoNaChamada = false;
+                DefinirAlertaMicrofone(null, OrigemAlertaMic.Nenhuma);
                 _muteableAudioSource = null;
                 _muteAntesDeEspera = false;
 
@@ -3615,41 +3628,318 @@ namespace WavenVoIP
         // indefinidamente, exigindo encerrar pelo Gerenciador de Tarefas. Agora é async e usa
         // await (nunca bloqueia a UI thread) com timeout de 3s por segurança — se o lookup não
         // responder a tempo, segue com o dispositivo padrão do sistema em vez de travar.
+        // ═══ v2.6.1 — microfone sem falha silenciosa ═══════════════════════════════════════════
+        // Dispositivo resolvido na criação da mídia, avisos para o operador e monitoramento da voz
+        // durante a chamada (ver Services/MicrofoneService e Services/DetectorVozMicrofone).
+
+        private enum OrigemAlertaMic { Nenhuma, Saude, Detector, Desconexao }
+        private ResolucaoAudio? _resolucaoMic;
+        private ResolucaoAudio? _resolucaoFone;
+        private AlertaMicrofone? _alertaMic;
+        private OrigemAlertaMic _origemAlertaMic = OrigemAlertaMic.Nenhuma;
+        private string _alertaMicDaChamada = string.Empty;    // pior alerta exibido nesta chamada (para a medição)
+        private readonly object _alertaMicLock = new();
+        private bool _micDesconectadoNaChamada;
+        private static bool _assinouDispositivos;
+
+        public event Action<AlertaMicrofone?>? AlertaMicrofoneMudou;
+        public AlertaMicrofone? AlertaMicrofoneAtual { get { lock (_alertaMicLock) return _alertaMic; } }
+        // Nível do microfone agora (dBFS, antes do ganho) para o medidor da tela; −120 = sem sinal/mudo.
+        public double NivelMicrofoneDb => _muteableAudioSource?.Detector.UltimoNivelDb ?? -120.0;
+        public string MicrofoneEmUso => _resolucaoMic?.NomeEmUso ?? string.Empty;
+
+        private void DefinirAlertaMicrofone(AlertaMicrofone? alerta, OrigemAlertaMic origem)
+        {
+            lock (_alertaMicLock)
+            {
+                if (Equals(_alertaMic, alerta)) return;
+                _alertaMic = alerta;
+                _origemAlertaMic = alerta == null ? OrigemAlertaMic.Nenhuma : origem;
+                if (alerta != null && (alerta.Grave || _alertaMicDaChamada.Length == 0)) _alertaMicDaChamada = alerta.Codigo;
+            }
+            try { AlertaMicrofoneMudou?.Invoke(alerta); } catch { }
+        }
+
+        private void RegistrarResolucao(ResolucaoAudio r, bool saida)
+        {
+            var tipo = saida ? "call_output" : "audio_input";
+            var cfgNome = r.NomeConfigurado;
+            switch (r.Situacao)
+            {
+                case SituacaoDispositivo.Ok:
+                case SituacaoDispositivo.Automatico:
+                    RegistrarSinalSip($"AUDIO_DEVICE_DETECTED | {tipo}={r.NomeEmUso} idx={r.IndiceWave} situacao={r.Situacao}");
+                    LogHelper.Sip($"AUDIO_DEVICE_DETECTED | {tipo}={r.NomeEmUso} idx={r.IndiceWave} situacao={r.Situacao}");
+                    break;
+                case SituacaoDispositivo.Renomeado:
+                    RegistrarSinalSip($"AUDIO_DEVICE_RENAMED | {tipo} de='{cfgNome}' para='{r.NomeEmUso}' idx={r.IndiceWave} {r.Detalhe}");
+                    LogHelper.Sip($"AUDIO_DEVICE_RENAMED | {tipo} de='{cfgNome}' para='{r.NomeEmUso}' idx={r.IndiceWave} {r.Detalhe}");
+                    // mesmo aparelho em outra porta USB: passa a valer o nome/ID novos
+                    if (_config != null && r.Escolhido != null)
+                    {
+                        if (saida) { _config.CallOutputDevice = r.Escolhido.Nome; _config.CallOutputDeviceId = r.Escolhido.Id; }
+                        else       { _config.AudioInputDevice = r.Escolhido.Nome; _config.AudioInputDeviceId = r.Escolhido.Id; }
+                        var novo = r.Escolhido;
+                        _ = Task.Run(() => SipConfig.AtualizarDispositivoRenomeado(saida, cfgNome, novo.Nome, novo.Id));
+                    }
+                    break;
+                default:
+                    // Mantida a linha da 2.6.0 (o painel conta AUDIO_DEVICE_RECOVERY) + aviso explícito.
+                    RegistrarSinalSip($"AUDIO_DEVICE_RECOVERY | {tipo}='{cfgNome}' nao encontrado, usando '{r.NomeEmUso}' {r.Detalhe}");
+                    LogHelper.Sip($"AUDIO_DEVICE_RECOVERY | {tipo}='{cfgNome}' nao encontrado, usando '{r.NomeEmUso}' {r.Detalhe}", LogLevel.WARN);
+                    if (!saida)
+                    {
+                        LogHelper.Warn($"MIC_DISPOSITIVO_AUSENTE | configurado=\"{cfgNome}\" em_uso=\"{r.NomeEmUso}\" {r.Detalhe}");
+                        DefinirAlertaMicrofone(new AlertaMicrofone(true, "Headset/microfone não encontrado",
+                            r.Escolhido != null
+                                ? $"O microfone \"{cfgNome}\" não foi encontrado. Esta ligação está usando \"{r.NomeEmUso}\" — o cliente pode não te ouvir bem. Reconecte o headset."
+                                : $"O microfone \"{cfgNome}\" não foi encontrado e não há outro microfone ativo. O cliente NÃO vai te ouvir. Conecte o headset.",
+                            false, "MIC_DISPOSITIVO_AUSENTE"), OrigemAlertaMic.Saude);
+                    }
+                    break;
+            }
+        }
+
+        // Chamado quando a chamada é atendida (entrada ou saída).
+        private void IniciarMonitoramentoMicrofone()
+        {
+            try
+            {
+                lock (_alertaMicLock) _alertaMicDaChamada = _alertaMic?.Codigo ?? string.Empty;
+                _micDesconectadoNaChamada = false;
+                _muteableAudioSource?.Detector.Iniciar();
+                if (!_assinouDispositivos)
+                {
+                    _assinouDispositivos = true;
+                    MicrofoneService.IniciarMonitoramento();
+                    MicrofoneService.DispositivosMudaram += () => { try { OnDispositivosMudaramDuranteChamada(); } catch { } };
+                }
+                var proxy = _muteableAudioSource;
+                _ = Task.Run(async () =>
+                {
+                    var saude = await VerificarSaudeMicrofoneAsync();
+                    if (saude == null || !ReferenceEquals(proxy, _muteableAudioSource)) return;
+                    RegistrarSinalSip($"MIC_SAUDE_CHAMADA | {saude.Resumo()}");
+                    if (!saude.Ok)
+                    {
+                        LogHelper.Warn($"MIC_PROBLEMA | {saude.Resumo()}");
+                        // ausência já foi avisada na criação da mídia com texto próprio
+                        var semAusencia = saude.Problemas.Where(p => p is not ProblemaMicrofone.Desconectado and not ProblemaMicrofone.Desativado).ToList();
+                        if (semAusencia.Count > 0)
+                            DefinirAlertaMicrofone(new AlertaMicrofone(saude.Grave, saude.Grave ? "O cliente pode não estar te ouvindo" : "Atenção ao microfone",
+                                saude.TextoParaOperador(), false, "MIC_" + semAusencia[0].ToString().ToUpperInvariant()), OrigemAlertaMic.Saude);
+                    }
+                });
+            }
+            catch { }
+        }
+
+        private Task<SaudeMicrofone?> VerificarSaudeMicrofoneAsync()
+        {
+            var c = _config;
+            return MicrofoneService.ComLimiteDeTempo<SaudeMicrofone>(() => MicrofoneService.VerificarMicrofone(
+                c?.AudioInputDevice, c?.AudioInputDeviceId, c?.CallOutputDevice, c?.CallOutputDeviceId));
+        }
+
+        private void TratarSuspeitaMicrofone(MuteableAudioSource proxy, SuspeitaMicrofone s)
+        {
+            if (!ReferenceEquals(proxy, _muteableAudioSource) || !IsInCall) return;
+            var nome = _resolucaoMic?.NomeEmUso ?? "padrão do Windows";
+            RegistrarSinalSip($"MIC_SUSPEITA | {s} microfone=\"{nome}\"");
+
+            if (s == SuspeitaMicrofone.Nenhuma)
+            {
+                // voz/sinal voltou: some o aviso do detector (avisos de dispositivo continuam)
+                if (_origemAlertaMic == OrigemAlertaMic.Detector) DefinirAlertaMicrofone(null, OrigemAlertaMic.Nenhuma);
+                return;
+            }
+            if (_origemAlertaMic is OrigemAlertaMic.Saude or OrigemAlertaMic.Desconexao && (_alertaMic?.Grave ?? false)) return;
+
+            _ = Task.Run(async () =>
+            {
+                var saude = await VerificarSaudeMicrofoneAsync();
+                if (!ReferenceEquals(proxy, _muteableAudioSource) || proxy.Detector.Atual == SuspeitaMicrofone.Nenhuma) return;
+                if (saude != null && saude.Grave)
+                {
+                    LogHelper.Warn($"MIC_SEM_SINAL_CHAMADA | suspeita={s} {saude.Resumo()}");
+                    DefinirAlertaMicrofone(new AlertaMicrofone(true, "O cliente não está te ouvindo",
+                        saude.TextoParaOperador(), true, "MIC_SEM_SINAL"), OrigemAlertaMic.Detector);
+                    return;
+                }
+                switch (s)
+                {
+                    case SuspeitaMicrofone.SemSinalDesdeInicio:
+                        DefinirAlertaMicrofone(new AlertaMicrofone(false, "Nenhum som chega do seu microfone",
+                            $"Desde que você atendeu, o microfone \"{nome}\" não entregou nenhum som. Se você já falou, o cliente não está te ouvindo — confira o headset ou use o microfone do computador.",
+                            true, "MIC_SEM_SINAL"), OrigemAlertaMic.Detector);
+                        break;
+                    case SuspeitaMicrofone.SemVozDesdeAtendimento:
+                        DefinirAlertaMicrofone(new AlertaMicrofone(false, "Sua voz não foi detectada",
+                            $"Ainda não detectamos sua voz nesta ligação (microfone \"{nome}\"). Fale normalmente: se a barra do microfone não se mexer, o cliente não está te ouvindo.",
+                            true, "MIC_SEM_VOZ"), OrigemAlertaMic.Detector);
+                        break;
+                    case SuspeitaMicrofone.SinalPerdido:
+                        // sem causa no Windows: pode ser headset com "portão de ruído" (zera o som no
+                        // silêncio) — só registra; o aviso grave vem da desconexão ou do mudo do Windows.
+                        RegistrarSinalSip($"MIC_SINAL_ZERADO_SEM_CAUSA | microfone=\"{nome}\"");
+                        break;
+                }
+            });
+        }
+
+        // Headset entrou/saiu durante a ligação.
+        private void OnDispositivosMudaramDuranteChamada()
+        {
+            if (!IsInCall || _muteableAudioSource == null || _config == null) return;
+            var proxy = _muteableAudioSource;
+            var emUso = _resolucaoMic?.Escolhido;
+            var cfg = _config;
+            List<EndpointAudio> eps;
+            try { eps = MicrofoneService.ListarEndpoints(saida: false); } catch { return; }
+
+            var emUsoAtivo = emUso == null || eps.Any(e => e.Ativo && string.Equals(e.Id, emUso.Id, StringComparison.OrdinalIgnoreCase));
+            if (!emUsoAtivo && !_micDesconectadoNaChamada)
+            {
+                _micDesconectadoNaChamada = true;
+                LogHelper.Warn($"MIC_DESCONECTADO_CHAMADA | microfone=\"{emUso?.Nome}\"");
+                RegistrarSinalSip($"MIC_DESCONECTADO_CHAMADA | microfone=\"{emUso?.Nome}\"");
+                DefinirAlertaMicrofone(new AlertaMicrofone(true, "Microfone desconectado durante a ligação",
+                    $"O microfone \"{emUso?.Nome}\" foi desconectado. O cliente NÃO está te ouvindo. Reconecte o headset (o áudio volta sozinho) ou use o microfone do computador.",
+                    true, "MIC_DESCONECTADO"), OrigemAlertaMic.Desconexao);
+                return;
+            }
+
+            // Reconectou: o microfone configurado voltou (mesmo aparelho, talvez em outra porta).
+            if (_micDesconectadoNaChamada || (_resolucaoMic?.Situacao == SituacaoDispositivo.Ausente))
+            {
+                var (sit, esc, _) = MicrofoneService.Escolher(cfg.AudioInputDevice, cfg.AudioInputDeviceId, eps);
+                if (esc != null && sit is SituacaoDispositivo.Ok or SituacaoDispositivo.Renomeado or SituacaoDispositivo.Automatico &&
+                    (emUso == null || !string.Equals(esc.Id, emUso.Id, StringComparison.OrdinalIgnoreCase) || _micDesconectadoNaChamada))
+                {
+                    if (TrocarMicrofoneDaChamada(proxy, esc, "reconectado"))
+                    {
+                        _micDesconectadoNaChamada = false;
+                        _resolucaoMic = new ResolucaoAudio(sit, cfg.AudioInputDevice, esc, MicrofoneService.IndiceWave(esc, false), "reconectado_na_chamada");
+                        DefinirAlertaMicrofone(null, OrigemAlertaMic.Nenhuma);
+                        StatusChanged?.Invoke($"Microfone reconectado: {esc.Nome}");
+                    }
+                }
+            }
+        }
+
+        // Botão "Usar microfone do computador" do aviso: troca a captura para o padrão do Windows
+        // (que não seja o aparelho que falhou). Vale só para esta ligação.
+        public bool UsarMicrofoneAlternativo()
+        {
+            var proxy = _muteableAudioSource;
+            if (!IsInCall || proxy == null) return false;
+            try
+            {
+                var emUso = _resolucaoMic?.Escolhido;
+                var eps = MicrofoneService.ListarEndpoints(saida: false).Where(e => e.Ativo &&
+                    (emUso == null || !string.Equals(e.Id, emUso.Id, StringComparison.OrdinalIgnoreCase))).ToList();
+                var alvo = eps.FirstOrDefault(e => e.PadraoComunicacao) ?? eps.FirstOrDefault(e => e.PadraoConsole) ?? eps.FirstOrDefault();
+                if (alvo == null)
+                {
+                    StatusChanged?.Invoke("Nenhum outro microfone ativo no computador.");
+                    return false;
+                }
+                if (!TrocarMicrofoneDaChamada(proxy, alvo, "operador_escolheu")) return false;
+                _resolucaoMic = new ResolucaoAudio(SituacaoDispositivo.Ausente, _config?.AudioInputDevice ?? string.Empty, alvo,
+                    MicrofoneService.IndiceWave(alvo, false), "trocado_pelo_operador");
+                _micDesconectadoNaChamada = false;
+                DefinirAlertaMicrofone(new AlertaMicrofone(false, "Usando outro microfone",
+                    $"Esta ligação agora usa \"{alvo.Nome}\". Fale e confira se a barra do microfone se mexe.", false, "MIC_TROCADO"),
+                    OrigemAlertaMic.Saude);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LogHelper.Warn($"MIC_TROCA_FALHOU | {ex.GetType().Name}: {ex.Message}");
+                return false;
+            }
+        }
+
+        private bool TrocarMicrofoneDaChamada(MuteableAudioSource proxy, EndpointAudio alvo, string motivo)
+        {
+            try
+            {
+                var idx = MicrofoneService.IndiceWave(alvo, saida: false);
+                if (idx < 0) { LogHelper.Warn($"MIC_TROCA_FALHOU | sem_indice microfone=\"{alvo.Nome}\""); return false; }
+                var nova = new WindowsAudioEndPoint(new AudioEncoder(), -1, idx, false, true);
+                var anterior = proxy.TrocarFonte(nova);
+                if (anterior != null)
+                {
+                    try { _ = anterior.CloseAudio(); } catch { }
+                    LiberarAudioInputNativo(anterior);
+                }
+                LogHelper.Warn($"MIC_TROCADO_NA_CHAMADA | motivo={motivo} microfone=\"{alvo.Nome}\" idx={idx}");
+                RegistrarSinalSip($"MIC_TROCADO_NA_CHAMADA | motivo={motivo} microfone=\"{alvo.Nome}\" idx={idx}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LogHelper.Warn($"MIC_TROCA_FALHOU | {ex.GetType().Name}: {ex.Message}");
+                return false;
+            }
+        }
+
+        // Fim da chamada: medição (só números) no log, no CSV local e — se houve problema — no painel.
+        private void RegistrarMedicaoMicrofone(MuteableAudioSource? proxy)
+        {
+            if (proxy == null) return;
+            try
+            {
+                var d = proxy.Detector;
+                if (d.SegundosMonitorados + d.SegundosPausado < 0.5) return;   // não chegou a conversar
+                string alerta; lock (_alertaMicLock) alerta = _alertaMicDaChamada;
+                var mic = _resolucaoMic?.NomeEmUso ?? "?";
+                var sit = _resolucaoMic?.Situacao.ToString() ?? "?";
+                var linha = $"AUDIO_CALL_MEDICAO | microfone=\"{mic}\" situacao={sit} {d.Resumo()} alerta={(alerta.Length == 0 ? "-" : alerta)}";
+                RegistrarSinalSip(linha);
+                LogHelper.Sip(linha);
+                MedicoesAudioChamada.Registrar(_config?.Ramal ?? string.Empty, mic, sit, d, alerta);
+                // incidente no painel só quando o operador provavelmente ficou sem ser ouvido
+                if ((d.SegundosMonitorados >= 3 && !d.HouveVoz) || alerta is "MIC_DESCONECTADO" or "MIC_DISPOSITIVO_AUSENTE" || (alerta == "MIC_SEM_SINAL" && d.SegundosSemSinal >= 3))
+                    LogHelper.Warn($"MIC_CHAMADA_COM_PROBLEMA | microfone=\"{mic}\" situacao={sit} {d.Resumo()} alerta={(alerta.Length == 0 ? "-" : alerta)}");
+            }
+            catch { }
+        }
+
         private async Task<VoIPMediaSession> CriarMediaAsync()
         {
             int outIdx = -1;
             int inIdx  = -1;
+            _resolucaoMic = null;
+            _resolucaoFone = null;
+            DefinirAlertaMicrofone(null, OrigemAlertaMic.Nenhuma);
 
             if (_config != null)
             {
-                // Lookup em paralelo reduz latência de enumeração de devices (~50-100ms ganho)
-                var outDev = string.IsNullOrEmpty(_config.CallOutputDevice) ? null : _config.CallOutputDevice;
-                var inDev  = string.IsNullOrEmpty(_config.AudioInputDevice)  ? null : _config.AudioInputDevice;
-                var tOut = outDev != null ? Task.Run(() => AudioDeviceService.IndiceWaveOutPorNome(outDev)) : Task.FromResult(-1);
-                var tIn  = inDev  != null ? Task.Run(() => AudioDeviceService.IndiceWaveInPorNome(inDev))  : Task.FromResult(-1);
-
-                var conjunto = Task.WhenAll(tOut, tIn);
-                var venceu = await Task.WhenAny(conjunto, Task.Delay(TimeSpan.FromSeconds(3)));
-                if (ReferenceEquals(venceu, conjunto) && conjunto.IsCompletedSuccessfully)
+                // v2.6.1 — dispositivo pelo ID do Windows + nome (inclusive com a numeração "N- "
+                // que o Windows acrescenta ao trocar o headset de porta). Limite de 3 s mantido.
+                var cfg = _config;
+                var tRes = Task.Run(() => (mic: MicrofoneService.Resolver(cfg.AudioInputDevice, cfg.AudioInputDeviceId, saida: false),
+                                           fone: MicrofoneService.Resolver(cfg.CallOutputDevice, cfg.CallOutputDeviceId, saida: true)));
+                var venceu = await Task.WhenAny(tRes, Task.Delay(TimeSpan.FromSeconds(3)));
+                if (ReferenceEquals(venceu, tRes) && tRes.IsCompletedSuccessfully)
                 {
-                    outIdx = tOut.Result;
-                    inIdx  = tIn.Result;
+                    _resolucaoMic = tRes.Result.mic;
+                    _resolucaoFone = tRes.Result.fone;
+                    inIdx  = _resolucaoMic.IndiceWave;
+                    outIdx = _resolucaoFone.IndiceWave;
+                    RegistrarResolucao(_resolucaoMic, saida: false);
+                    RegistrarResolucao(_resolucaoFone, saida: true);
                 }
                 else
                 {
-                    RegistrarSinalSip($"AUDIO_DEVICE_LOOKUP_TIMEOUT | outDev={outDev} inDev={inDev} | usando dispositivo padrao apos 3s");
-                    LogHelper.Sip($"AUDIO_DEVICE_LOOKUP_TIMEOUT | outDev={outDev} inDev={inDev} | usando dispositivo padrao apos 3s", LogLevel.WARN);
-                }
-
-                if (outDev != null)
-                {
-                    if (outIdx >= 0) { RegistrarSinalSip($"AUDIO_DEVICE_DETECTED | call_output={outDev} waveOutIdx={outIdx}"); LogHelper.Sip($"AUDIO_DEVICE_DETECTED | call_output={outDev} waveOutIdx={outIdx}"); }
-                    else             { RegistrarSinalSip($"AUDIO_DEVICE_RECOVERY | call_output='{outDev}' nao encontrado, usando default"); LogHelper.Sip($"AUDIO_DEVICE_RECOVERY | call_output='{outDev}' nao encontrado, fallback default", LogLevel.WARN); }
-                }
-                if (inDev != null)
-                {
-                    if (inIdx >= 0) { RegistrarSinalSip($"AUDIO_DEVICE_DETECTED | audio_input={inDev} waveInIdx={inIdx}"); LogHelper.Sip($"AUDIO_DEVICE_DETECTED | audio_input={inDev} waveInIdx={inIdx}"); }
-                    else            { RegistrarSinalSip($"AUDIO_DEVICE_RECOVERY | audio_input='{inDev}' nao encontrado, usando default"); LogHelper.Sip($"AUDIO_DEVICE_RECOVERY | audio_input='{inDev}' nao encontrado, fallback default", LogLevel.WARN); }
+                    _ = tRes.ContinueWith(t => _ = t.Exception, TaskScheduler.Default);
+                    RegistrarSinalSip($"AUDIO_DEVICE_LOOKUP_TIMEOUT | outDev={cfg.CallOutputDevice} inDev={cfg.AudioInputDevice} | usando dispositivo padrao apos 3s");
+                    LogHelper.Sip($"AUDIO_DEVICE_LOOKUP_TIMEOUT | outDev={cfg.CallOutputDevice} inDev={cfg.AudioInputDevice} | usando dispositivo padrao apos 3s", LogLevel.WARN);
+                    if (!string.IsNullOrEmpty(cfg.AudioInputDevice))
+                        DefinirAlertaMicrofone(new AlertaMicrofone(false, "Microfone não confirmado",
+                            $"O Windows demorou para responder e não foi possível confirmar o microfone \"{cfg.AudioInputDevice}\". A ligação usa o microfone padrão do Windows.",
+                            false, "MIC_TIMEOUT"), OrigemAlertaMic.Saude);
                 }
             }
 
@@ -3675,17 +3965,17 @@ namespace WavenVoIP
             var nivelarMic = _config?.MicAutoGainEnabled ?? true;
             if (nivelarMic)
             {
-                // ganho aprendido é por microfone; a consulta ao Windows tem limite de tempo
+                // ganho aprendido é por microfone (o que a chamada realmente usa — v2.6.1: já resolvido)
                 try
                 {
-                    var micCfg = _config?.AudioInputDevice ?? string.Empty;
-                    var tNome = Task.Run(() => MicNivelWindows.NomeCapturaAtual(micCfg));
-                    if (tNome.Wait(400)) MicAutoGain.DefinirDispositivo(tNome.Result);
+                    var nomeUso = _resolucaoMic?.Escolhido?.Nome;
+                    if (!string.IsNullOrEmpty(nomeUso)) MicAutoGain.DefinirDispositivo(nomeUso);
                 }
                 catch { }
             }
             var muteProxy = new MuteableAudioSource(audio, nivelarMic);
             _muteableAudioSource = muteProxy;
+            muteProxy.SuspeitaMudou += s => TratarSuspeitaMicrofone(muteProxy, s);
             LogHelper.Sip($"AUDIO_MUTE_PROXY_CREATED | TX=MuteableAudioSource RX=WindowsAudioEndPoint direto | mic_auto_gain={nivelarMic}");
 
             var sessao = new VoIPMediaSession(new SIPSorceryMedia.Abstractions.MediaEndPoints
@@ -3712,18 +4002,16 @@ namespace WavenVoIP
             // v2.5.0 — o nivelamento do microfone precisa saber quando o outro lado está falando
             // para não amplificar o retorno do alto-falante (eco). Só lê o nível do pacote; o
             // áudio recebido segue intocado para o alto-falante.
-            if (nivelarMic)
+            // v2.6.1 — sempre: o detector de voz também precisa saber quando o cliente está falando.
+            sessao.OnRtpPacketReceived += (_, tipo, pacote) =>
             {
-                sessao.OnRtpPacketReceived += (_, tipo, pacote) =>
+                try
                 {
-                    try
-                    {
-                        if (tipo == SDPMediaTypesEnum.audio)
-                            muteProxy.InformarAudioRemoto(pacote.Header.PayloadType, pacote.Payload);
-                    }
-                    catch { }
-                };
-            }
+                    if (tipo == SDPMediaTypesEnum.audio)
+                        muteProxy.InformarAudioRemoto(pacote.Header.PayloadType, pacote.Payload);
+                }
+                catch { }
+            };
             return sessao;
         }
 

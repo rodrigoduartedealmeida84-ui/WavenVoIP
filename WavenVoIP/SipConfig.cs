@@ -186,6 +186,27 @@ namespace WavenVoIP
 
             // Áudio
             if (RingVolume <= 0) RingVolume = 80;
+            AudioInputDeviceId ??= string.Empty;   // JSON com null explícito
+            CallOutputDeviceId ??= string.Empty;
+        }
+
+        // v2.6.1 — o Windows renumerou o headset (outra porta USB): grava o nome/ID atuais SÓ dos
+        // campos de áudio, relendo o arquivo para não sobrescrever outras mudanças. Só troca se o
+        // valor salvo ainda for o antigo.
+        public static void AtualizarDispositivoRenomeado(bool saida, string nomeAntigo, string nomeNovo, string idNovo)
+        {
+            try
+            {
+                var cfg = CarregarSalva();
+                if (cfg == null) return;
+                var atual = saida ? cfg.CallOutputDevice : cfg.AudioInputDevice;
+                if (!string.Equals(atual, nomeAntigo, StringComparison.OrdinalIgnoreCase)) return;
+                if (saida) { cfg.CallOutputDevice = nomeNovo; cfg.CallOutputDeviceId = idNovo; }
+                else       { cfg.AudioInputDevice = nomeNovo; cfg.AudioInputDeviceId = idNovo; }
+                cfg.Salvar();
+                LogHelper.Info($"AUDIO_DEVICE_RENAMED_SAVED | tipo={(saida ? "saida" : "microfone")} de=\"{nomeAntigo}\" para=\"{nomeNovo}\"");
+            }
+            catch (Exception ex) { LogHelper.Warn($"AUDIO_DEVICE_RENAMED_SAVE_FAIL | {ex.Message}"); }
         }
 
         // Kept for call-site compatibility — delegates to RepairDefaults.
@@ -428,6 +449,13 @@ namespace WavenVoIP
         public string CallOutputDevice  { get; set; } = string.Empty;  // áudio da ligação
         public string RingOutputDevice  { get; set; } = string.Empty;  // saída do toque
         public int    RingVolume        { get; set; } = 80;            // 0-100
+
+        // v2.6.1 — ID do Windows do microfone/áudio da ligação. O nome sozinho quebra quando o
+        // headset USB muda de porta ("Microfone (3- …)"); com o ID + nome sem a numeração o app
+        // reencontra o mesmo aparelho (ver Services/MicrofoneService). Vazio = só pelo nome.
+        // Campos novos são ignorados por versões antigas (rollback seguro).
+        public string AudioInputDeviceId { get; set; } = string.Empty;
+        public string CallOutputDeviceId { get; set; } = string.Empty;
 
         // ── Company config auto-sync v1.2.14 ──────────────────────────────────
         public string    CompanyConfigVersion  { get; set; } = string.Empty;

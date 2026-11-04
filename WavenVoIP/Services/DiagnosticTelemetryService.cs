@@ -164,6 +164,19 @@ namespace WavenVoIP.Services
             ["LOG_QUEUE_WARNING"] = TimeSpan.FromMinutes(10),
             ["EXCEPTION_BURST"]  = TimeSpan.FromMinutes(10),
             ["UNOBSERVED_EXCEPTION"] = TimeSpan.FromMinutes(5),
+            // v2.6.1 — microfone (ver SipService/MicrofoneService). Só números e nomes de dispositivo.
+            ["MIC_DISPOSITIVO_AUSENTE"]   = TimeSpan.FromMinutes(30),
+            ["MIC_PROBLEMA"]              = TimeSpan.FromMinutes(30),
+            ["MIC_PROBLEMA_OCIOSO"]       = TimeSpan.FromMinutes(60),
+            ["MIC_CHAMADA_COM_PROBLEMA"]  = TimeSpan.FromMinutes(2),
+            ["MIC_DESCONECTADO_CHAMADA"]  = TimeSpan.FromMinutes(5),
+            ["MIC_SEM_SINAL_CHAMADA"]     = TimeSpan.FromMinutes(5),
+            ["MIC_TROCADO_NA_CHAMADA"]    = TimeSpan.FromMinutes(5),
+        };
+        private static readonly string[] _eventosMicrofone =
+        {
+            "MIC_DISPOSITIVO_AUSENTE", "MIC_PROBLEMA_OCIOSO", "MIC_PROBLEMA", "MIC_CHAMADA_COM_PROBLEMA",
+            "MIC_DESCONECTADO_CHAMADA", "MIC_SEM_SINAL_CHAMADA", "MIC_TROCADO_NA_CHAMADA",
         };
 
         // Rate limit GLOBAL — rede de segurança final contra qualquer bug de log que
@@ -267,6 +280,19 @@ namespace WavenVoIP.Services
                     case var m when m.StartsWith("API_CONTACT_SYNC_START", StringComparison.Ordinal):
                         _lastOperation = "CONTACT_SYNC";
                         break;
+                }
+
+                if (e.Message.StartsWith("MIC_", StringComparison.Ordinal))
+                {
+                    foreach (var ev in _eventosMicrofone)
+                    {
+                        if (!e.Message.StartsWith(ev + " ", StringComparison.Ordinal) && !e.Message.StartsWith(ev + "|", StringComparison.Ordinal)) continue;
+                        var sep = e.Message.IndexOf('|');
+                        var det = sep >= 0 ? e.Message.Substring(sep + 1).Trim() : string.Empty;
+                        if (det.Length > 900) det = det.Substring(0, 900);
+                        _ = EnviarIncidenteAsync(ev, detalhe: det);
+                        break;
+                    }
                 }
 
                 if (e.Message.StartsWith("TASK_UNOBSERVED_EXCEPTION", StringComparison.Ordinal))

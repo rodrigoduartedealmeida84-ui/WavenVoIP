@@ -19,22 +19,37 @@ namespace WavenVoIP.Services
     // v2.5.0 — também nivela o microfone (MicAutoGain) quando o codec negociado é G.711:
     // decodifica o bloco, aplica o ganho automático com limitador e recodifica. O endpoint só
     // entrega áudio já codificado, por isso o ajuste é feito aqui. Outros codecs passam direto.
+    //
+    // v2.6.1 — mede cada bloco do microfone ANTES do ganho e alimenta o DetectorVozMicrofone
+    // (sem guardar áudio: só o nível). Também permite trocar a FONTE (microfone) no meio da
+    // chamada — headset reconectado ou "usar o microfone do computador" — sem mexer no áudio
+    // recebido (o alto-falante continua no endpoint original).
     internal sealed class MuteableAudioSource : IAudioSource
     {
-        private readonly WindowsAudioEndPoint _inner;
+        private readonly WindowsAudioEndPoint _inner;   // sink (alto-falante) + fonte original
+        private WindowsAudioEndPoint _fonte;            // fonte atual (microfone)
         private volatile bool _muted;
 
         private readonly MicAutoGain? _autoGain;
         private readonly object _autoGainLock = new();
         private AudioCodecsEnum _codec = AudioCodecsEnum.PCMU;
         private int _clockRate = 8000;
+        private AudioFormat? _formato;
         // O endpoint pode entregar o MESMO bloco pelos dois eventos (sample e frame): o bloco
-        // já nivelado é reaproveitado para não processar (nem avançar o estado) duas vezes.
+        // já processado é reaproveitado para não processar (nem avançar o estado) duas vezes.
         private byte[]? _ultimaEntrada;
         private byte[]? _ultimaSaida;
+        private byte[]? _ultimoBlocoMudo;
 
         // Silence byte negociado via SetAudioSourceFormat — padrão PCMU (mais comum no Asterisk)
         private byte _silenceByte = 0xFF;
+
+        public DetectorVozMicrofone Detector { get; } = new();
+        // Disparado (fora da thread de áudio) quando a suspeita do detector muda.
+        public event Action<SuspeitaMicrofone>? SuspeitaMudou;
+        private SuspeitaMicrofone _ultimaSuspeitaNotificada = SuspeitaMicrofone.Nenhuma;
+        private long _ultimoBlocoTick = Environment.TickCount64;
+        public long MsDesdeUltimoBlocoMicrofone => Environment.TickCount64 - System.Threading.Interlocked.Read(ref _ultimoBlocoTick);
 
         public event EncodedSampleDelegate? OnAudioSourceEncodedSample;
         public event Action<EncodedAudioFrame>? OnAudioSourceEncodedFrameReady;
@@ -50,23 +65,63 @@ namespace WavenVoIP.Services
         public MuteableAudioSource(WindowsAudioEndPoint inner, bool nivelarMicrofone = false)
         {
             _inner = inner;
+            _fonte = inner;
             _autoGain = nivelarMicrofone ? new MicAutoGain() : null;
-            _inner.OnAudioSourceEncodedSample     += RelayEncodedSample;
-            _inner.OnAudioSourceEncodedFrameReady += RelayEncodedFrame;
-            _inner.OnAudioSourceError             += e => OnAudioSourceError?.Invoke(e);
+            Assinar(_fonte);
         }
 
+        private void Assinar(WindowsAudioEndPoint e)
+        {
+            e.OnAudioSourceEncodedSample     += RelayEncodedSample;
+            e.OnAudioSourceEncodedFrameReady += RelayEncodedFrame;
+            e.OnAudioSourceError             += RelayErro;
+        }
+
+        private void Desassinar(WindowsAudioEndPoint e)
+        {
+            e.OnAudioSourceEncodedSample     -= RelayEncodedSample;
+            e.OnAudioSourceEncodedFrameReady -= RelayEncodedFrame;
+            e.OnAudioSourceError             -= RelayErro;
+        }
+
+        private void RelayErro(string e) => OnAudioSourceError?.Invoke(e);
+
         public void SetMute(bool muted) => _muted = muted;
+        public bool Mudo => _muted;
+
+        // Fonte extra criada na troca de microfone (null = usando a original).
+        public WindowsAudioEndPoint? FonteExtra => ReferenceEquals(_fonte, _inner) ? null : _fonte;
+
+        // v2.6.1 — passa a capturar de outro microfone. Retorna a fonte extra anterior (se houver)
+        // para quem chamou fechar/liberar.
+        public WindowsAudioEndPoint? TrocarFonte(WindowsAudioEndPoint nova)
+        {
+            var antiga = _fonte;
+            Desassinar(antiga);
+            if (_formato.HasValue) nova.SetAudioSourceFormat(_formato.Value);
+            Assinar(nova);
+            _fonte = nova;
+            _ = nova.StartAudio();
+            if (ReferenceEquals(antiga, _inner))
+            {
+                // A fonte original continua no endpoint que também toca o áudio recebido: só pausa a
+                // captura (o alto-falante não é afetado — PauseAudio do endpoint pausa a fonte).
+                try { _ = _inner.PauseAudio(); } catch { }
+                return null;
+            }
+            return antiga;
+        }
 
         // v2.5.0 — nível do áudio RECEBIDO (pacote RTP G.711 que vai para o alto-falante). O
         // nivelamento usa isso para não tratar como fala — nem amplificar — o retorno do
         // alto-falante captado pelo microfone (ver MicAutoGain, supressão de eco).
+        // v2.6.1 — medido sempre (o detector sabe quando o cliente está falando).
         private double _farDb = -120.0;
         private long _farTick;
 
         public void InformarAudioRemoto(int payloadType, byte[]? payload)
         {
-            if (_autoGain == null || payload == null || payload.Length == 0) return;
+            if (payload == null || payload.Length == 0) return;
             if (payloadType != 0 && payloadType != 8) return;      // só G.711 (PCMU/PCMA)
             double soma = 0;
             if (payloadType == 8)
@@ -96,15 +151,27 @@ namespace WavenVoIP.Services
             lock (_autoGainLock) return (_autoGain.FalaEntradaMediaDb, _autoGain.BlocosFala, _autoGain.BlocosLimitados);
         }
 
-        private byte[] Nivelar(byte[] encoded)
+        private void NotificarSuspeita(SuspeitaMicrofone s)
         {
-            if (_autoGain == null || encoded == null || encoded.Length == 0) return encoded!;
+            if (s == _ultimaSuspeitaNotificada) return;
+            _ultimaSuspeitaNotificada = s;
+            var h = SuspeitaMudou;
+            if (h != null) Task.Run(() => { try { h(s); } catch { } });
+        }
+
+        // Mede (detector) e nivela (MicAutoGain) um bloco do microfone.
+        private byte[] Processar(byte[] encoded)
+        {
+            if (encoded == null || encoded.Length == 0) return encoded!;
             var codec = _codec;
             if (codec != AudioCodecsEnum.PCMU && codec != AudioCodecsEnum.PCMA) return encoded;
 
+            SuspeitaMicrofone suspeita;
+            byte[] saida;
             lock (_autoGainLock)
             {
                 if (ReferenceEquals(encoded, _ultimaEntrada) && _ultimaSaida != null) return _ultimaSaida;
+                System.Threading.Interlocked.Exchange(ref _ultimoBlocoTick, Environment.TickCount64);
 
                 var pcm = new short[encoded.Length];
                 if (codec == AudioCodecsEnum.PCMA)
@@ -112,25 +179,49 @@ namespace WavenVoIP.Services
                 else
                     for (int i = 0; i < pcm.Length; i++) pcm[i] = MuLawDecoder.MuLawToLinearSample(encoded[i]);
 
-                _autoGain.Processar(pcm, _clockRate, FarDbAtual());
+                var (db, zero) = DetectorVozMicrofone.Medir(pcm);
+                var far = FarDbAtual();
+                suspeita = Detector.Processar(db, zero, pcm.Length / (double)_clockRate, pausado: false, far);
 
-                var saida = new byte[encoded.Length];
-                if (codec == AudioCodecsEnum.PCMA)
-                    for (int i = 0; i < pcm.Length; i++) saida[i] = ALawEncoder.LinearToALawSample(pcm[i]);
-                else
-                    for (int i = 0; i < pcm.Length; i++) saida[i] = MuLawEncoder.LinearToMuLawSample(pcm[i]);
+                saida = encoded;
+                if (_autoGain != null)
+                {
+                    _autoGain.Processar(pcm, _clockRate, far);
+                    saida = new byte[encoded.Length];
+                    if (codec == AudioCodecsEnum.PCMA)
+                        for (int i = 0; i < pcm.Length; i++) saida[i] = ALawEncoder.LinearToALawSample(pcm[i]);
+                    else
+                        for (int i = 0; i < pcm.Length; i++) saida[i] = MuLawEncoder.LinearToMuLawSample(pcm[i]);
+                }
 
                 _ultimaEntrada = encoded;
                 _ultimaSaida = saida;
-                return saida;
             }
+            NotificarSuspeita(suspeita);
+            return saida;
+        }
+
+        // Mudo/espera: o detector fica pausado (nunca alerta por escolha do operador).
+        private void RegistrarBlocoMudo(byte[] original)
+        {
+            if (original == null || original.Length == 0) return;
+            SuspeitaMicrofone s;
+            lock (_autoGainLock)
+            {
+                if (ReferenceEquals(original, _ultimoBlocoMudo)) return;
+                _ultimoBlocoMudo = original;
+                System.Threading.Interlocked.Exchange(ref _ultimoBlocoTick, Environment.TickCount64);
+                s = Detector.Processar(-120.0, true, original.Length / (double)_clockRate, pausado: true);
+            }
+            NotificarSuspeita(s);
         }
 
         // Desconecta do inner ao encerrar chamada para evitar memory leak
         public void Detach()
         {
-            _inner.OnAudioSourceEncodedSample     -= RelayEncodedSample;
-            _inner.OnAudioSourceEncodedFrameReady -= RelayEncodedFrame;
+            Detector.Parar();
+            Desassinar(_inner);
+            if (!ReferenceEquals(_fonte, _inner)) Desassinar(_fonte);
         }
 
         private void RelayEncodedSample(uint durationRtpUnits, byte[] sample)
@@ -139,6 +230,7 @@ namespace WavenVoIP.Services
             if (handler == null) return;
             if (_muted)
             {
+                RegistrarBlocoMudo(sample);
                 // Silêncio válido G.711: preenche com _silenceByte (0xFF para PCMU, 0xD5 para PCMA).
                 // NÃO usar all-zeros — 0x00 em G.711 decodifica para ruído alto (~-8031 linear PCM).
                 var silence = new byte[sample.Length];
@@ -147,7 +239,7 @@ namespace WavenVoIP.Services
             }
             else
             {
-                handler.Invoke(durationRtpUnits, Nivelar(sample));
+                handler.Invoke(durationRtpUnits, Processar(sample));
             }
         }
 
@@ -157,6 +249,7 @@ namespace WavenVoIP.Services
             if (handler == null) return;
             if (_muted)
             {
+                RegistrarBlocoMudo(frame.EncodedAudio);
                 var silence = new byte[frame.EncodedAudio.Length];
                 Array.Fill(silence, _silenceByte);
                 var silenceFrame = new EncodedAudioFrame(
@@ -166,36 +259,34 @@ namespace WavenVoIP.Services
                     silence);
                 handler.Invoke(silenceFrame);
             }
-            else if (_autoGain == null)
-            {
-                handler.Invoke(frame);
-            }
             else
             {
-                var nivelado = Nivelar(frame.EncodedAudio);
-                handler.Invoke(ReferenceEquals(nivelado, frame.EncodedAudio)
+                var processado = Processar(frame.EncodedAudio);
+                handler.Invoke(ReferenceEquals(processado, frame.EncodedAudio)
                     ? frame
-                    : new EncodedAudioFrame(frame.MediaStreamIndex, frame.AudioFormat, frame.DurationMilliSeconds, nivelado));
+                    : new EncodedAudioFrame(frame.MediaStreamIndex, frame.AudioFormat, frame.DurationMilliSeconds, processado));
             }
         }
 
-        // Toda gestão de ciclo de vida delega ao inner endpoint
-        public Task PauseAudio()  => _inner.PauseAudio();
-        public Task ResumeAudio() => _inner.ResumeAudio();
-        public Task StartAudio()  => _inner.StartAudio();
-        public Task CloseAudio()  => _inner.CloseAudio();
+        // Toda gestão de ciclo de vida delega ao inner endpoint (e à fonte extra, se houver)
+        public Task PauseAudio()  => FonteExtra is { } f ? Task.WhenAll(_inner.PauseAudio(), f.PauseAudio()) : _inner.PauseAudio();
+        public Task ResumeAudio() => FonteExtra is { } f ? f.ResumeAudio() : _inner.ResumeAudio();
+        public Task StartAudio()  => FonteExtra is { } f ? f.StartAudio() : _inner.StartAudio();
+        public Task CloseAudio()  => FonteExtra is { } f ? Task.WhenAll(_inner.CloseAudio(), f.CloseAudio()) : _inner.CloseAudio();
 
         public List<AudioFormat> GetAudioSourceFormats()            => _inner.GetAudioSourceFormats();
         public void RestrictFormats(Func<AudioFormat, bool> filter) => _inner.RestrictFormats(filter);
         public bool HasEncodedAudioSubscribers() => OnAudioSourceEncodedSample != null;
-        public bool IsAudioSourcePaused()        => _inner.IsAudioSourcePaused();
+        public bool IsAudioSourcePaused()        => _fonte.IsAudioSourcePaused();
         public void ExternalAudioSourceRawSample(AudioSamplingRatesEnum samplingRate, uint durationMilliseconds, short[] sample)
-            => _inner.ExternalAudioSourceRawSample(samplingRate, durationMilliseconds, sample);
+            => _fonte.ExternalAudioSourceRawSample(samplingRate, durationMilliseconds, sample);
 
         // Intercepta a negociação de formato para definir o silence byte correto
         public void SetAudioSourceFormat(AudioFormat audioFormat)
         {
             _inner.SetAudioSourceFormat(audioFormat);
+            if (!ReferenceEquals(_fonte, _inner)) _fonte.SetAudioSourceFormat(audioFormat);
+            _formato = audioFormat;
             // PCMA (G.711 a-law, Codec=PCMA ou FormatID=8): silence = 0xD5
             // PCMU (G.711 u-law, Codec=PCMU ou FormatID=0): silence = 0xFF
             // Outros codecs (G.722, Opus, etc.): 0xFF como aproximação segura

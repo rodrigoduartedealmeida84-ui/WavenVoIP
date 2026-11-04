@@ -31,12 +31,16 @@ namespace WavenVoIP.Services
 
         private static MMDevice? Localizar(MMDeviceEnumerator en, string nomeConfigurado)
         {
-            MMDevice? d = null;
-            if (!string.IsNullOrWhiteSpace(nomeConfigurado))
-                d = en.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active)
-                      .FirstOrDefault(x => x.FriendlyName.Equals(nomeConfigurado, StringComparison.OrdinalIgnoreCase));
+            // v2.6.1 — mesmo critério da chamada (ID/nome/nome sem a numeração do Windows), para
+            // ajustar o microfone que a ligação realmente usa.
+            try
+            {
+                var res = MicrofoneService.Resolver(nomeConfigurado, null, saida: false);
+                if (res.Escolhido != null) return en.GetDevice(res.Escolhido.Id);
+            }
+            catch { }
             // microfone configurado ausente (ex.: headset desconectado): a chamada usa o padrão do Windows
-            return d ?? en.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications);
+            return en.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Console);
         }
 
         // Nome do microfone que a chamada realmente usa (para guardar o ganho por dispositivo).

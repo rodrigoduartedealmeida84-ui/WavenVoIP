@@ -125,6 +125,84 @@ namespace WavenVoIP.Views
         }
         private bool _houveAtendente;
 
+        // ── v2.6.1: aviso de microfone e medidor de nível ─────────────────────────────
+        public event Func<bool>? OnUsarMicrofoneAlternativoRequested;
+        private double _alturaAlertaMic;
+
+        public void MostrarAlertaMicrofone(Services.AlertaMicrofone? alerta)
+        {
+            if (!Dispatcher.CheckAccess()) { Dispatcher.BeginInvoke(() => MostrarAlertaMicrofone(alerta)); return; }
+            try
+            {
+                if (alerta == null)
+                {
+                    painelAlertaMic.Visibility = Visibility.Collapsed;
+                }
+                else
+                {
+                    var grave = alerta.Grave;
+                    painelAlertaMic.Background  = new SolidColorBrush(grave ? Color.FromRgb(0xFE, 0xF2, 0xF2) : Color.FromRgb(0xFF, 0xFB, 0xEB));
+                    painelAlertaMic.BorderBrush = new SolidColorBrush(grave ? Color.FromRgb(0xFC, 0xA5, 0xA5) : Color.FromRgb(0xFC, 0xD3, 0x4D));
+                    txtAlertaMicIcone.Foreground  = new SolidColorBrush(grave ? Color.FromRgb(0xDC, 0x26, 0x26) : Color.FromRgb(0xD9, 0x77, 0x06));
+                    txtAlertaMicTitulo.Foreground = new SolidColorBrush(grave ? Color.FromRgb(0x99, 0x1B, 0x1B) : Color.FromRgb(0x92, 0x40, 0x0E));
+                    txtAlertaMicTexto.Foreground  = new SolidColorBrush(grave ? Color.FromRgb(0x7F, 0x1D, 0x1D) : Color.FromRgb(0x78, 0x35, 0x0F));
+                    txtAlertaMicTitulo.Text = alerta.Titulo;
+                    txtAlertaMicTexto.Text = alerta.Texto;
+                    btnUsarMicComputador.Visibility = alerta.OferecerTroca ? Visibility.Visible : Visibility.Collapsed;
+                    btnUsarMicComputador.IsEnabled = true;
+                    painelAlertaMic.Visibility = Visibility.Visible;
+                }
+                // a janela cresce/encolhe para o aviso sem cobrir os botões (mesma regra dos participantes)
+                Dispatcher.BeginInvoke(new Action(AjustarAlturaAlertaMic), DispatcherPriority.Loaded);
+            }
+            catch { }
+        }
+
+        private void AjustarAlturaAlertaMic()
+        {
+            try
+            {
+                var extra = painelAlertaMic.Visibility == Visibility.Visible ? painelAlertaMic.ActualHeight + 10 : 0;
+                if (Math.Abs(extra - _alturaAlertaMic) < 0.5 || WindowState != WindowState.Normal) return;
+                var delta = extra - _alturaAlertaMic;
+                MinHeight = Math.Max(0, MinHeight + delta);
+                Height += delta;
+                Top = Math.Max(SystemParameters.WorkArea.Top, Top - delta);
+                _alturaAlertaMic = extra;
+            }
+            catch { }
+        }
+
+        // nivelDb = nível do microfone agora (−120 = sem sinal). Barra verde com voz, cinza parada.
+        public void AtualizarNivelMicrofone(double nivelDb, bool mudoOuEspera)
+        {
+            try
+            {
+                var largura = (gridNivelMic.ActualWidth > 30 ? gridNivelMic.ActualWidth - 24 : 0);
+                var frac = mudoOuEspera ? 0 : Math.Clamp((nivelDb + 60.0) / 50.0, 0.0, 1.0);   // −60 dBFS = vazio, −10 = cheio
+                barraNivelMic.Width = largura * frac;
+                barraNivelMic.Background = nivelDb > -50 ? Brushes.LimeGreen : Brushes.Silver;
+            }
+            catch { }
+        }
+
+        public void DefinirMicrofoneEmUso(string nome)
+        {
+            if (!Dispatcher.CheckAccess()) { Dispatcher.BeginInvoke(() => DefinirMicrofoneEmUso(nome)); return; }
+            try { txtMicEmUso.Text = string.IsNullOrWhiteSpace(nome) ? string.Empty : $"Microfone: {nome}"; txtMicEmUso.ToolTip = nome; } catch { }
+        }
+
+        private void BtnUsarMicComputador_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                btnUsarMicComputador.IsEnabled = false;
+                var ok = OnUsarMicrofoneAlternativoRequested?.Invoke() ?? false;
+                if (!ok) btnUsarMicComputador.IsEnabled = true;
+            }
+            catch { btnUsarMicComputador.IsEnabled = true; }
+        }
+
         public void MostrarAvisoParticipantes(string texto)
         {
             if (!Dispatcher.CheckAccess()) { Dispatcher.BeginInvoke(() => MostrarAvisoParticipantes(texto)); return; }
