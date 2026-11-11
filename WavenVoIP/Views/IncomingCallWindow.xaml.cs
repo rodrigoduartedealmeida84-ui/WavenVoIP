@@ -107,12 +107,10 @@ namespace WavenVoIP.Views
                     ? toqueArquivo
                     : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, toqueArquivo);
 
-                // Dispositivo de toque — preferir SipConfig.RingOutputDevice
-                var ringNome = sipCfg?.RingOutputDevice ?? string.Empty;
-                var ringId   = string.IsNullOrEmpty(ringNome)
-                    ? (audioCfg.DispositivoToqueId ?? string.Empty)
-                    : (Services.AudioDeviceService.BuscarIdDispositivoPorNome(ringNome, saida: true) ?? string.Empty);
-                if (string.IsNullOrEmpty(ringNome)) ringNome = audioCfg.DispositivoToqueNome ?? string.Empty;
+                // v2.6.2 — dispositivo de toque: o configurado (ID + nome, reencontrado mesmo em outra
+                // porta USB) ou Automático = alto-falante do computador. Resolvido no RingtoneService,
+                // igual ao botão "Testar toque".
+                var (ringNome, ringId) = Services.AudioDeviceService.ConfiguracaoToque(sipCfg, audioCfg);
 
                 // Volume
                 var volume = sipCfg != null && sipCfg.RingVolume > 0
@@ -120,10 +118,12 @@ namespace WavenVoIP.Views
                     : 0.8f;
 
                 if (_toqueParado) return;
-                _ringtoneService.Tocar(fullPath, ringId, ringNome, "IncomingCallWindow", volume: volume);
+                var r = _ringtoneService.Tocar(fullPath, ringId, ringNome, "IncomingCallWindow", volume: volume);
                 if (_toqueParado) _ringtoneService.Parar();
+                else if (!r.Tocando && r.Motivo != "cancelado")
+                    Services.LogHelper.Warn($"RING_INCOMING_SILENT | motivo={r.Motivo} erro={r.Erro}");
             }
-            catch { }
+            catch (Exception ex) { try { Services.LogHelper.Warn($"RING_INCOMING_ERROR | {ex.Message}"); } catch { } }
             });
         }
 

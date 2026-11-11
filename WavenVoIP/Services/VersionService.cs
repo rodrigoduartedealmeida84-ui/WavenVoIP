@@ -4,15 +4,25 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "2.6.1";
+        public const string Versao  = "2.6.2";
         public const string NomeApp = "WavenVoIP";
 
-        public static readonly DateTime DataBuild = new DateTime(2026, 11, 4);
+        public static readonly DateTime DataBuild = new DateTime(2026, 11, 11);
 
         public static string VersaoCompleta => $"{NomeApp} v{Versao}";
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v2.6.2 — Toque da chamada no alto-falante certo (11/11/2026)\n" +
+            "• [FIX] Com headset conectado o toque sai no alto-falante do computador e a conversa no headset; o headset USB e reconhecido pelo barramento USB/Bluetooth, nao so pelo nome (o Intelbras se apresenta ao Windows como \"alto-falante\")\n" +
+            "• [FIX] Dispositivo do toque guardado pelo ID do Windows + nome: trocar o headset ou a caixa de porta USB (\"3- ...\") nao perde a escolha\n" +
+            "• [FIX] Se a saida do toque sumir no meio do toque (USB desconectado/trocado de porta), o toque recomeca sozinho na melhor saida disponivel; se a escolhida nao abrir, usa o padrao do Windows (antes ficava em silencio)\n" +
+            "• [FIX] O rotulo \"Automatico (Realtek/Speaker)\" de versoes antigas nao e mais tratado como nome de dispositivo\n" +
+            "• [NEW] \"Testar toque\" usa o mesmo caminho da chamada recebida, nao trava a tela e mostra onde o toque saiu; clicar de novo para\n" +
+            "• [FIX] \"Erro inesperado\" ao passar o mouse nos botoes depois que o Windows Update troca o .NET com o app aberto: os componentes de acessibilidade sao carregados na abertura e, se o runtime sumir, aparece um unico aviso para reabrir o app\n" +
+            "• [NEW] Aviso de chamadas sem toque: \"Testar toque\" e a tela principal avisam quando o alto-falante do toque esta no mudo ou com volume 0 no Windows, ou quando o Waven VoIP esta no mudo/0% no Mixer de volume (caso real: alto-falante no mudo do Windows, toque inaudivel)\n" +
+            "• Microfone e audio da ligacao continuam como na 2.6.1\n" +
+            "\n" +
             "v2.6.1 — Microfone sem falha silenciosa (04/11/2026)\n" +
             "• [FIX] Headset USB trocado de porta (o Windows passa a chamar de \"Microfone (3- ...)\") continua sendo o microfone da ligacao; antes o app passava sem avisar para o microfone padrao do Windows e o cliente podia deixar de ouvir o operador\n" +
             "• [NEW] O microfone e guardado pelo ID do Windows + nome; o aparelho certo e usado mesmo com outro nome\n" +

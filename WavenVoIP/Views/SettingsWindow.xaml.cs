@@ -132,7 +132,7 @@ namespace WavenVoIP.Views
 
             cmbMicrofone.Items.Add("Automático");
             cmbAltoFalante.Items.Add("Automático");
-            cmbDispToque.Items.Add(new RingDeviceItem("", "Automático"));
+            cmbDispToque.Items.Add(new RingDeviceItem("", "Automático", "Automático (alto-falante do computador)"));
 
             try
             {
@@ -142,12 +142,17 @@ namespace WavenVoIP.Views
                     cmbMicrofone.Items.Add(mic.FriendlyName);
 
                 foreach (var speaker in enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active))
-                {
                     cmbAltoFalante.Items.Add(speaker.FriendlyName);
-                    cmbDispToque.Items.Add(new RingDeviceItem(speaker.ID, speaker.FriendlyName));
-                }
             }
             catch { }
+
+            // v2.6.2 — saídas do toque com o tipo (headset fica identificado na lista)
+            foreach (var s in AudioDeviceService.ListarSaidasParaToque())
+            {
+                var tipo = AudioDeviceService.ClassificarSaida(s);
+                var rotulo = tipo == AudioDeviceService.TipoSaida.Headset ? $"{s.Nome}  — headset" : s.Nome;
+                cmbDispToque.Items.Add(new RingDeviceItem(s.Id, s.Nome, rotulo));
+            }
 
             // Selecionar a partir do SipConfig (novos campos)
             // v2.6.1 — o mesmo aparelho em outra porta USB ("3- …") é reconhecido; e um aparelho
@@ -156,10 +161,7 @@ namespace WavenVoIP.Views
             SelecionarDispositivo(cmbMicrofone, _sipConfig.AudioInputDevice, _sipConfig.AudioInputDeviceId, saida: false);
             SelecionarDispositivo(cmbAltoFalante, _sipConfig.CallOutputDevice, _sipConfig.CallOutputDeviceId, saida: true);
 
-            cmbDispToque.SelectedItem = string.IsNullOrEmpty(_sipConfig.RingOutputDevice)
-                ? cmbDispToque.Items[0]
-                : cmbDispToque.Items.Cast<object>().FirstOrDefault(i => i is RingDeviceItem r && r.Nome == _sipConfig.RingOutputDevice)
-                  ?? cmbDispToque.Items[0];
+            SelecionarDispositivoToque();
 
             sldVolumeToque.Value = _sipConfig.RingVolume > 0 ? _sipConfig.RingVolume : 80;
             if (txtVolumeToqueVal != null)
@@ -176,16 +178,42 @@ namespace WavenVoIP.Views
                 txtToque.Text = dlg.FileName;
         }
 
-        private void BtnTestarToque_Click(object sender, RoutedEventArgs e)
+        // v2.6.2 — reencontra o dispositivo salvo pelo ID, nome ou nome sem a numeração da porta
+        // USB; se estiver desconectado, continua visível e selecionado (não vira "Automático").
+        private void SelecionarDispositivoToque()
         {
             try
             {
-                _testRing?.Parar();
-                _testRing = new RingtoneService();
+                var (nome, id) = AudioDeviceService.ConfiguracaoToque(_sipConfig, _config);
+                if (nome.Length == 0) { cmbDispToque.SelectedItem = cmbDispToque.Items[0]; return; }
+                var saidas = cmbDispToque.Items.OfType<RingDeviceItem>().Where(r => !r.Automatico)
+                    .Select(r => new AudioDeviceService.SaidaAudio(r.Id, r.Nome, true, -1, string.Empty, false)).ToList();
+                var (esc, motivo) = AudioDeviceService.EscolherSaidaToque(nome, id, saidas);
+                if (esc != null && motivo.StartsWith("configurado", StringComparison.Ordinal) && !motivo.StartsWith("configurado_ausente", StringComparison.Ordinal))
+                {
+                    cmbDispToque.SelectedItem = cmbDispToque.Items.OfType<RingDeviceItem>().First(r => r.Id == esc.Id);
+                    return;
+                }
+                var desc = new RingDeviceItem(id, nome, desconectado: true);
+                cmbDispToque.Items.Add(desc);
+                cmbDispToque.SelectedItem = desc;
+            }
+            catch { cmbDispToque.SelectedItem = cmbDispToque.Items[0]; }
+        }
 
+        private System.Threading.CancellationTokenSource? _testeToqueCts;
+        private const int TesteToqueSegundos = 5;
+
+        private async void BtnTestarToque_Click(object sender, RoutedEventArgs e)
+        {
+            // Clicar de novo durante o teste = parar
+            if (_testeToqueCts != null) { PararTesteToque(); return; }
+            try
+            {
                 var dispSelecionado = cmbDispToque?.SelectedItem as RingDeviceItem;
-                var deviceId   = dispSelecionado?.Id   ?? string.Empty;
-                var deviceNome = dispSelecionado?.Nome ?? string.Empty;
+                string deviceId, deviceNome;
+                if (dispSelecionado == null || dispSelecionado.Automatico) { deviceId = string.Empty; deviceNome = string.Empty; }
+                else { deviceId = dispSelecionado.Id; deviceNome = dispSelecionado.Nome; }
                 var volume = sldVolumeToque != null ? (float)sldVolumeToque.Value / 100f : 0.8f;
 
                 var path = string.IsNullOrWhiteSpace(txtToque?.Text)
@@ -197,18 +225,86 @@ namespace WavenVoIP.Views
 
                 if (!System.IO.File.Exists(fullPath))
                 {
-                    MessageBox.Show("Arquivo de toque não encontrado:\n" + fullPath, "Waven VoIP");
+                    MostrarResultadoTesteToque(false, "Arquivo de toque não encontrado:\n" + fullPath);
                     return;
                 }
 
+                _testRing ??= new RingtoneService();
                 var svc = _testRing;
-                svc.Tocar(fullPath, deviceId, deviceNome, "TestButton", loop: false, volume: volume);
-                System.Threading.Tasks.Task.Delay(4000).ContinueWith(_ => Dispatcher.Invoke(() => svc.Parar()));
+                var cts = new System.Threading.CancellationTokenSource();
+                _testeToqueCts = cts;
+                btnTestarToque.Content = "Parar";
+                MostrarResultadoTesteToque(null, "Procurando a saída do toque…");
+
+                // Enumerar e abrir o áudio fora da interface (driver USB lento não trava a tela)
+                var r = await System.Threading.Tasks.Task.Run(() => svc.Tocar(fullPath, deviceId, deviceNome, "TestButton", loop: false, volume: volume));
+                if (cts.IsCancellationRequested) return;
+                if (!r.Tocando)
+                {
+                    FinalizarTesteToque(cts);
+                    MostrarResultadoTesteToque(false, "O toque não saiu em nenhum dispositivo. " + (r.Erro ?? string.Empty));
+                    return;
+                }
+                var aviso = r.Motivo switch
+                {
+                    var m when m.StartsWith("configurado_ausente") => $"O dispositivo escolhido não está conectado. Tocando em: {r.Dispositivo}",
+                    "padrao_windows" => $"Tocando no padrão do Windows: {r.Dispositivo}",
+                    _ => $"Tocando em: {r.Dispositivo}"
+                };
+                bool ok = !r.Motivo.StartsWith("configurado_ausente") && r.Motivo != "padrao_windows";
+                // v2.6.2 — tocar no dispositivo certo não basta: mudo/volume 0 no Windows = sem som
+                var silencio = r.Estado?.Aviso(volume);
+                if (silencio != null)
+                {
+                    MostrarResultadoTesteToque(false, $"⚠ SEM SOM — {silencio} Corrija no ícone de som do Windows (ou no Mixer de volume) e teste de novo. ({aviso})");
+                    txtTesteToqueResultado.Foreground = new SolidColorBrush(Color.FromRgb(0xB9, 0x1C, 0x1C));
+                }
+                else MostrarResultadoTesteToque(ok, aviso);
+
+                try { await System.Threading.Tasks.Task.Delay(TesteToqueSegundos * 1000, cts.Token); } catch (OperationCanceledException) { return; }
+                FinalizarTesteToque(cts);
+                _ = System.Threading.Tasks.Task.Run(() => { try { svc.Parar(); } catch { } });
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Erro ao testar toque: " + ex.Message, "Waven VoIP");
+                PararTesteToque();
+                MostrarResultadoTesteToque(false, "Erro ao testar toque: " + ex.Message);
             }
+        }
+
+        private void FinalizarTesteToque(System.Threading.CancellationTokenSource cts)
+        {
+            if (!ReferenceEquals(_testeToqueCts, cts)) return;
+            _testeToqueCts = null;
+            try { cts.Dispose(); } catch { }
+            try { btnTestarToque.Content = "Testar toque"; } catch { }
+        }
+
+        private void PararTesteToque()
+        {
+            var cts = _testeToqueCts;
+            _testeToqueCts = null;
+            try { cts?.Cancel(); cts?.Dispose(); } catch { }
+            try { btnTestarToque.Content = "Testar toque"; } catch { }
+            var svc = _testRing;
+            if (svc != null) _ = System.Threading.Tasks.Task.Run(() => { try { svc.Parar(); } catch { } });
+        }
+
+        // ok: true = verde, false = vermelho/amarelo, null = neutro
+        private void MostrarResultadoTesteToque(bool? ok, string texto)
+        {
+            try
+            {
+                txtTesteToqueResultado.Visibility = Visibility.Visible;
+                txtTesteToqueResultado.Text = texto;
+                txtTesteToqueResultado.Foreground = ok switch
+                {
+                    true => new SolidColorBrush(Color.FromRgb(0x15, 0x80, 0x3D)),
+                    false => new SolidColorBrush(Color.FromRgb(0xB4, 0x53, 0x09)),
+                    _ => new SolidColorBrush(Color.FromRgb(0x33, 0x41, 0x55))
+                };
+            }
+            catch { }
         }
 
 
@@ -248,8 +344,24 @@ namespace WavenVoIP.Views
             (_sipConfig.AudioInputDevice, _sipConfig.AudioInputDeviceId) = LerDispositivoSelecionado(cmbMicrofone, _sipConfig.AudioInputDevice, _sipConfig.AudioInputDeviceId, saida: false);
             (_sipConfig.CallOutputDevice, _sipConfig.CallOutputDeviceId) = LerDispositivoSelecionado(cmbAltoFalante, _sipConfig.CallOutputDevice, _sipConfig.CallOutputDeviceId, saida: true);
             LogHelper.Sip($"CONFIG_AUDIO_SALVO | microfone=\"{_sipConfig.AudioInputDevice}\" id_mic={(_sipConfig.AudioInputDeviceId.Length > 0 ? "sim" : "nao")} audio=\"{_sipConfig.CallOutputDevice}\" (selecao mic=\"{selMic}\" audio=\"{selSpeaker}\")");
-            _sipConfig.RingOutputDevice = (dispToque == null || string.IsNullOrEmpty(dispToque.Nome) || dispToque.Nome == "Automático")
-                ? string.Empty : dispToque.Nome;
+            // v2.6.2 — nome + ID; "Automático" grava vazio; desconectado mantém o configurado
+            if (dispToque == null || dispToque.Automatico)
+            {
+                _sipConfig.RingOutputDevice = string.Empty;
+                _sipConfig.RingOutputDeviceId = string.Empty;
+            }
+            else if (!dispToque.Desconectado)
+            {
+                _sipConfig.RingOutputDevice = dispToque.Nome;
+                _sipConfig.RingOutputDeviceId = dispToque.Id;
+            }
+            else
+            {
+                var (nomeCfg, idCfg) = AudioDeviceService.ConfiguracaoToque(_sipConfig, _config);
+                _sipConfig.RingOutputDevice = nomeCfg;
+                _sipConfig.RingOutputDeviceId = idCfg;
+            }
+            LogHelper.Sip($"CONFIG_RING_SALVO | toque=\"{(_sipConfig.RingOutputDevice.Length == 0 ? "Automático" : _sipConfig.RingOutputDevice)}\" id={(_sipConfig.RingOutputDeviceId.Length > 0 ? "sim" : "nao")}");
             _sipConfig.RingVolume = sldVolumeToque != null ? (int)sldVolumeToque.Value : 80;
 
             // Preenche campos ainda vazios com auto-detecção
@@ -259,7 +371,7 @@ namespace WavenVoIP.Views
             _config.Microfone        = string.IsNullOrEmpty(_sipConfig.AudioInputDevice) ? "Padrão do sistema" : _sipConfig.AudioInputDevice;
             _config.AltoFalante      = string.IsNullOrEmpty(_sipConfig.CallOutputDevice) ? "Padrão do sistema" : _sipConfig.CallOutputDevice;
             _config.DispositivoToqueNome = _sipConfig.RingOutputDevice;
-            _config.DispositivoToqueId   = dispToque?.Id ?? string.Empty;
+            _config.DispositivoToqueId   = _sipConfig.RingOutputDeviceId;
             _config.Toque            = string.IsNullOrWhiteSpace(txtToque.Text?.Trim()) ? "Assets\\toque_padrao.mp3" : txtToque.Text.Trim();
             _config.TocarEmTelaCheia = chkInvadirTela.IsChecked == true;
             ConfiguracaoAudioService.Salvar(_config);

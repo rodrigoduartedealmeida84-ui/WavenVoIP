@@ -188,6 +188,8 @@ namespace WavenVoIP
             if (RingVolume <= 0) RingVolume = 80;
             AudioInputDeviceId ??= string.Empty;   // JSON com null explícito
             CallOutputDeviceId ??= string.Empty;
+            RingOutputDeviceId ??= string.Empty;
+            RingOutputDevice ??= string.Empty;
         }
 
         // v2.6.1 — o Windows renumerou o headset (outra porta USB): grava o nome/ID atuais SÓ dos
@@ -456,6 +458,8 @@ namespace WavenVoIP
         // Campos novos são ignorados por versões antigas (rollback seguro).
         public string AudioInputDeviceId { get; set; } = string.Empty;
         public string CallOutputDeviceId { get; set; } = string.Empty;
+        // v2.6.2 — ID do Windows da saída do toque (mesma regra; vazio = só pelo nome).
+        public string RingOutputDeviceId { get; set; } = string.Empty;
 
         // ── Company config auto-sync v1.2.14 ──────────────────────────────────
         public string    CompanyConfigVersion  { get; set; } = string.Empty;

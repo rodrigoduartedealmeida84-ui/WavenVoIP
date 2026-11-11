@@ -169,6 +169,7 @@ public partial class App : Application
 
         AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
         DispatcherUnhandledException += App_DispatcherUnhandledException;
+        PrecarregarAssembliesDeAcessibilidade();
         // v2.4.0 — investigação de travamento: antes isso engolia TODA exceção de task
         // fire-and-forget (padrão usado em vários pontos do app, ex. "_ = Task.Run(...)") sem
         // nenhum log — se uma dessas tasks falhasse silenciosamente, não sobrava rastro nenhum
@@ -580,6 +581,28 @@ public partial class App : Application
         {
             LogCrash("RECORDING_PLAYER_CRASH_PREVENTED", "DispatcherUnhandledException", e.Exception);
 
+            // v2.6.2 — runtime .NET trocado pelo Windows Update com o app aberto: a pasta do runtime
+            // em uso some e qualquer assembly carregado sob demanda falha (ex.: Accessibility.dll ao
+            // abrir um tooltip — 3 "erro inesperado" em 11/11/2026, 8.0.33 → 8.0.34 às 10:30).
+            // Não é falha do app: avisa UMA vez para reabrir e não repete o aviso a cada tooltip.
+            if (EhRuntimeRemovidoEmExecucao(e.Exception))
+            {
+                e.Handled = true;
+                if (System.Threading.Interlocked.Exchange(ref _avisoRuntimeMostrado, 1) == 0)
+                {
+                    LogCrash("RUNTIME_UPDATED_WHILE_RUNNING", $"pasta do runtime ausente: {System.Runtime.InteropServices.RuntimeEnvironment.GetRuntimeDirectory()}", null);
+                    try
+                    {
+                        Dispatcher.BeginInvoke(() => MessageBox.Show(
+                            "O Windows atualizou o .NET enquanto o Waven VoIP estava aberto.\n\n" +
+                            "As ligações continuam funcionando, mas feche e abra o Waven VoIP quando não estiver em ligação.",
+                            "Waven VoIP", MessageBoxButton.OK, MessageBoxImage.Information));
+                    }
+                    catch { }
+                }
+                return;
+            }
+
             if (e.Exception is Win32Exception)
             {
                 e.Handled = true;
@@ -608,5 +631,37 @@ public partial class App : Application
             e.Handled = true;
         }
         catch { }
+    }
+
+    private static int _avisoRuntimeMostrado;
+
+    // Assemblies que o WPF só carrega sob demanda (tooltip/popup com leitor de tela, Teams,
+    // gerenciador de senha etc. ouvindo acessibilidade). Carregados no início, sobrevivem à
+    // troca do runtime pelo Windows Update.
+    private static void PrecarregarAssembliesDeAcessibilidade()
+    {
+        foreach (var nome in new[] { "Accessibility", "UIAutomationProvider", "UIAutomationTypes", "UIAutomationClient" })
+        {
+            try { System.Reflection.Assembly.Load(nome); }
+            catch (Exception ex) { LogCrash("ASSEMBLY_PRELOAD_FAIL", nome, ex); }
+        }
+    }
+
+    internal static bool EhRuntimeRemovidoEmExecucao(Exception? ex)
+    {
+        for (var x = ex; x != null; x = x.InnerException)
+        {
+            if (x is System.IO.FileNotFoundException or System.IO.FileLoadException)
+            {
+                try
+                {
+                    var dir = System.Runtime.InteropServices.RuntimeEnvironment.GetRuntimeDirectory();
+                    var wpf = System.IO.Path.GetDirectoryName(typeof(Window).Assembly.Location) ?? string.Empty;
+                    if (!System.IO.Directory.Exists(dir) || (wpf.Length > 0 && !System.IO.Directory.Exists(wpf))) return true;
+                }
+                catch { }
+            }
+        }
+        return false;
     }
 }

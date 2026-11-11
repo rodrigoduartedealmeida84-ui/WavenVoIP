@@ -3072,6 +3072,7 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
             AtualizarNavSelecionada();
             try { AtualizarBotaoStatus(); } catch { }
             _ = VerificarMicrofoneOciosoAsync("apos_configuracoes");   // v2.6.1
+            _ = VerificarToqueOciosoAsync("apos_configuracoes");       // v2.6.2
         }
         private void NavDashboard_Click(object sender, RoutedEventArgs e) { MainTabs.SelectedIndex = 4; AtualizarNavSelecionada(); AnimarAbaAtual(); dashboardControl?.AtualizarDados(); RegistrarUiDiagnostico("DASHBOARD_REFRESH"); }
 
@@ -3778,12 +3779,12 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
         private void IniciarVigiaMicrofone()
         {
             MicrofoneService.IniciarMonitoramento();
-            MicrofoneService.DispositivosMudaram += () => NaUi(() => _ = VerificarMicrofoneOciosoAsync("dispositivos_mudaram"));
+            MicrofoneService.DispositivosMudaram += () => NaUi(() => { _ = VerificarMicrofoneOciosoAsync("dispositivos_mudaram"); _ = VerificarToqueOciosoAsync("dispositivos_mudaram"); });
             _timerSaudeMic = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(60) };
-            _timerSaudeMic.Tick += (_, __) => _ = VerificarMicrofoneOciosoAsync("periodico");
+            _timerSaudeMic.Tick += (_, __) => { _ = VerificarMicrofoneOciosoAsync("periodico"); _ = VerificarToqueOciosoAsync("periodico"); };
             _timerSaudeMic.Start();
             var inicial = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(6) };
-            inicial.Tick += (_, __) => { inicial.Stop(); _ = VerificarMicrofoneOciosoAsync("inicio"); };
+            inicial.Tick += (_, __) => { inicial.Stop(); _ = VerificarMicrofoneOciosoAsync("inicio"); _ = VerificarToqueOciosoAsync("inicio"); };
             inicial.Start();
         }
 
@@ -3818,6 +3819,7 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
                     _assinaturaProblemaMic = string.Empty;
                     _assinaturaBannerFechado = string.Empty;
                     bannerMicrofone.Visibility = Visibility.Collapsed;
+                    MostrarBannerToqueSeNecessario();   // v2.6.2 — microfone ok: o banner fica livre para o toque
                     return;
                 }
 
@@ -3833,6 +3835,7 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
                 txtBannerMicTitulo.Text = titulo;
                 txtBannerMicTexto.Text = texto;
                 bannerMicrofone.Visibility = assinatura == _assinaturaBannerFechado ? Visibility.Collapsed : Visibility.Visible;
+                _bannerMostraToque = false;   // v2.6.2 — o banner agora é do microfone
 
                 if (assinatura != _assinaturaProblemaMic)
                 {
@@ -3853,8 +3856,76 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
 
         private void BtnBannerMicFechar_Click(object sender, RoutedEventArgs e)
         {
-            _assinaturaBannerFechado = _assinaturaProblemaMic;
+            if (_bannerMostraToque) _assinaturaToqueFechado = _assinaturaProblemaToque;
+            else _assinaturaBannerFechado = _assinaturaProblemaMic;
             bannerMicrofone.Visibility = Visibility.Collapsed;
+        }
+
+        // ── v2.6.2 — toque sem som (saída do toque no mudo/volume 0 no Windows ou no Mixer) ─────
+        // Caso real: ramal 100, 11/11/2026 — o "Alto-falantes (Realtek)" estava no mudo do Windows; o
+        // toque saía no dispositivo certo e ninguém ouvia. Avisa ANTES da próxima chamada, no mesmo
+        // banner do microfone (o microfone tem prioridade: é ele que o cliente precisa ouvir).
+        private string _assinaturaProblemaToque = string.Empty;
+        private string _assinaturaToqueFechado = string.Empty;
+        private string? _avisoToque;
+        private bool _bannerMostraToque;
+        private bool _verificandoToque;
+
+        private async System.Threading.Tasks.Task VerificarToqueOciosoAsync(string motivo)
+        {
+            if (_verificandoToque || _sipService.IsInCall) return;
+            _verificandoToque = true;
+            try
+            {
+                var cfg = SipConfig.CarregarSalva();
+                var (nome, id) = AudioDeviceService.ConfiguracaoToque(cfg, ConfiguracaoAudioService.Carregar());
+                var volumeApp = cfg != null && cfg.RingVolume > 0 ? cfg.RingVolume / 100f : 0.8f;
+                var estado = await MicrofoneService.ComLimiteDeTempo<EstadoSaidaToque>(() => EstadoSaidaToque.LerSaidaDoToque(nome, id));
+                if (estado == null) return;
+                var aviso = estado.Aviso(volumeApp);
+                if (aviso == null)
+                {
+                    if (_avisoToque != null)
+                    {
+                        LogHelper.Sip($"RING_OUTPUT_OK_NOVAMENTE | motivo={motivo} {estado.Resumo()}");
+                        txtStatus.Text = $"Toque OK: {estado.Dispositivo}";
+                    }
+                    _avisoToque = null; _assinaturaProblemaToque = string.Empty; _assinaturaToqueFechado = string.Empty;
+                    if (_bannerMostraToque) { _bannerMostraToque = false; bannerMicrofone.Visibility = Visibility.Collapsed; }
+                    return;
+                }
+                _avisoToque = aviso;
+                var assinatura = estado.Resumo();
+                if (assinatura != _assinaturaProblemaToque)
+                {
+                    _assinaturaProblemaToque = assinatura;
+                    LogHelper.Warn($"RING_OUTPUT_SILENT_OCIOSO | motivo={motivo} {estado.Resumo()} volume_toque={volumeApp:F2}");
+                    RegistrarUiDiagnostico($"RING_OUTPUT_SILENT_OCIOSO motivo={motivo} dispositivo=\"{estado.Dispositivo}\"");
+                    MostrarAvisoDiscreto("Chamadas sem toque", aviso);
+                }
+                MostrarBannerToqueSeNecessario();
+            }
+            catch { }
+            finally { _verificandoToque = false; }
+        }
+
+        private void MostrarBannerToqueSeNecessario()
+        {
+            try
+            {
+                if (_avisoToque == null || _assinaturaProblemaMic.Length > 0) return;   // microfone com problema tem prioridade
+                if (_assinaturaProblemaToque == _assinaturaToqueFechado) { if (_bannerMostraToque) bannerMicrofone.Visibility = Visibility.Collapsed; return; }
+                bannerMicrofone.Background = new SolidColorBrush(Color.FromRgb(0xFF, 0xFB, 0xEB));
+                bannerMicrofone.BorderBrush = new SolidColorBrush(Color.FromRgb(0xFC, 0xD3, 0x4D));
+                txtBannerMicIcone.Foreground = new SolidColorBrush(Color.FromRgb(0xD9, 0x77, 0x06));
+                txtBannerMicTitulo.Foreground = new SolidColorBrush(Color.FromRgb(0x92, 0x40, 0x0E));
+                txtBannerMicTexto.Foreground = new SolidColorBrush(Color.FromRgb(0x78, 0x35, 0x0F));
+                txtBannerMicTitulo.Text = "Chamadas recebidas sem toque";
+                txtBannerMicTexto.Text = _avisoToque + " Corrija no ícone de som do Windows.";
+                bannerMicrofone.Visibility = Visibility.Visible;
+                _bannerMostraToque = true;
+            }
+            catch { }
         }
 
         private CallWindow CriarTelaDeChamada(string numero, string status)
@@ -4736,10 +4807,17 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
 
                 if (cmbCfgDispToque != null)
                 {
-                    cmbCfgDispToque.SelectedItem = string.IsNullOrEmpty(sipCfg.RingOutputDevice)
-                        ? cmbCfgDispToque.Items[0]
-                        : cmbCfgDispToque.Items.Cast<object>().FirstOrDefault(i => i is RingDeviceItem r && r.Nome == sipCfg.RingOutputDevice)
-                          ?? cmbCfgDispToque.Items[0];
+                    // v2.6.2 — reencontra pelo ID/nome sem a numeração da porta USB
+                    object? selToque = null;
+                    if (!AudioDeviceService.EhNomeAutomatico(sipCfg.RingOutputDevice))
+                    {
+                        var itens = cmbCfgDispToque.Items.OfType<RingDeviceItem>().Where(r => !r.Automatico).ToList();
+                        var (escT, motT) = AudioDeviceService.EscolherSaidaToque(sipCfg.RingOutputDevice, sipCfg.RingOutputDeviceId,
+                            itens.Select(r => new AudioDeviceService.SaidaAudio(r.Id, r.Nome, true, -1, string.Empty, false)).ToList());
+                        if (escT != null && !motT.StartsWith("configurado_ausente") && motT.StartsWith("configurado"))
+                            selToque = itens.First(r => r.Id == escT.Id);
+                    }
+                    cmbCfgDispToque.SelectedItem = selToque ?? cmbCfgDispToque.Items[0];
                 }
 
                 if (cmbGoogleSyncInterval != null)
@@ -4774,12 +4852,12 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
         {
             try
             {
-                _testRingtoneService?.Parar();
-                _testRingtoneService = new RingtoneService();
+                _testRingtoneService ??= new RingtoneService();
 
                 var dispSelecionado = cmbCfgDispToque?.SelectedItem as RingDeviceItem;
-                var deviceId = dispSelecionado?.Id ?? string.Empty;
-                var deviceNome = dispSelecionado?.Nome ?? string.Empty;
+                var auto = dispSelecionado == null || dispSelecionado.Automatico;
+                var deviceId = auto ? string.Empty : dispSelecionado!.Id;
+                var deviceNome = auto ? string.Empty : dispSelecionado!.Nome;
 
                 var path = string.IsNullOrWhiteSpace(txtCfgToque?.Text)
                     ? (ConfiguracaoAudioService.Carregar().Toque ?? "Assets\\toque_padrao.mp3")
@@ -4787,9 +4865,13 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
                 var fullPath = Path.IsPathRooted(path) ? path : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, path);
                 if (!File.Exists(fullPath)) { MessageBox.Show("Arquivo de toque não encontrado:\n" + fullPath, "Waven VoIP"); return; }
 
+                // v2.6.2 — fora da interface (driver USB lento não trava a tela)
                 var svc = _testRingtoneService;
-                svc.Tocar(fullPath, deviceId, deviceNome, "TestButton", loop: false);
-                Task.Delay(4000).ContinueWith(_ => Dispatcher.Invoke(() => svc.Parar()));
+                _ = Task.Run(async () =>
+                {
+                    try { svc.Tocar(fullPath, deviceId, deviceNome, "TestButton", loop: false); await Task.Delay(4000); svc.Parar(); }
+                    catch { }
+                });
             }
             catch (Exception ex)
             {
@@ -4946,8 +5028,9 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
                     // Salvar novos campos no SipConfig
                     config.AudioInputDevice = selMicCfg == "Automático" ? string.Empty : selMicCfg;
                     config.CallOutputDevice = selSpeakerCfg == "Automático" ? string.Empty : selSpeakerCfg;
-                    config.RingOutputDevice = (dispSelecionado == null || string.IsNullOrEmpty(dispSelecionado.Nome) || dispSelecionado.Nome == "Automático")
-                        ? string.Empty : dispSelecionado.Nome;
+                    var toqueAuto = dispSelecionado == null || dispSelecionado.Automatico;
+                    config.RingOutputDevice   = toqueAuto ? string.Empty : dispSelecionado!.Nome;
+                    config.RingOutputDeviceId = toqueAuto ? string.Empty : dispSelecionado!.Id;
 
                     // Manter compatibilidade audio-config.json
                     audio.Microfone   = string.IsNullOrEmpty(config.AudioInputDevice) ? "Padrão do sistema" : config.AudioInputDevice;
@@ -4955,8 +5038,8 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
                     audio.Toque = txtCfgToque?.Text?.Trim() ?? "Assets\\toque_padrao.mp3";
                     audio.TocarEmTelaCheia = chkCfgInvadirTela?.IsChecked == true;
                     audio.ToqueSempreNoSpeakerPrincipal = true;
-                    audio.DispositivoToqueId   = dispSelecionado?.Id   ?? string.Empty;
-                    audio.DispositivoToqueNome = dispSelecionado?.Nome ?? string.Empty;
+                    audio.DispositivoToqueId   = config.RingOutputDeviceId;
+                    audio.DispositivoToqueNome = config.RingOutputDevice;   // nunca o rótulo "Automático"
 
                     var intervaloItem = cmbGoogleSyncInterval?.SelectedItem as ComboBoxItem;
                     if (intervaloItem?.Tag is string tagStr && int.TryParse(tagStr, out var intervMin))
@@ -5776,7 +5859,12 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
     {
         public string Id { get; }
         public string Nome { get; }
-        public RingDeviceItem(string id, string nome) { Id = id; Nome = nome; }
-        public override string ToString() => Nome;
+        // v2.6.2 — texto exibido (ex.: "… — headset"); configurado mas desconectado
+        public string? Rotulo { get; }
+        public bool Desconectado { get; }
+        public bool Automatico => string.IsNullOrEmpty(Id) && !Desconectado && Services.AudioDeviceService.EhNomeAutomatico(Nome);
+        public RingDeviceItem(string id, string nome, string? rotulo = null, bool desconectado = false)
+        { Id = id; Nome = nome; Rotulo = rotulo; Desconectado = desconectado; }
+        public override string ToString() => Desconectado ? $"⚠ {Nome} (desconectado)" : (Rotulo ?? Nome);
     }
 }
