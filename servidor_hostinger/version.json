@@ -1,7 +1,7 @@
 {
-    "versao": "2.6.1",
-    "zip": "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.6.1/WavenVoIP.zip",
-    "sha256": "60ffea1d858816f29460dd64f8bf21868a70d7fbcd7cfb654456fa9bcd83e47e",
-    "data": "2026-11-04",
-    "notas": "WavenVoIP v2.6.1 - Microfone sem falha silenciosa. O headset continua reconhecido quando muda de porta USB; o app avisa quando o microfone esta desconectado, no mudo do Windows, bloqueado ou com volume baixo; aviso e medidor do microfone durante a ligacao; botao Testar microfone nas Configuracoes."
+    "versao": "2.6.2",
+    "zip": "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.6.2/WavenVoIP.zip",
+    "sha256": "03707a5cac512b2ebebdcc559d47d1ee5e554db7086ebeba905a50a9fc7402fd",
+    "data": "2026-11-11",
+    "notas": "WavenVoIP v2.6.2 - Toque da chamada no alto-falante do computador mesmo com headset conectado; dispositivo do toque reconhecido apos troca de porta USB; toque recomeca sozinho se a saida sumir; aviso quando o alto-falante do toque esta no mudo ou com volume 0 no Windows; botao Testar toque mostra onde o toque saiu; fim do erro inesperado quando o Windows atualiza o .NET com o app aberto."
 }
