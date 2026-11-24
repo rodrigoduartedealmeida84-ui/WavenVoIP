@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Windows.Interop;
 using Microsoft.Win32;
@@ -328,7 +328,7 @@ namespace WavenVoIP.Views
                         if (atendeu)
                         {
                             RegistrarUiDiagnostico($"INCOMING_CALL_ANSWERED caller={caller}");
-                            var call = CriarTelaDeChamada(displayCaller, "Em chamada");
+                            var call = CriarTelaDeChamada(displayCaller, "Em chamada", caller);
                             _activeCallWindow = call;
                             call.Closed += (_, __) => { if (ReferenceEquals(_activeCallWindow, call)) _activeCallWindow = null; };
                             call.IniciarContador();
@@ -2965,7 +2965,7 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
                 // v2.3.6 — feedback IMEDIATO e bem visível do primeiro clique: Show()+Activate() logo
                 // de cara, antes de qualquer chamada SIP — investigação real mostrou a janela de
                 // chamada podendo abrir sem tomar foco, dando a impressão de que o clique não fez nada.
-                var call = CriarTelaDeChamada(ResolverDisplayChamada(numeroFinal), $"Iniciando chamada via {origemSaida}...");
+                var call = CriarTelaDeChamada(ResolverDisplayChamada(numeroFinal), $"Iniciando chamada via {origemSaida}...", numeroFinal);
                 _activeCallWindow = call;
                 call.Closed += (_, __) => { if (ReferenceEquals(_activeCallWindow, call)) _activeCallWindow = null; };
                 call.Show();
@@ -3928,9 +3928,9 @@ private void Tecla_Click(object sender, RoutedEventArgs e)
             catch { }
         }
 
-        private CallWindow CriarTelaDeChamada(string numero, string status)
+        private CallWindow CriarTelaDeChamada(string numero, string status, string numeroTelefone = "")
         {
-            var call = new CallWindow(numero, status);
+            var call = new CallWindow(numero, status) { NumeroTelefone = numeroTelefone ?? string.Empty };
             call.OnHangupRequested += () => _sipService.Desligar();
             call.OnBlindTransferRequested += BlindTransferRequested;
             call.OnAttendedTransferRequested += AttendedTransferRequested;

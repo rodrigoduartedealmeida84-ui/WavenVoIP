@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using WavenVoIP.Models;
@@ -64,8 +64,14 @@ namespace WavenVoIP.Services
         // WhatsApp do Historico.
         public static string? NumeroParaWhatsApp(string? numero)
         {
-            var n = DialPlanService.RemoverPrefixoDeRota(PhoneNumberNormalizer.NormalizeForDial(numero ?? string.Empty));
-            return DialPlanService.IsTelefoneExternoValido(n) ? n : null;
+            // v2.6.3 — "Nome (numero)" vindo da tela de chamada: separa o telefone do nome
+            // (nome com código do cliente era concatenado ao número) e só aceita destino
+            // que vire 55 + DDD + número válido.
+            var n = DialPlanService.RemoverPrefixoDeRota(PhoneNumberNormalizer.NormalizeForDial(
+                WhatsAppService.ExtrairTelefone(numero)));
+            if (!DialPlanService.IsTelefoneExternoValido(n)) return null;
+            try { return WhatsAppService.DestinoValido(WhatsAppService.NormalizarTelefoneParaEnvio(n)) ? n : null; }
+            catch { return null; }
         }
 
         // Destino final da conversa (formato da API: 55 + DDD + numero, com o 9o digito).

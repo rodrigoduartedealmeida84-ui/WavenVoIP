@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 using System.Windows;
 using System.Windows.Media;
@@ -47,6 +47,12 @@ namespace WavenVoIP.Views
             try
             {
                 var n = WhatsAppService.NormalizarTelefoneParaEnvio(txtNumero.Text);
+                if (!WhatsAppService.DestinoValido(n))
+                {
+                    txtNumeroNormalizado.Text       = "Número inválido. Informe DDD + número.";
+                    txtNumeroNormalizado.Foreground = new SolidColorBrush(Color.FromRgb(185, 28, 28));
+                    return;
+                }
                 txtNumeroNormalizado.Text       = "Será enviado para: " + n;
                 txtNumeroNormalizado.Foreground = new SolidColorBrush(Color.FromRgb(22, 163, 74));
             }

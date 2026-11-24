@@ -43,6 +43,8 @@ namespace WavenVoIP.Views
         public event Action<string>? OnWhatsAppRequested;
 
         public string NomeNumeroAtual => txtNomeNumero?.Text ?? string.Empty;
+        // v2.6.3 — telefone real da chamada (sem o nome do contato), usado no botão WhatsApp.
+        public string NumeroTelefone { get; set; } = string.Empty;
 
         // ── v2.5.0: participantes da ligação em conferência + "Remover atendente" ──
         public event Action<string>? OnRemoverAtendenteRequested;
@@ -480,7 +482,8 @@ namespace WavenVoIP.Views
         private void BtnTransferenciaCega_Click(object sender, RoutedEventArgs e) => OnBlindTransferRequested?.Invoke();
         private void BtnTransferenciaAssistida_Click(object sender, RoutedEventArgs e) => OnAttendedTransferRequested?.Invoke();
 
-        private void BtnWhatsApp_Click(object sender, RoutedEventArgs e) => OnWhatsAppRequested?.Invoke(txtNomeNumero.Text);
+        private void BtnWhatsApp_Click(object sender, RoutedEventArgs e) => OnWhatsAppRequested?.Invoke(
+            !string.IsNullOrWhiteSpace(NumeroTelefone) ? NumeroTelefone : txtNomeNumero.Text);
         private void BtnAudio_Click(object sender, RoutedEventArgs e) => OnAudioRouteRequested?.Invoke();
 
         private void BtnSegurar_Click(object sender, RoutedEventArgs e)

@@ -4,15 +4,20 @@ namespace WavenVoIP.Services
 {
     public static class VersionService
     {
-        public const string Versao  = "2.6.2";
+        public const string Versao  = "2.6.3";
         public const string NomeApp = "WavenVoIP";
 
-        public static readonly DateTime DataBuild = new DateTime(2026, 11, 11);
+        public static readonly DateTime DataBuild = new DateTime(2026, 11, 23);
 
         public static string VersaoCompleta => $"{NomeApp} v{Versao}";
         public static string VersaoComData  => $"{NomeApp} v{Versao}  •  build {DataBuild:dd/MM/yyyy}";
 
         public static string Changelog =>
+            "v2.6.3 — WhatsApp para o numero certo na tela da chamada (23/11/2026)\n" +
+            "• [FIX] Botao WhatsApp da tela da chamada enviava o template para um numero errado quando o nome do contato tinha numeros (ex.: codigo do cliente \"4260 - ...\" grudava no telefone): agora usa o telefone da ligacao, separado do nome\n" +
+            "• [NEW] Antes de enviar, o numero e conferido: 55 + DDD existente + celular (9 digitos) ou fixo (8 digitos); numero invalido nao e enviado e aparece em vermelho na janela do WhatsApp\n" +
+            "• Toque, microfone e audio da ligacao continuam como na 2.6.2\n" +
+            "\n" +
             "v2.6.2 — Toque da chamada no alto-falante certo (11/11/2026)\n" +
             "• [FIX] Com headset conectado o toque sai no alto-falante do computador e a conversa no headset; o headset USB e reconhecido pelo barramento USB/Bluetooth, nao so pelo nome (o Intelbras se apresenta ao Windows como \"alto-falante\")\n" +
             "• [FIX] Dispositivo do toque guardado pelo ID do Windows + nome: trocar o headset ou a caixa de porta USB (\"3- ...\") nao perde a escolha\n" +

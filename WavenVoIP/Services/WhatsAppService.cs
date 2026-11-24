@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 using System.Net.Http;
 using System.Text;
@@ -24,9 +24,54 @@ namespace WavenVoIP.Services
             return n;
         }
 
+        // v2.6.3 — o texto da tela de chamada é "Nome (numero)". Quando o nome tinha dígitos
+        // (ex.: "4260 - DEUZINA LOPES (6692327870)"), SomenteDigitos juntava o código do
+        // cliente ao telefone e o template ia para 5542606692327870. Se o texto tiver letras,
+        // usa só o telefone: o último grupo entre parênteses ou, sem ele, a última sequência
+        // de dígitos com 8+ caracteres. Texto só com número/máscara não é alterado.
+        public static string ExtrairTelefone(string? texto)
+        {
+            var t = (texto ?? string.Empty).Trim();
+            if (!t.Any(char.IsLetter)) return t;
+
+            var grupos = System.Text.RegularExpressions.Regex.Matches(t, @"\(([^()]*)\)");
+            for (int i = grupos.Count - 1; i >= 0; i--)
+            {
+                var g = grupos[i].Groups[1].Value;
+                if (!g.Any(char.IsLetter) && SomenteDigitos(g).Length >= 8) return g.Trim();
+            }
+
+            // Sem parênteses: junta os blocos numéricos do FIM do texto só até formar um
+            // telefone (10+ dígitos), para não puxar o código do cliente que vem antes.
+            var tokens = t.Split(new[] { ' ', '	', '-' }, StringSplitOptions.RemoveEmptyEntries);
+            var acumulado = string.Empty;
+            for (int i = tokens.Length - 1; i >= 0; i--)
+            {
+                var tok = tokens[i].Trim('(', ')', '+', '.');
+                if (tok.Length == 0 || !tok.All(char.IsDigit)) break;
+                acumulado = tok + acumulado;
+                if (acumulado.Length >= 10) break;
+            }
+            return acumulado.Length >= 8 ? acumulado : string.Empty;
+        }
+
+        // v2.6.3 — destino válido para o template: 55 + DDD existente + celular (9 + 8 dígitos)
+        // ou fixo (8 dígitos começando em 2–5). Qualquer outra coisa é bloqueada antes do POST.
+        public static bool DestinoValido(string? numeroNormalizado)
+        {
+            var n = numeroNormalizado ?? string.Empty;
+            if (!n.StartsWith("55") || !n.All(char.IsDigit)) return false;
+            var local = n.Substring(2);
+            if (local.Length < 10 || !PhoneNumberNormalizer.DddExiste(local.Substring(0, 2))) return false;
+            var assinante = local.Substring(2);
+            if (assinante.Length == 9) return assinante[0] == '9';
+            if (assinante.Length == 8) return assinante[0] >= '2' && assinante[0] <= '5';
+            return false;
+        }
+
         public static string NormalizarTelefoneParaEnvio(string telefone)
         {
-            var n = RemoverPrefixoRota(telefone);
+            var n = RemoverPrefixoRota(ExtrairTelefone(telefone));
 
             if (n.StartsWith("00"))
                 n = n.Substring(2);
@@ -66,9 +111,9 @@ namespace WavenVoIP.Services
             externalKey ??= GerarExternalKey(tipoEvento);
             resultado.ExternalKey = externalKey;
 
-            if (string.IsNullOrWhiteSpace(numeroNormalizado) || numeroNormalizado.Length < 12)
+            if (!DestinoValido(numeroNormalizado))
             {
-                resultado.Debug = "Número inválido. Use DDD + número.";
+                resultado.Debug = $"Número inválido para WhatsApp ({numeroNormalizado}). Use DDD + número.";
                 LogHelper.WhatsApp($"WABA_INVALID_PHONE | numero_original={telefone} normalizado={numeroNormalizado}");
                 return resultado;
             }

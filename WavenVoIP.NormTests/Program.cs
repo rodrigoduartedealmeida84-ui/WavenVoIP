@@ -1,4 +1,4 @@
-using WavenVoIP;
+﻿using WavenVoIP;
 using WavenVoIP.Services;
 
 int total = 0, falhas = 0;
@@ -200,6 +200,73 @@ Check("Formatacao do numero errado deixa o DDD visivel", "(25) 99726-8679", Phon
 Check("Seletor: historico com rota 1 mostra o nacional", "(55) 99726-8679", PhoneNumberNormalizer.FormatarNacional(DialPlanService.NumeroNacionalParaDiscagem("155997268679")));
 Check("Seletor: entrada com DDI mostra o nacional", "(55) 99726-8679", PhoneNumberNormalizer.FormatarNacional(DialPlanService.NumeroNacionalParaDiscagem("5555997268679")));
 Check("Seletor: ramal fica como esta", "104", PhoneNumberNormalizer.FormatarNacional(DialPlanService.NumeroNacionalParaDiscagem("104")));
+
+// v2.6.3 — destino do template WhatsApp (caso 23/11 ramal 109, cliente 4260 - DEUZINA LOPES)
+string Dst(string x) { var n = NaoAtendidasPolicy.NumeroParaWhatsApp(x); return n == null ? "null" : WhatsAppService.NormalizarTelefoneParaEnvio(n); }
+Check("WA chamada: nome com codigo nao entra no numero", "5566992327870", Dst("4260 - DEUZINA LOPES (6692327870)"));
+Check("WA chamada: nome com codigo e numero com 9", "5566992327870", Dst("4260 - DEUZINA LOPES (66992327870)"));
+Check("WA chamada: numero formatado entre parenteses", "5566992327870", Dst("4260 DEUZINA ((66) 99232-7870)") );
+Check("WA chamada: nome sem parenteses, numero no fim", "5566992327870", Dst("Cliente 4260 66 99232-7870"));
+Check("WA chamada: so nome com codigo nao abre", "null", Dst("4260 - DEUZINA LOPES"));
+Check("WA chamada: numero puro (NumeroTelefone) com rota+55", "5566992327870", Dst("1556692327870"));
+Check("WA historico: 556692327870 (ramal 100)", "5566992327870", Dst("556692327870"));
+Check("WA contato: mascara", "5566992327870", Dst("(66) 99232-7870"));
+Check("WA contato: +55 com mascara", "5566992327870", Dst("+55 (66) 99232-7870"));
+Check("WA fixo valido", "556635210003", Dst("6635210003"));
+Check("WA popup perdida: destino", "5566999990002", NaoAtendidasPolicy.DestinoWhatsApp("6699990002") ?? "null");
+Check("WA concatenado do incidente bloqueado", "null", Dst("42606692327870"));
+Check("WA DDD inexistente bloqueado", "null", Dst("25997268679"));
+Check("WA ramal/fila bloqueado", "null|null", Dst("104") + "|" + Dst("700"));
+CheckBool("WA gate envio: 5542606692327870 invalido", false, WhatsAppService.DestinoValido("5542606692327870"));
+CheckBool("WA gate envio: 5566992327870 valido", true, WhatsAppService.DestinoValido("5566992327870"));
+CheckBool("WA gate envio: celular 8 dig sem 9 invalido", false, WhatsAppService.DestinoValido("556692327870"));
+CheckBool("WA gate envio: fixo valido", true, WhatsAppService.DestinoValido("556635210003"));
+Check("WA janela manual/config: nome+numero normaliza", "5566992327870", WhatsAppService.NormalizarTelefoneParaEnvio("4260 - DEUZINA LOPES (6692327870)"));
+Check("WA janela manual: digitado sem 9", "5566992327870", WhatsAppService.NormalizarTelefoneParaEnvio("6692327870"));
+
+// Tela de chamada: o botao WhatsApp entrega o telefone, nao o texto "Nome (numero)"
+{
+    string? entregue = null; string? erro = null; string? fluxoJanela = null; string? fluxoManual = null;
+    var th = new System.Threading.Thread(() =>
+    {
+        try
+        {
+            if (System.Windows.Application.Current == null) new WavenVoIP.App().InitializeComponent();
+            var w = new WavenVoIP.Views.CallWindow("4260 - DEUZINA LOPES (6692327870)", "Em chamada") { NumeroTelefone = "556692327870" };
+            w.OnWhatsAppRequested += n => entregue = n;
+            typeof(WavenVoIP.Views.CallWindow).GetMethod("BtnWhatsApp_Click", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+                .Invoke(w, new object?[] { null, null });
+            var w2 = new WavenVoIP.Views.CallWindow("4260 - DEUZINA LOPES (6692327870)", "Em chamada");
+            w2.OnWhatsAppRequested += n => entregue += "|" + Dst(n);
+            typeof(WavenVoIP.Views.CallWindow).GetMethod("BtnWhatsApp_Click", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+                .Invoke(w2, new object?[] { null, null });
+            // Fluxo completo sem envio: botao da chamada -> politica -> janela WhatsApp (o que sera enviado)
+            string? doBotao = null;
+            var w3 = new WavenVoIP.Views.CallWindow("4260 - DEUZINA LOPES (6692327870)", "Em chamada") { NumeroTelefone = "1556692327870" };
+            w3.OnWhatsAppRequested += n => doBotao = n;
+            typeof(WavenVoIP.Views.CallWindow).GetMethod("BtnWhatsApp_Click", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+                .Invoke(w3, new object?[] { null, null });
+            var limpo = NaoAtendidasPolicy.NumeroParaWhatsApp(doBotao);
+            var jw = new WavenVoIP.Views.WhatsAppMessageWindow(limpo!, "", "chamada", "4260 - DEUZINA LOPES");
+            fluxoJanela = ((System.Windows.Controls.TextBlock)jw.FindName("txtNumeroNormalizado")).Text;
+            var jm = new WavenVoIP.Views.WhatsAppMessageWindow("42606692327870", "", "manual", "");
+            fluxoManual = ((System.Windows.Controls.TextBlock)jm.FindName("txtNumeroNormalizado")).Text;
+        }
+        catch (Exception ex) { erro = ex.GetBaseException().Message; }
+    });
+    th.SetApartmentState(System.Threading.ApartmentState.STA); th.Start(); th.Join();
+    Check("WA fluxo chamada->janela: destino exibido", "Será enviado para: 5566992327870", erro ?? fluxoJanela ?? "null");
+    Check("WA janela manual: numero concatenado aparece como invalido", "Número inválido. Informe DDD + número.", erro ?? fluxoManual ?? "null");
+    Check("WA CallWindow: botao usa NumeroTelefone; sem ele extrai do texto", "556692327870|5566992327870", erro ?? entregue ?? "null");
+}
+
+// Gate do envio: invalidos voltam antes de qualquer HTTP (proxy morto garante que nada sai)
+System.Net.Http.HttpClient.DefaultProxy = new System.Net.WebProxy("http://127.0.0.1:9");
+foreach (var inval in new[] { "42606692327870", "5542606692327870", "4260 - DEUZINA LOPES", "104", "25997268679" })
+{
+    var r = WhatsAppService.EnviarTemplateWabaAsync(inval, "teste_regressao").GetAwaiter().GetResult();
+    CheckBool($"WA envio bloqueado sem HTTP: {inval}", true, !r.Sucesso && r.HttpStatusCode == 0 && r.Debug.StartsWith("Número inválido"));
+}
 
 Console.WriteLine();
 Console.WriteLine($"=== RESULTADO: {total - falhas}/{total} passaram, {falhas} falha(s) ===");
