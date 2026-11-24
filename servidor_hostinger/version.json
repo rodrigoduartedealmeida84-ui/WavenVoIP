@@ -1,7 +1,7 @@
 {
-    "versao": "2.6.2",
-    "zip": "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.6.2/WavenVoIP.zip",
-    "sha256": "03707a5cac512b2ebebdcc559d47d1ee5e554db7086ebeba905a50a9fc7402fd",
-    "data": "2026-11-11",
-    "notas": "WavenVoIP v2.6.2 - Toque da chamada no alto-falante do computador mesmo com headset conectado; dispositivo do toque reconhecido apos troca de porta USB; toque recomeca sozinho se a saida sumir; aviso quando o alto-falante do toque esta no mudo ou com volume 0 no Windows; botao Testar toque mostra onde o toque saiu; fim do erro inesperado quando o Windows atualiza o .NET com o app aberto."
+    "versao": "2.6.3",
+    "zip": "https://github.com/rodrigoduartedealmeida84-ui/WavenVoIP/releases/download/v2.6.3/WavenVoIP.zip",
+    "sha256": "76482261f031ef066893ca8560e6574d3eb3d7a06d5beb15f27724b6548dc397",
+    "data": "2026-11-23",
+    "notas": "WavenVoIP v2.6.3 - Botao WhatsApp da tela da chamada envia para o telefone certo (o codigo do cliente no nome do contato nao e mais juntado ao numero); numero conferido antes do envio (DDD + celular/fixo validos). Toque e microfone iguais a 2.6.2."
 }
